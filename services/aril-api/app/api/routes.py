@@ -22,6 +22,8 @@ from app.core.schemas import (
     CompareRequest,
     CompareResponse,
     CompareResult,
+    ModelPricingResponse,
+    OpenRouterCatalogResponse,
     OpenRouterKeyStatus,
     OpenRouterKeyUpdate,
     PreferRequest,
@@ -50,6 +52,7 @@ from app.routing.pipeline import (
     score_routes,
     wants_image_generation,
 )
+from app.routing.pricing import list_catalog, pricing_for_models, resolve_cost_usd
 from app.routing.probe import probe_models
 from app.routing.rewrite import llm_alternatives
 
@@ -177,13 +180,20 @@ async def chat(req: ChatRequest) -> ChatResponse:
         assistant_content=result.content,
     )
 
+    resolved_cost = resolve_cost_usd(
+        result.model,
+        reported_cost=result.cost_usd,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        web_search=req.web_search,
+    )
     return ChatResponse(
         session_id=session_id,
         message=assistant,
         model=result.model,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        cost_usd=result.cost_usd * (0.45 if cached else 1.0),
+        cost_usd=resolved_cost * (0.45 if cached else 1.0),
         cached=cached,
         route_category=classification.primary,
     )
@@ -303,6 +313,13 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             user_content=last_user,
             assistant_content=stored_full,
         )
+        meta["cost_usd"] = resolve_cost_usd(
+            str(meta.get("model") or model),
+            reported_cost=float(meta.get("cost_usd") or 0.0),
+            input_tokens=int(meta.get("input_tokens") or 0),
+            output_tokens=int(meta.get("output_tokens") or 0),
+            web_search=bool(req.web_search),
+        )
         meta["latency_ms"] = int((time.perf_counter() - stream_started) * 1000)
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
 
@@ -362,12 +379,18 @@ async def compare(req: CompareRequest) -> CompareResponse:
             ms = int((time.perf_counter() - started) * 1000)
             # Classify the *response* to suggest which category the answer best fits.
             resp_class = classify(result.content or last_user or " ")
+            resolved = resolve_cost_usd(
+                result.model,
+                reported_cost=result.cost_usd,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
             return CompareResult(
                 model=result.model,
                 content=result.content,
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
-                cost_usd=result.cost_usd * (0.45 if cached else 1.0),
+                cost_usd=resolved * (0.45 if cached else 1.0),
                 latency_ms=ms,
                 probe_latency_ms=probe_map.get(model),
                 cached=cached,
@@ -496,6 +519,30 @@ async def openrouter_key_put(req: OpenRouterKeyUpdate) -> OpenRouterKeyStatus:
 @router.delete("/settings/openrouter-key", response_model=OpenRouterKeyStatus)
 async def openrouter_key_delete() -> OpenRouterKeyStatus:
     return OpenRouterKeyStatus(**key_store.clear_api_key())
+
+
+@router.get("/models/pricing", response_model=ModelPricingResponse)
+async def models_pricing(ids: str = "", refresh: bool = False) -> ModelPricingResponse:
+    """USD / 1K token rates from OpenRouter for the given model ids (comma-separated)."""
+    requested = [part.strip() for part in ids.split(",") if part.strip()]
+    if not requested:
+        # Default to category-profile + catalog models.
+        requested = sorted(
+            {
+                *DEFAULT_PROFILE.values(),
+                *[m for models in CATEGORY_RECOMMENDATIONS.values() for m in models],
+                IMAGE_GEN_MODEL,
+            }
+        )
+    rows = pricing_for_models(requested, force_refresh=refresh)
+    return ModelPricingResponse(models=rows, refreshed=refresh)
+
+
+@router.get("/models/catalog", response_model=OpenRouterCatalogResponse)
+async def models_catalog(q: str = "", refresh: bool = False) -> OpenRouterCatalogResponse:
+    """Full OpenRouter model list with pricing (optional `q` search filter)."""
+    rows = list_catalog(query=q or None, force_refresh=refresh)
+    return OpenRouterCatalogResponse(models=rows, count=len(rows), refreshed=refresh)
 
 
 @router.get("/models")

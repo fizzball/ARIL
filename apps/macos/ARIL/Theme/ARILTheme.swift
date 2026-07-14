@@ -21,6 +21,8 @@ struct ThemePalette {
     let analysisFill: Color
     let sidebar: Color
     let text: Color
+    /// Agent replies — cooler / softer than prompt text so turns are easy to scan.
+    let assistantText: Color
     let textMuted: Color
     let accent: Color
     let accentStrong: Color
@@ -28,6 +30,8 @@ struct ThemePalette {
     let inputFill: Color
     let danger: Color
     let preferredHighlight: Color
+    /// Turn cost footer under assistant replies.
+    let costFooter: Color
     let colorScheme: ColorScheme
 
     static func palette(for option: AppThemeOption) -> ThemePalette {
@@ -39,6 +43,7 @@ struct ThemePalette {
                 analysisFill: Color(red: 0.22, green: 0.17, blue: 0.11),
                 sidebar: Color(red: 0.07, green: 0.06, blue: 0.05),
                 text: Color(red: 0.92, green: 0.88, blue: 0.80),
+                assistantText: Color(red: 0.72, green: 0.82, blue: 0.88),
                 textMuted: Color(red: 0.72, green: 0.68, blue: 0.60),
                 accent: Color(red: 0.78, green: 0.66, blue: 0.42),
                 accentStrong: Color(red: 0.85, green: 0.72, blue: 0.40),
@@ -46,6 +51,7 @@ struct ThemePalette {
                 inputFill: Color(red: 0.12, green: 0.10, blue: 0.09),
                 danger: Color(red: 0.75, green: 0.35, blue: 0.30),
                 preferredHighlight: Color(red: 0.95, green: 0.78, blue: 0.35),
+                costFooter: Color(red: 0.95, green: 0.78, blue: 0.35),
                 colorScheme: .dark
             )
         case .slate:
@@ -55,6 +61,7 @@ struct ThemePalette {
                 analysisFill: Color(red: 0.18, green: 0.26, blue: 0.36),
                 sidebar: Color(red: 0.08, green: 0.09, blue: 0.12),
                 text: Color(red: 0.90, green: 0.92, blue: 0.95),
+                assistantText: Color(red: 0.62, green: 0.80, blue: 0.92),
                 textMuted: Color(red: 0.65, green: 0.70, blue: 0.78),
                 accent: Color(red: 0.45, green: 0.70, blue: 0.95),
                 accentStrong: Color(red: 0.55, green: 0.78, blue: 1.0),
@@ -62,6 +69,7 @@ struct ThemePalette {
                 inputFill: Color(red: 0.13, green: 0.15, blue: 0.18),
                 danger: Color(red: 0.85, green: 0.40, blue: 0.40),
                 preferredHighlight: Color(red: 0.40, green: 0.85, blue: 0.90),
+                costFooter: Color(red: 0.40, green: 0.85, blue: 0.90),
                 colorScheme: .dark
             )
         case .light:
@@ -71,6 +79,7 @@ struct ThemePalette {
                 analysisFill: Color(red: 0.88, green: 0.84, blue: 0.74),
                 sidebar: Color(red: 0.93, green: 0.93, blue: 0.92),
                 text: Color(red: 0.15, green: 0.15, blue: 0.14),
+                assistantText: Color(red: 0.18, green: 0.32, blue: 0.48),
                 textMuted: Color(red: 0.40, green: 0.40, blue: 0.38),
                 accent: Color(red: 0.45, green: 0.32, blue: 0.15),
                 accentStrong: Color(red: 0.55, green: 0.38, blue: 0.12),
@@ -78,6 +87,7 @@ struct ThemePalette {
                 inputFill: Color(red: 0.99, green: 0.99, blue: 0.98),
                 danger: Color(red: 0.75, green: 0.20, blue: 0.18),
                 preferredHighlight: Color(red: 0.15, green: 0.45, blue: 0.35),
+                costFooter: Color(red: 0.12, green: 0.42, blue: 0.36),
                 colorScheme: .light
             )
         case .forest:
@@ -87,6 +97,7 @@ struct ThemePalette {
                 analysisFill: Color(red: 0.14, green: 0.28, blue: 0.18),
                 sidebar: Color(red: 0.05, green: 0.09, blue: 0.07),
                 text: Color(red: 0.88, green: 0.93, blue: 0.88),
+                assistantText: Color(red: 0.70, green: 0.88, blue: 0.78),
                 textMuted: Color(red: 0.60, green: 0.70, blue: 0.62),
                 accent: Color(red: 0.55, green: 0.78, blue: 0.50),
                 accentStrong: Color(red: 0.65, green: 0.88, blue: 0.55),
@@ -94,6 +105,7 @@ struct ThemePalette {
                 inputFill: Color(red: 0.09, green: 0.13, blue: 0.11),
                 danger: Color(red: 0.80, green: 0.40, blue: 0.35),
                 preferredHighlight: Color(red: 0.85, green: 0.75, blue: 0.35),
+                costFooter: Color(red: 0.85, green: 0.75, blue: 0.35),
                 colorScheme: .dark
             )
         }

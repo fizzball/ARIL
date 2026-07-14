@@ -150,10 +150,22 @@ private struct MessageBubble: View {
                 .onHover { hoveringUser = $0 }
                 .help("Click or use ↓ to reuse this prompt")
             } else {
-                AssistantMarkdownContent(
-                    content: message.content.isEmpty && isStreamingAssistant ? "…" : message.content,
-                    palette: theme.palette
-                )
+                let body = message.content.isEmpty && isStreamingAssistant
+                    ? "…"
+                    : message.bodyWithoutCostFooter
+                VStack(alignment: .leading, spacing: 8) {
+                    AssistantMarkdownContent(
+                        content: body,
+                        textColor: theme.palette.assistantText
+                    )
+                    if let costLabel = message.costFooterLabel {
+                        Text(costLabel)
+                            .font(ARILTheme.captionFont.weight(.semibold))
+                            .foregroundStyle(theme.palette.costFooter)
+                            .textSelection(.enabled)
+                            .monospacedDigit()
+                    }
+                }
                 .padding(.leading, 26)
             }
         }
@@ -164,7 +176,7 @@ private struct MessageBubble: View {
 /// Renders assistant text plus embedded markdown images (`![alt](url)`), including data URLs.
 private struct AssistantMarkdownContent: View {
     let content: String
-    let palette: ThemePalette
+    let textColor: Color
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -173,7 +185,7 @@ private struct AssistantMarkdownContent: View {
                 case .text(let text):
                     Text(text)
                         .font(ARILTheme.bodyFont)
-                        .foregroundStyle(palette.text)
+                        .foregroundStyle(textColor)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 case .image(let urlString, let alt):

@@ -131,6 +131,48 @@ final class ARILAPIClient {
         return try decode(data)
     }
 
+    func modelPricing(
+        baseURL: String,
+        modelIDs: [String],
+        refresh: Bool = false
+    ) async throws -> ModelPricingResponseDTO {
+        let ids = modelIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        var components = URLComponents(url: try url(baseURL, path: "/v1/models/pricing"), resolvingAgainstBaseURL: false)
+        var query: [URLQueryItem] = []
+        if !ids.isEmpty {
+            query.append(URLQueryItem(name: "ids", value: ids.joined(separator: ",")))
+        }
+        if refresh {
+            query.append(URLQueryItem(name: "refresh", value: "true"))
+        }
+        components?.queryItems = query.isEmpty ? nil : query
+        guard let final = components?.url else { throw ARILAPIError.invalidURL }
+        let (data, response) = try await session.data(from: final)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func openRouterCatalog(
+        baseURL: String,
+        query: String = "",
+        refresh: Bool = false
+    ) async throws -> OpenRouterCatalogResponseDTO {
+        var components = URLComponents(url: try url(baseURL, path: "/v1/models/catalog"), resolvingAgainstBaseURL: false)
+        var items: [URLQueryItem] = []
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty {
+            items.append(URLQueryItem(name: "q", value: q))
+        }
+        if refresh {
+            items.append(URLQueryItem(name: "refresh", value: "true"))
+        }
+        components?.queryItems = items.isEmpty ? nil : items
+        guard let final = components?.url else { throw ARILAPIError.invalidURL }
+        let (data, response) = try await session.data(from: final)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
     private func put<Body: Encodable, Response: Decodable>(
         _ baseURL: String,
         path: String,

@@ -46,11 +46,25 @@ struct ContentView: View {
                 .help("Log analysis — last 20 sends and responses")
 
                 Button {
+                    state.showModelCosts = true
+                } label: {
+                    Image(systemName: "dollarsign.circle")
+                }
+                .help("Selected model costs (OpenRouter)")
+
+                Button {
                     openSettings()
                 } label: {
                     Image(systemName: "gearshape")
                 }
                 .help("Preferences")
+
+                Button {
+                    state.showAbout = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .help("About ARIL")
 
                 Button {
                     state.shutdown()
@@ -59,17 +73,15 @@ struct ContentView: View {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                 }
                 .help("Quit ARIL")
-
-                Button {
-                    state.showAbout = true
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .help("About ARIL")
             }
         }
         .sheet(isPresented: $state.showExchangeLog) {
             LogAnalysisView()
+                .environmentObject(state)
+                .environmentObject(theme)
+        }
+        .popover(isPresented: $state.showModelCosts, arrowEdge: .bottom) {
+            ModelCostsView()
                 .environmentObject(state)
                 .environmentObject(theme)
         }

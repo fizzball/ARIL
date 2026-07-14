@@ -121,9 +121,14 @@ private struct SessionRow: View {
                     .font(ARILTheme.bodyFont)
                     .foregroundStyle(theme.palette.text)
                     .lineLimit(1)
-                Text(subtitle)
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(theme.palette.textMuted.opacity(0.8))
+                HStack(spacing: 0) {
+                    Text(subtitlePrefix)
+                        .foregroundStyle(theme.palette.textMuted.opacity(0.8))
+                    Text(live?.totalCostLabel ?? "$0.0000")
+                        .foregroundStyle(theme.palette.danger)
+                        .monospacedDigit()
+                }
+                .font(ARILTheme.captionFont)
             }
             Spacer(minLength: 4)
             if hovering {
@@ -142,8 +147,9 @@ private struct SessionRow: View {
         .onHover { hovering = $0 }
     }
 
-    private var subtitle: String {
-        guard let live else { return "Empty" }
-        return live.messages.isEmpty ? "Empty" : "\(live.messages.count) messages"
+    private var subtitlePrefix: String {
+        guard let live else { return "Empty · " }
+        if live.messages.isEmpty { return "Empty · " }
+        return "\(live.messages.count) messages · "
     }
 }

@@ -19,13 +19,14 @@ from app.core.schemas import (
 
 DEFAULT_PROFILE = RoutingProfile().as_map()
 
+# Legacy blended fallbacks — live OpenRouter rates come from app.routing.pricing.
 COST_PER_1K: dict[str, float] = {
-    "openai/gpt-4.1": 0.01,
-    "openai/gpt-4.1-mini": 0.002,
-    "anthropic/claude-sonnet-4": 0.012,
-    "anthropic/claude-opus-4": 0.04,
-    "google/gemini-2.5-flash": 0.0015,
-    "meta-llama/llama-3.3-70b-instruct": 0.0008,
+    "openai/gpt-4.1": 0.005,
+    "openai/gpt-4.1-mini": 0.001,
+    "anthropic/claude-sonnet-4": 0.009,
+    "anthropic/claude-opus-4": 0.045,
+    "google/gemini-2.5-flash": 0.0014,
+    "meta-llama/llama-3.3-70b-instruct": 0.0002,
 }
 
 # Suggested catalog per category (client Settings uses the same idea)
@@ -229,24 +230,34 @@ def score_routes(
     prompt: str,
     primary: RouteCategory,
     profile: dict[RouteCategory, str] | None = None,
+    *,
+    system_prompt: str | None = None,
 ) -> list[ModelEstimate]:
     from app.core.schemas import ScoreBreakdown
 
     mapping = profile or DEFAULT_PROFILE
     in_tok = estimate_tokens(prompt)
+    sys = (system_prompt or "").strip()
+    if sys:
+        in_tok += estimate_tokens(sys)
     out_tok = min(2048, max(128, in_tok // 2))
     # Always score primary + cost/performance/confidence peers
     include = {primary, RouteCategory.cost, RouteCategory.performance, RouteCategory.confidence}
     if primary != RouteCategory.general:
         include.add(RouteCategory.general)
 
+    from app.routing.pricing import estimate_cost_usd
+
     rows: list[ModelEstimate] = []
     for category, model_id in mapping.items():
         if category not in include:
             continue
         provider = model_id.split("/", 1)[0]
-        rate = COST_PER_1K.get(model_id, 0.01)
-        cost = round((in_tok + out_tok) / 1000 * rate, 6)
+        cost = estimate_cost_usd(
+            model_id,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+        )
         fit_raw = 0.45 if category == primary else 0.12
         cost_raw = 1.0 - min(1.0, cost * 50)
         base_raw = 0.1
@@ -337,7 +348,17 @@ def build_preview(
     grade = grade_prompt(req.prompt)
     alts = alternatives if alternatives is not None else alternatives_for(req.prompt, grade)
     profile = resolve_profile(req.routing_profile)
-    routes = score_routes(req.prompt, classification.primary, profile)
+    # Prefer live OpenRouter rates for prompt-cost analysis.
+    from app.routing.pricing import ensure_pricing_cache
+
+    ensure_pricing_cache()
+    system_prompt = (req.system_prompt or "").strip() or None
+    routes = score_routes(
+        req.prompt,
+        classification.primary,
+        profile,
+        system_prompt=system_prompt,
+    )
     temp = req.temperature if req.temperature is not None else settings.aril_default_temperature
 
     # Prefer explicit profile mapping for the classified category (clearest Auto behavior)
@@ -358,6 +379,8 @@ def build_preview(
     )
 
     in_tok = estimate_tokens(req.prompt)
+    if system_prompt:
+        in_tok += estimate_tokens(system_prompt)
     eligible = in_tok > settings.aril_cache_token_threshold
     would_hit = False
     savings = None

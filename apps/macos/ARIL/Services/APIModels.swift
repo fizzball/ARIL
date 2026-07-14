@@ -46,6 +46,7 @@ struct PreviewRequest: Encodable {
     let sessionId: String?
     let routingProfile: APIRoutingProfile?
     let enhanceAlternatives: Bool
+    let systemPrompt: String?
 
     enum CodingKeys: String, CodingKey {
         case prompt, temperature
@@ -54,6 +55,7 @@ struct PreviewRequest: Encodable {
         case sessionId = "session_id"
         case routingProfile = "routing_profile"
         case enhanceAlternatives = "enhance_alternatives"
+        case systemPrompt = "system_prompt"
     }
 }
 
@@ -459,4 +461,57 @@ struct OpenRouterKeyUpdateDTO: Encodable {
     enum CodingKeys: String, CodingKey {
         case apiKey = "api_key"
     }
+}
+
+struct ModelPricingDTO: Codable, Identifiable, Equatable {
+    let id: String
+    let promptPer1k: Double
+    let completionPer1k: Double
+    let webSearchPerRequest: Double?
+    let source: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, source
+        case promptPer1k = "prompt_per_1k"
+        case completionPer1k = "completion_per_1k"
+        case webSearchPerRequest = "web_search_per_request"
+    }
+
+    /// OpenRouter web plugin fee (USD / search). Falls back to Exa default $0.005.
+    var webSearchFee: Double {
+        let fee = webSearchPerRequest ?? 0.005
+        return fee > 0 ? fee : 0.005
+    }
+}
+
+struct ModelPricingResponseDTO: Codable {
+    let models: [ModelPricingDTO]
+    let refreshed: Bool?
+}
+
+struct OpenRouterCatalogModelDTO: Codable, Identifiable, Equatable, Hashable {
+    let id: String
+    let name: String
+    let promptPer1k: Double
+    let completionPer1k: Double
+    let webSearchPerRequest: Double?
+    let contextLength: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case promptPer1k = "prompt_per_1k"
+        case completionPer1k = "completion_per_1k"
+        case webSearchPerRequest = "web_search_per_request"
+        case contextLength = "context_length"
+    }
+
+    var pricingLabel: String {
+        String(format: "$%.4f / $%.4f per 1K", promptPer1k, completionPer1k)
+    }
+}
+
+struct OpenRouterCatalogResponseDTO: Codable {
+    let models: [OpenRouterCatalogModelDTO]
+    let count: Int
+    let refreshed: Bool?
 }

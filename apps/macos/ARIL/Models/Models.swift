@@ -99,6 +99,13 @@ struct RoutingProfile: Hashable, Codable {
         }
     }
 
+    /// Distinct model ids currently mapped across categories.
+    var selectedModels: [String] {
+        Array(
+            Set([coding, security, reasoning, vision, cost, performance, confidence, general])
+        ).sorted()
+    }
+
     init(
         coding: String,
         security: String,
@@ -138,12 +145,41 @@ struct ChatSession: Identifiable, Hashable, Codable {
     var title: String
     var messages: [ChatMessage]
     var updatedAt: Date
+    /// Running total of actual turn costs (USD). New sessions start at 0.
+    var totalCostUsd: Double
 
-    init(id: UUID = UUID(), title: String, messages: [ChatMessage], updatedAt: Date = .now) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        messages: [ChatMessage],
+        updatedAt: Date = .now,
+        totalCostUsd: Double = 0
+    ) {
         self.id = id
         self.title = title
         self.messages = messages
         self.updatedAt = updatedAt
+        self.totalCostUsd = totalCostUsd
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        messages = try c.decode([ChatMessage].self, forKey: .messages)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        totalCostUsd = try c.decodeIfPresent(Double.self, forKey: .totalCostUsd) ?? 0
+        if totalCostUsd == 0 {
+            recomputeTotalCost()
+        }
+    }
+
+    mutating func recomputeTotalCost() {
+        totalCostUsd = messages.compactMap { ChatMessage.actualCostUsd(from: $0.content) }.reduce(0, +)
+    }
+
+    var totalCostLabel: String {
+        String(format: "$%.4f", totalCostUsd)
     }
 }
 
@@ -160,6 +196,58 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         self.id = id
         self.role = role
         self.content = content
+    }
+
+    static func formatActualCostFooter(_ costUsd: Double) -> String {
+        String(format: "\n\n[ total token cost = $%.4f ]", max(0, costUsd))
+    }
+
+    static func formatActualCostLabel(_ costUsd: Double) -> String {
+        String(format: "[ total token cost = $%.4f ]", max(0, costUsd))
+    }
+
+    static func stripActualCostFooter(_ content: String) -> String {
+        guard let range = content.range(
+            of: #"\n*\n?\s*(?:\[\s*total token cost\s*=\s*\$[0-9.]+\s*\]|-->\s*total token cost\s*=\s*\$[0-9.]+\s*<--|\{actual cost = \$[0-9.]+\})\s*"#,
+            options: .regularExpression
+        ) else {
+            return content
+        }
+        // Only strip a trailing footer.
+        let after = content[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard after.isEmpty else { return content }
+        return String(content[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func actualCostUsd(from content: String) -> Double? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?:\[\s*total token cost\s*=\s*\$([0-9.]+)\s*\]|-->\s*total token cost\s*=\s*\$([0-9.]+)\s*<--|\{actual cost = \$([0-9.]+)\})"#,
+            options: []
+        ) else { return nil }
+        let ns = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: ns.length))
+        guard let last = matches.last else { return nil }
+        for group in 1..<last.numberOfRanges {
+            let range = last.range(at: group)
+            guard range.location != NSNotFound else { continue }
+            return Double(ns.substring(with: range))
+        }
+        return nil
+    }
+
+    static func withActualCostFooter(_ content: String, costUsd: Double) -> String {
+        stripActualCostFooter(content) + formatActualCostFooter(costUsd)
+    }
+
+    /// Body text without a trailing cost footer (for colored rendering).
+    var bodyWithoutCostFooter: String {
+        Self.stripActualCostFooter(content)
+    }
+
+    /// Display label for a trailing cost footer, if present.
+    var costFooterLabel: String? {
+        guard let cost = Self.actualCostUsd(from: content) else { return nil }
+        return Self.formatActualCostLabel(cost)
     }
 }
 

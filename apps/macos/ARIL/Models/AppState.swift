@@ -34,11 +34,21 @@ final class AppState: ObservableObject {
         "meta-llama/llama-3.3-70b-instruct",
     ]
 
+    /// Factory default for Preferences → Models (app default picker).
+    static let factoryDefaultModel = "openai/gpt-4.1"
+
     /// Seconds of typing idle before prompt analysis runs (Preferences; 0…10, step 0.5).
     @Published var analysisIdleSeconds: Double = 2.0
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
+    /// When on, `systemPrompt` is sent as a system message on every chat/compare request.
+    @Published var systemPromptEnabled: Bool = false
+    @Published var systemPrompt: String = ""
+    /// True when the editor differs from the last persisted value (enables Save).
+    @Published var systemPromptDirty: Bool = false
+    /// Snapshot of last persisted prompt text (for dirty checks).
+    private var systemPromptBaseline: String = ""
 
     @Published var sessions: [ChatSession] = []
     @Published var selectedSessionID: UUID?
@@ -75,6 +85,7 @@ final class AppState: ObservableObject {
     @Published var userDisplayName: String
     @Published var showRoutingAnalysis: Bool = false
     @Published var showExchangeLog: Bool = false
+    @Published var showModelCosts: Bool = false
     @Published var exchangeLog: [ExchangeLogEntry] = []
     @Published var classifications: [ClassificationRecordDTO] = []
     @Published var compareCategoryDraft: [String: RouteCategory] = [:]
@@ -85,6 +96,13 @@ final class AppState: ObservableObject {
     @Published var openRouterKeyDraft: String = ""
     @Published var isEditingOpenRouterKey: Bool = false
     @Published var openRouterKeyMessage: String?
+    /// OpenRouter USD / 1K token rates keyed by model id (used in Preferences + analysis).
+    @Published var modelPricingByID: [String: ModelPricingDTO] = [:]
+    @Published var isLoadingModelPricing: Bool = false
+    /// Full OpenRouter catalog for the Preferences “Other…” browser.
+    @Published var openRouterCatalog: [OpenRouterCatalogModelDTO] = []
+    @Published var isLoadingOpenRouterCatalog: Bool = false
+    @Published var openRouterCatalogError: String?
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
@@ -111,10 +129,29 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.4"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "34"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.5"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "35"
         return "\(short) (\(build))"
     }
+
+    /// Placeholder / starting text for Preferences → System Prompt (Claude.md-style).
+    static let defaultSystemPrompt = """
+        You are a helpful, reliable AI assistant.
+
+        Follow the user’s instructions carefully and ask concise clarifying questions only when essential. Provide accurate, practical answers tailored to the user’s context and level of expertise.
+
+        Guidelines:
+        Lead with the answer or outcome.
+        Be clear, concise, and well structured.
+        Do not invent facts; state uncertainty when appropriate.
+        Preserve the user’s intent and constraints.
+        Make reasonable assumptions when they are low risk, and disclose important ones.
+        Explain complex ideas in plain language.
+        For actionable tasks, provide concrete steps or complete the work when tools are available.
+        Protect privacy, security, and confidential information.
+        Refuse unsafe or prohibited requests briefly, while offering a safer alternative when possible.
+        Review your response for correctness and completeness before sending it.
+        """
 
     /// At least one ready MCP server while MCP use is enabled.
     var hasConfiguredMCPServers: Bool {
@@ -139,6 +176,11 @@ final class AppState: ObservableObject {
         )
         mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
         mcpServers = Self.loadMCPServers()
+        systemPromptEnabled = defaults.object(forKey: "aril.systemPromptEnabled") as? Bool ?? false
+        let storedPrompt = defaults.string(forKey: "aril.systemPrompt") ?? ""
+        systemPrompt = storedPrompt
+        systemPromptBaseline = storedPrompt
+        systemPromptDirty = false
         loadDeletedSessionIDs()
         // Restore history synchronously so the first frame never looks empty.
         loadLocalSessions()
@@ -168,6 +210,102 @@ final class AppState: ObservableObject {
         let clamped = Self.clampedIdleSeconds(value)
         analysisIdleSeconds = clamped
         UserDefaults.standard.set(clamped, forKey: "aril.analysisIdleSeconds")
+    }
+
+    func setSystemPromptEnabled(_ enabled: Bool) {
+        if !enabled {
+            // Turning off keeps any edits so re-enable restores the same text.
+            persistSystemPromptText()
+            systemPromptEnabled = false
+            UserDefaults.standard.set(false, forKey: "aril.systemPromptEnabled")
+            systemPromptDirty = false
+            refreshAnalysisForSystemPromptChange()
+            return
+        }
+        systemPromptEnabled = true
+        UserDefaults.standard.set(true, forKey: "aril.systemPromptEnabled")
+        // Seed + persist the built-in default the first time there’s nothing stored yet.
+        if systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            systemPrompt = Self.defaultSystemPrompt
+            persistSystemPromptText()
+        }
+        systemPromptDirty = false
+        refreshAnalysisForSystemPromptChange()
+    }
+
+    func updateSystemPromptDraft(_ text: String) {
+        systemPrompt = text
+        refreshSystemPromptDirty()
+        refreshAnalysisForSystemPromptChange()
+    }
+
+    func restoreDefaultSystemPrompt() {
+        systemPrompt = Self.defaultSystemPrompt
+        refreshSystemPromptDirty()
+        refreshAnalysisForSystemPromptChange()
+    }
+
+    func saveSystemPrompt() {
+        persistSystemPromptText()
+        UserDefaults.standard.set(systemPromptEnabled, forKey: "aril.systemPromptEnabled")
+        systemPromptDirty = false
+        refreshAnalysisForSystemPromptChange()
+    }
+
+    /// Re-run cost analysis when the system prompt changes (if a draft is ready).
+    private func refreshAnalysisForSystemPromptChange() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        schedulePreview()
+    }
+
+    private func persistSystemPromptText() {
+        UserDefaults.standard.set(systemPrompt, forKey: "aril.systemPrompt")
+        systemPromptBaseline = systemPrompt
+    }
+
+    private func refreshSystemPromptDirty() {
+        systemPromptDirty = systemPrompt != systemPromptBaseline
+    }
+
+    /// Text shown when the toggle is off (saved draft, else the built-in default).
+    var systemPromptShadowText: String {
+        let trimmed = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultSystemPrompt : systemPrompt
+    }
+
+    /// Rough token estimate (~4 chars/token), matching the gateway `estimate_tokens`.
+    static func estimateTokens(_ text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return 0 }
+        return max(1, trimmed.count / 4)
+    }
+
+    /// Approximate tokens for the current system-prompt draft (0 when empty).
+    var systemPromptTokenEstimate: Int {
+        Self.estimateTokens(systemPrompt)
+    }
+
+    /// System prompt text to send with preview/chat when the feature is enabled.
+    var activeSystemPromptForAPI: String? {
+        guard systemPromptEnabled else { return nil }
+        let trimmed = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Build API messages for a send, injecting the global system prompt when enabled.
+    func messagesForAPI(from sessionMessages: [ChatMessage]) -> [APIChatMessage] {
+        var out = sessionMessages.map {
+            let cleaned = ChatMessage.stripActualCostFooter($0.content)
+            return APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForAPI(cleaned))
+        }
+        // Prefer a single leading system turn (Claude.md-style); drop any stored system noise.
+        out.removeAll { $0.role == "system" }
+        guard systemPromptEnabled else { return out }
+        let prompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return out }
+        out.insert(APIChatMessage(role: "system", content: prompt), at: 0)
+        return out
     }
 
     static let maxExchangeLogCapacity = 20
@@ -247,7 +385,101 @@ final class AppState: ObservableObject {
         reconcileSelection()
         // Do not auto-create an empty session — count stays 0 until the user starts one.
         saveLocalSessions()
+        await refreshModelPricing(forceRefresh: true)
         objectWillChange.send()
+    }
+
+    /// Models whose rates should be known for Preferences + Auto routing analysis.
+    private var pricingModelIDs: [String] {
+        var ids = Set(routingProfile.selectedModels)
+        ids.insert(defaultModel)
+        ids.insert(selectedModel)
+        for model in Self.modelCatalog { ids.insert(model) }
+        for models in RoutingProfile.recommendations.values {
+            for model in models { ids.insert(model) }
+        }
+        return ids.sorted()
+    }
+
+    func refreshModelPricing(forceRefresh: Bool = false, focusing modelID: String? = nil) async {
+        isLoadingModelPricing = true
+        defer { isLoadingModelPricing = false }
+        var ids = pricingModelIDs
+        if let modelID, !modelID.isEmpty, !ids.contains(modelID) {
+            ids.append(modelID)
+        }
+        do {
+            let response = try await client.modelPricing(
+                baseURL: gatewayURL,
+                modelIDs: ids,
+                refresh: forceRefresh
+            )
+            var next = modelPricingByID
+            for row in response.models {
+                next[row.id] = row
+            }
+            modelPricingByID = next
+        } catch {
+            // Keep prior rates / analysis can fall back server-side.
+        }
+    }
+
+    func pricingLabel(for modelID: String) -> String? {
+        guard let row = modelPricingByID[modelID] else { return nil }
+        return String(format: "$%.4f / $%.4f per 1K", row.promptPer1k, row.completionPer1k)
+    }
+
+    func setRoutingModel(_ model: String, for category: RouteCategory) {
+        routingProfile.setModel(model, for: category)
+        saveRoutingProfile()
+        Task {
+            await refreshModelPricing(forceRefresh: true, focusing: model)
+            refreshAnalysisForSystemPromptChange()
+        }
+    }
+
+    /// True when category mappings or the app default differ from factory originals.
+    var routingModelsDifferFromDefaults: Bool {
+        routingProfile != .default || defaultModel != Self.factoryDefaultModel
+    }
+
+    /// Restore category → model mappings and the app default to factory originals.
+    func resetRoutingModelsToDefaults() {
+        routingProfile = .default
+        saveRoutingProfile()
+        setDefaultModel(Self.factoryDefaultModel)
+        Task {
+            await refreshModelPricing(forceRefresh: true)
+            refreshAnalysisForSystemPromptChange()
+        }
+    }
+
+    func refreshOpenRouterCatalog(query: String = "", forceRefresh: Bool = false) async {
+        isLoadingOpenRouterCatalog = true
+        openRouterCatalogError = nil
+        defer { isLoadingOpenRouterCatalog = false }
+        do {
+            let response = try await client.openRouterCatalog(
+                baseURL: gatewayURL,
+                query: query,
+                refresh: forceRefresh
+            )
+            openRouterCatalog = response.models
+            // Keep pricing map in sync for any selected/browser picks.
+            var next = modelPricingByID
+            for row in response.models {
+                next[row.id] = ModelPricingDTO(
+                    id: row.id,
+                    promptPer1k: row.promptPer1k,
+                    completionPer1k: row.completionPer1k,
+                    webSearchPerRequest: row.webSearchPerRequest,
+                    source: "openrouter"
+                )
+            }
+            modelPricingByID = next
+        } catch {
+            openRouterCatalogError = error.localizedDescription
+        }
     }
 
     /// Keep sidebar / chat selection pinned to a real session after list reloads.
@@ -442,14 +674,15 @@ final class AppState: ObservableObject {
                             guard let role = ChatMessage.Role(rawValue: msg.role) else { return nil }
                             return ChatMessage(role: role, content: msg.content)
                         }
-                        loaded.append(
-                            ChatSession(
-                                id: uuid,
-                                title: detail.title,
-                                messages: messages,
-                                updatedAt: Self.parseAPIDate(detail.updatedAt) ?? .now
-                            )
+                        var session = ChatSession(
+                            id: uuid,
+                            title: detail.title,
+                            messages: messages,
+                            updatedAt: Self.parseAPIDate(detail.updatedAt) ?? .now,
+                            totalCostUsd: 0
                         )
+                        session.recomputeTotalCost()
+                        loaded.append(session)
                     } catch {
                         // Skip a single bad/oversized session; keep trying others.
                         continue
@@ -502,7 +735,11 @@ final class AppState: ObservableObject {
                 byID[session.id] = session
             }
         }
-        return Array(byID.values)
+        return Array(byID.values).map { session in
+            var next = session
+            next.recomputeTotalCost()
+            return next
+        }
     }
 
     func selectModel(_ model: String) {
@@ -514,6 +751,7 @@ final class AppState: ObservableObject {
     func setDefaultModel(_ model: String) {
         defaultModel = model
         UserDefaults.standard.set(model, forKey: "aril.defaultModel")
+        Task { await refreshModelPricing(forceRefresh: true, focusing: model) }
     }
 
     func saveUserDisplayName() {
@@ -608,7 +846,8 @@ final class AppState: ObservableObject {
                     preferredModel: selectedModel,
                     sessionId: selectedSessionID?.uuidString.lowercased(),
                     routingProfile: APIRoutingProfile(routingProfile),
-                    enhanceAlternatives: true
+                    enhanceAlternatives: true,
+                    systemPrompt: activeSystemPromptForAPI
                 )
             )
             preview = result
@@ -780,9 +1019,7 @@ final class AppState: ObservableObject {
         preferredCompareModel = nil
         lastCacheLabel = cacheEligible ? "not cached" : "not eligible"
 
-        let historyForAPI = sessions[idx].messages.map {
-            APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForAPI($0.content))
-        }
+        let historyForAPI = messagesForAPI(from: sessions[idx].messages)
 
         if Task.isCancelled { return }
 
@@ -844,6 +1081,14 @@ final class AppState: ObservableObject {
             if let ms = done.latencyMs {
                 lastLatencyMs = ms
             }
+            applyActualCost(
+                sessionID: sid,
+                assistantID: assistantID,
+                model: done.model,
+                reportedCost: done.costUsd,
+                inputTokens: done.inputTokens,
+                outputTokens: done.outputTokens
+            )
             let responseText = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
             recordExchange(
@@ -884,6 +1129,14 @@ final class AppState: ObservableObject {
             }()
             if alreadyHasContent {
                 lastError = nil
+                applyActualCost(
+                    sessionID: sid,
+                    assistantID: assistantID,
+                    model: selectedModel,
+                    reportedCost: nil,
+                    inputTokens: nil,
+                    outputTokens: nil
+                )
                 let responseText = sessions.first(where: { $0.id == sid })?
                     .messages.first(where: { $0.id == assistantID })?.content ?? ""
                 recordExchange(
@@ -906,12 +1159,22 @@ final class AppState: ObservableObject {
                         session.messages[m].content = response.message.content
                     }
                 }
+                applyActualCost(
+                    sessionID: sid,
+                    assistantID: assistantID,
+                    model: response.model,
+                    reportedCost: response.costUsd,
+                    inputTokens: response.inputTokens,
+                    outputTokens: response.outputTokens
+                )
                 lastError = nil
                 lastCacheLabel = response.cached ? "cached" : "not cached"
                 generationPhase = .streaming
+                let responseText = sessions.first(where: { $0.id == sid })?
+                    .messages.first(where: { $0.id == assistantID })?.content ?? response.message.content
                 recordExchange(
                     prompt: displayText,
-                    response: response.message.content,
+                    response: responseText,
                     model: response.model,
                     mode: routeMode.label,
                     status: .completed
@@ -998,9 +1261,74 @@ final class AppState: ObservableObject {
         id.split(separator: "/").last.map(String.init) ?? id
     }
 
+    /// Resolve OpenRouter-reported cost, falling back to token × rate pricing when needed.
+    func resolveActualCost(
+        model: String,
+        reportedCost: Double?,
+        inputTokens: Int?,
+        outputTokens: Int?
+    ) -> Double {
+        if let reportedCost, reportedCost > 0 {
+            return reportedCost
+        }
+        let inTok = max(0, inputTokens ?? 0)
+        let outTok = max(0, outputTokens ?? 0)
+        if inTok == 0 && outTok == 0 {
+            return reportedCost ?? 0
+        }
+        if let rates = modelPricingByID[model] {
+            var cost = (Double(inTok) / 1000.0) * rates.promptPer1k
+                + (Double(outTok) / 1000.0) * rates.completionPer1k
+            if webSearchEnabled {
+                cost += rates.webSearchFee
+            }
+            return round(cost * 1_000_000) / 1_000_000
+        }
+        return reportedCost ?? 0
+    }
+
+    private func applyActualCost(
+        sessionID: UUID,
+        assistantID: UUID,
+        model: String,
+        reportedCost: Double?,
+        inputTokens: Int?,
+        outputTokens: Int?
+    ) {
+        let cost = resolveActualCost(
+            model: model,
+            reportedCost: reportedCost,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens
+        )
+        updateSession(sessionID) { session in
+            guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+            let body = session.messages[m].content
+            guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            session.messages[m].content = ChatMessage.withActualCostFooter(body, costUsd: cost)
+            session.recomputeTotalCost()
+        }
+    }
+
     /// Drop embedded base64 images / huge blobs from outbound context (UI keeps originals).
     static func sanitizeContentForAPI(_ content: String) -> String {
         guard !content.isEmpty else { return content }
+        var text = ChatMessage.stripActualCostFooter(content)
+        text = sanitizeBulkyPayloads(text, truncateAt: 24_000, truncationMarker: "\n\n…[truncated for model context]")
+        return text
+    }
+
+    /// Persist a slim copy of history while keeping actual-cost footers for session totals.
+    static func sanitizeContentForStorage(_ content: String) -> String {
+        guard !content.isEmpty else { return content }
+        return sanitizeBulkyPayloads(content, truncateAt: 48_000, truncationMarker: "\n\n…[truncated for storage]")
+    }
+
+    private static func sanitizeBulkyPayloads(
+        _ content: String,
+        truncateAt maxChars: Int,
+        truncationMarker: String
+    ) -> String {
         var text = content
         if let md = try? NSRegularExpression(
             pattern: #"!\[[^\]]*\]\(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+\)"#,
@@ -1022,10 +1350,12 @@ final class AppState: ObservableObject {
                 withTemplate: "data:image/(omitted-from-context)"
             )
         }
-        let maxChars = 24_000
         if text.count > maxChars {
-            let keep = text.prefix(maxChars - 40)
-            text = String(keep) + "\n\n…[truncated for model context]"
+            // Preserve a trailing actual-cost footer when truncating.
+            let footer = ChatMessage.actualCostUsd(from: text).map { ChatMessage.formatActualCostFooter($0) } ?? ""
+            let budget = max(0, maxChars - footer.count - truncationMarker.count)
+            let keep = text.prefix(budget)
+            text = String(keep) + truncationMarker + footer
         }
         return text
     }
@@ -1053,7 +1383,16 @@ final class AppState: ObservableObject {
                 if !lastIsMatchingUser {
                     session.messages.append(ChatMessage(role: .user, content: prompt))
                 }
-                session.messages.append(ChatMessage(role: .assistant, content: result.content))
+                let cost = resolveActualCost(
+                    model: result.model,
+                    reportedCost: result.costUsd,
+                    inputTokens: result.inputTokens,
+                    outputTokens: result.outputTokens
+                )
+                session.messages.append(
+                    ChatMessage(role: .assistant, content: ChatMessage.withActualCostFooter(result.content, costUsd: cost))
+                )
+                session.recomputeTotalCost()
             }
         }
 
@@ -1327,7 +1666,8 @@ final class AppState: ObservableObject {
             id: session.id.uuidString.lowercased(),
             title: session.title,
             messages: session.messages.map {
-                APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForAPI($0.content))
+                // Keep actual-cost footers in history; only strip bulky image payloads.
+                APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForStorage($0.content))
             }
         )
         _ = try? await client.upsertSession(baseURL: gatewayURL, session: payload)

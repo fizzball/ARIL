@@ -69,6 +69,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.5", changes: [
+            "Preferences → System Prompt tab (Claude.md-style instructions, token estimate, cost analysis)",
+            "OpenRouter live $/1K model pricing in Preferences and prompt cost estimates",
+            "Toolbar model-costs panel; Web Search fee when Web is enabled",
+        ]),
         ChangelogEntry(version: "0.3.4", changes: [
             "Session history restores on launch (local cache + gateway merge; selection no longer clears)",
             "Ghost mark sits beside the ARIL label in chat bubbles",
@@ -86,7 +91,7 @@ struct AboutView: View {
             "Mode switches clear the draft; Compare uses a reliable model pair",
             "Live Thinking/Streaming status with elapsed timer",
             "ARIL mark identity, About page, reusable prior prompts",
-            "Display name for chat; Grade/Cost/% fit hover tips; Latency metric",
+            "Display name for chat; Grade/est. Cost/% fit hover tips; Latency metric",
         ]),
         ChangelogEntry(version: "0.3.1", changes: [
             "OpenRouter attachments and web search plugin",

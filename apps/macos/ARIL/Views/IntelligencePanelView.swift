@@ -80,25 +80,32 @@ struct IntelligencePanelView: View {
                 String(format: "%.0f%%", preview.grade.overall * 100),
                 help: "Prompt quality score (clarity, constraints, success criteria, token efficiency) — not model accuracy."
             )
-            metric("Tokens", "\(preview.cache.estimatedInputTokens)")
+            metric(
+                "Tokens",
+                "\(preview.cache.estimatedInputTokens)",
+                help: tokenHelp(for: preview)
+            )
             if let top = preview.routes.first {
                 let willCache = preview.cache.eligible && preview.cache.wouldHit
                 let costWarning = state.hasConfiguredMCPServers || state.webSearchEnabled
                 let baseHelp = "Estimated USD cost for the top recommended route (input + expected output)."
                 let warnHelp = "If Web search or MCP servers are used, costs may increase."
                 let cacheHelp = "This prompt looks cacheable — expected to hit the prompt cache (shown in green)."
+                let systemHelp = "Includes the global system prompt when enabled."
                 let costColor: Color? = {
                     if willCache { return Color(red: 0.35, green: 0.78, blue: 0.45) }
                     if costWarning { return Color(red: 0.95, green: 0.80, blue: 0.20) }
                     return nil
                 }()
                 let costHelp: String = {
-                    if willCache { return "\(baseHelp) \(cacheHelp)" }
-                    if costWarning { return "\(baseHelp) \(warnHelp)" }
-                    return baseHelp
+                    var parts = [baseHelp]
+                    if state.systemPromptEnabled { parts.append(systemHelp) }
+                    if willCache { parts.append(cacheHelp) }
+                    if costWarning { parts.append(warnHelp) }
+                    return parts.joined(separator: " ")
                 }()
                 metric(
-                    "Cost",
+                    "est. Cost",
                     String(format: "$%.4f", top.estimatedCostUsd),
                     valueColor: costColor,
                     help: costHelp
@@ -207,6 +214,17 @@ struct IntelligencePanelView: View {
 
     private func short(_ id: String) -> String {
         id.split(separator: "/").last.map(String.init) ?? id
+    }
+
+    private func tokenHelp(for preview: PreviewResponse) -> String {
+        var help = "Estimated input tokens for the draft prompt (≈4 characters per token)."
+        if state.systemPromptEnabled, state.systemPromptTokenEstimate > 0 {
+            help += " Includes ~\(state.systemPromptTokenEstimate) tokens from the global system prompt."
+        }
+        if preview.cache.eligible {
+            help += " Prompts above the cache threshold may be cache-eligible."
+        }
+        return help
     }
 }
 

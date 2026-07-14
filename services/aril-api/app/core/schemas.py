@@ -117,6 +117,8 @@ class PreviewRequest(BaseModel):
     session_id: str | None = None
     routing_profile: RoutingProfile | None = None
     enhance_alternatives: bool = True
+    # Optional Claude.md-style system prompt; counted toward token/cost estimates only.
+    system_prompt: str | None = None
 
 
 class PreviewResponse(BaseModel):
@@ -284,6 +286,34 @@ class OpenRouterKeyStatus(BaseModel):
     configured: bool
     masked_key: str = ""
     required: bool = True
+
+
+class ModelPricing(BaseModel):
+    id: str
+    prompt_per_1k: float
+    completion_per_1k: float
+    web_search_per_request: float = 0.005
+    source: str = "fallback"
+
+
+class ModelPricingResponse(BaseModel):
+    models: list[ModelPricing]
+    refreshed: bool = False
+
+
+class OpenRouterCatalogModel(BaseModel):
+    id: str
+    name: str
+    prompt_per_1k: float
+    completion_per_1k: float
+    web_search_per_request: float = 0.005
+    context_length: int | None = None
+
+
+class OpenRouterCatalogResponse(BaseModel):
+    models: list[OpenRouterCatalogModel]
+    count: int
+    refreshed: bool = False
 
 
 class OpenRouterKeyUpdate(BaseModel):

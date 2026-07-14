@@ -5,10 +5,19 @@ struct SettingsView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
 
+    private static let otherModelToken = "__aril.other__"
+
+    @State private var showModelBrowser = false
+    @State private var modelBrowserTitle = "Choose OpenRouter model"
+    @State private var modelBrowserCategory: RouteCategory?
+    @State private var modelBrowserForDefault = false
+
     var body: some View {
         TabView {
             gatewayTab
                 .tabItem { Label("General", systemImage: "gearshape") }
+            systemPromptTab
+                .tabItem { Label("System Prompt", systemImage: "doc.plaintext") }
             routingTab
                 .tabItem { Label("Models", systemImage: "cpu") }
             mcpTab
@@ -18,7 +27,7 @@ struct SettingsView: View {
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 640, height: 540)
+        .frame(width: 700, height: 640)
         .navigationTitle("Preferences")
         .task {
             await state.loadClassifications()
@@ -203,44 +212,151 @@ struct SettingsView: View {
         }
     }
 
+    private var systemPromptTab: some View {
+        Form {
+            Section("Global system prompt") {
+                Toggle("Enable", isOn: Binding(
+                    get: { state.systemPromptEnabled },
+                    set: { state.setSystemPromptEnabled($0) }
+                ))
+                Text("When enabled, this instruction is sent as a system message with every chat request. It is not shown in the session transcript, and its tokens are included in cost analysis.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if state.systemPromptEnabled {
+                    HStack {
+                        Text("Approximate tokens")
+                        Spacer()
+                        Text("~\(state.systemPromptTokenEstimate)")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Text("Rough estimate (~4 characters per token), aligned with gateway analysis.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TextEditor(text: Binding(
+                        get: { state.systemPrompt },
+                        set: { state.updateSystemPromptDraft($0) }
+                    ))
+                    .font(.system(.body, design: .default))
+                    .frame(minHeight: 220, maxHeight: 320)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                    )
+                    HStack {
+                        Button("Default") {
+                            state.restoreDefaultSystemPrompt()
+                        }
+                        .help("Restore the original built-in system prompt")
+                        Spacer()
+                        Button("Save") {
+                            state.saveSystemPrompt()
+                        }
+                        .disabled(!state.systemPromptDirty)
+                        .keyboardShortcut("s", modifiers: .command)
+                        .help(state.systemPromptDirty ? "Save system prompt" : "No changes to save")
+                    }
+                } else {
+                    ScrollView {
+                        Text(state.systemPromptShadowText)
+                            .font(.system(.caption, design: .default))
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(minHeight: 160, maxHeight: 240)
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text("Shadow text is your saved prompt (or the built-in default). Turn the toggle on to edit.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding()
+        .formStyle(.grouped)
+    }
+
     private var routingTab: some View {
         Form {
             Section("Default model") {
                 Picker("App default", selection: Binding(
                     get: { state.defaultModel },
-                    set: { state.setDefaultModel($0) }
+                    set: { newValue in
+                        if newValue == Self.otherModelToken {
+                            modelBrowserForDefault = true
+                            modelBrowserCategory = nil
+                            modelBrowserTitle = "Choose default OpenRouter model"
+                            showModelBrowser = true
+                        } else {
+                            state.setDefaultModel(newValue)
+                        }
+                    }
                 )) {
-                    ForEach(AppState.modelCatalog, id: \.self) { model in
+                    ForEach(defaultPickerModels, id: \.self) { model in
                         Text(model).tag(model)
                     }
+                    Divider()
+                    Text("Other…").tag(Self.otherModelToken)
                 }
-                Text("Manual mode uses the last model you picked. Default is highlighted ★ in the model menu.")
+                if let price = state.pricingLabel(for: state.defaultModel) {
+                    Text(price)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Text("Manual mode uses the last model you picked. Default is highlighted ★ in the model menu. Prices are OpenRouter USD per 1K input / output tokens. Choose Other… to browse the full OpenRouter catalog.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section("Category → recommended model") {
-                Text("Auto mode picks the model mapped to the detected prompt category.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Auto mode picks the model mapped to the detected prompt category.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if state.isLoadingModelPricing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Button("Reset") {
+                        state.resetRoutingModelsToDefaults()
+                    }
+                    .disabled(!state.routingModelsDifferFromDefaults)
+                    .help(
+                        state.routingModelsDifferFromDefaults
+                            ? "Restore all category models and the app default to the original built-in set"
+                            : "Already using the original built-in models"
+                    )
+                }
 
                 ForEach(RouteCategory.allCases) { category in
+                    let selected = state.routingProfile.model(for: category)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(category.label)
-                            .font(.headline)
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(category.label)
+                                .font(.headline)
+                            Spacer()
+                            if let price = state.pricingLabel(for: selected) {
+                                Text(price)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
                         Text(category.blurb)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Picker("Model for \(category.label)", selection: binding(for: category)) {
-                            ForEach(recommended(for: category), id: \.self) { model in
+                            ForEach(pickerModels(for: category), id: \.self) { model in
                                 Text(model).tag(model)
                             }
                             Divider()
-                            ForEach(AppState.modelCatalog, id: \.self) { model in
-                                if !(recommended(for: category).contains(model)) {
-                                    Text(model).tag(model)
-                                }
-                            }
+                            Text("Other…").tag(Self.otherModelToken)
                         }
                         .labelsHidden()
                     }
@@ -250,6 +366,40 @@ struct SettingsView: View {
         }
         .padding()
         .formStyle(.grouped)
+        .task {
+            await state.refreshModelPricing(forceRefresh: false)
+        }
+        .sheet(isPresented: $showModelBrowser) {
+            OpenRouterModelBrowserView(title: modelBrowserTitle) { modelID in
+                if modelBrowserForDefault {
+                    state.setDefaultModel(modelID)
+                } else if let category = modelBrowserCategory {
+                    state.setRoutingModel(modelID, for: category)
+                }
+            }
+            .environmentObject(state)
+            .environmentObject(theme)
+        }
+    }
+
+    private var defaultPickerModels: [String] {
+        var models = AppState.modelCatalog
+        if !models.contains(state.defaultModel) {
+            models.insert(state.defaultModel, at: 0)
+        }
+        return models
+    }
+
+    private func pickerModels(for category: RouteCategory) -> [String] {
+        let selected = state.routingProfile.model(for: category)
+        var models = recommended(for: category)
+        for model in AppState.modelCatalog where !models.contains(model) {
+            models.append(model)
+        }
+        if !models.contains(selected) {
+            models.insert(selected, at: 0)
+        }
+        return models
     }
 
     private var mcpTab: some View {
@@ -348,8 +498,14 @@ struct SettingsView: View {
         Binding(
             get: { state.routingProfile.model(for: category) },
             set: { newValue in
-                state.routingProfile.setModel(newValue, for: category)
-                state.saveRoutingProfile()
+                if newValue == Self.otherModelToken {
+                    modelBrowserForDefault = false
+                    modelBrowserCategory = category
+                    modelBrowserTitle = "Choose OpenRouter model for \(category.label)"
+                    showModelBrowser = true
+                } else {
+                    state.setRoutingModel(newValue, for: category)
+                }
             }
         )
     }
