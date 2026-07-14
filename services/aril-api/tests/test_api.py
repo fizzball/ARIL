@@ -93,6 +93,34 @@ def test_prompt_cache_module():
     assert prompt_cache.eligible(10) is False
 
 
+def test_prefer_feedback_boosts_learning():
+    r = client.post(
+        "/v1/feedback/prefer",
+        json={
+            "prompt": "refactor this python module with tests",
+            "model": "openai/gpt-4.1",
+            "category": "coding",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["category_wins"] >= 1
+
+    prev = client.post(
+        "/v1/preview",
+        json={
+            "prompt": "refactor this python module with tests now please",
+            "enhance_alternatives": False,
+        },
+    )
+    assert prev.status_code == 200
+    reasons = " ".join(
+        " ".join(row.get("reasons") or []) for row in prev.json()["routes"]
+    )
+    assert "Learned preference" in reasons or prev.json()["routes"]
+
+
 def test_chat_stub_or_live():
     r = client.post(
         "/v1/chat",

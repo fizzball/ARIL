@@ -18,12 +18,17 @@ from app.core.schemas import (
     CompareRequest,
     CompareResponse,
     CompareResult,
+    PreferRequest,
+    PreferResponse,
     PreviewRequest,
     PreviewResponse,
+    ProbeRequest,
+    ProbeResponse,
     SessionDetail,
     SessionSummary,
     SessionUpsert,
 )
+from app.core import preferences as pref_store
 from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
 from app.routing.pipeline import (
     DEFAULT_PROFILE,
@@ -34,6 +39,7 @@ from app.routing.pipeline import (
     resolve_profile,
     score_routes,
 )
+from app.routing.probe import probe_models
 from app.routing.rewrite import llm_alternatives
 
 router = APIRouter(prefix="/v1")
@@ -284,6 +290,14 @@ async def compare(req: CompareRequest) -> CompareResponse:
 
     session_id = req.session_id or str(uuid.uuid4())
 
+    probe_map: dict[str, int] = {}
+    probe_rows: list[dict] = []
+    if req.run_probe:
+        probe = await probe_models(ProbeRequest(models=models))
+        for row in probe.results:
+            probe_map[row.model] = row.latency_ms
+            probe_rows.append(row.model_dump())
+
     async def run_one(model: str) -> CompareResult:
         started = time.perf_counter()
         try:
@@ -301,6 +315,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
                 output_tokens=result.output_tokens,
                 cost_usd=result.cost_usd * (0.45 if cached else 1.0),
                 latency_ms=ms,
+                probe_latency_ms=probe_map.get(model),
                 cached=cached,
             )
         except Exception as exc:  # noqa: BLE001
@@ -312,6 +327,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
                 output_tokens=0,
                 cost_usd=0.0,
                 latency_ms=ms,
+                probe_latency_ms=probe_map.get(model),
                 error=str(exc),
             )
 
@@ -322,7 +338,8 @@ async def compare(req: CompareRequest) -> CompareResponse:
         if r.error:
             summary_bits.append(f"### {r.model}\nError: {r.error}")
         else:
-            summary_bits.append(f"### {r.model}\n{r.content}")
+            probe_bit = f" · probe {r.probe_latency_ms}ms" if r.probe_latency_ms is not None else ""
+            summary_bits.append(f"### {r.model} ({r.latency_ms}ms{probe_bit})\n{r.content}")
     assistant = ChatMessage(role="assistant", content="\n\n".join(summary_bits))
     session_store.upsert_session(
         SessionUpsert(
@@ -335,7 +352,24 @@ async def compare(req: CompareRequest) -> CompareResponse:
         session_id=session_id,
         route_category=classification.primary,
         results=list(results),
+        probe=probe_rows,
     )
+
+
+@router.post("/probe", response_model=ProbeResponse)
+async def probe(req: ProbeRequest) -> ProbeResponse:
+    return await probe_models(req)
+
+
+@router.post("/feedback/prefer", response_model=PreferResponse)
+async def prefer(req: PreferRequest) -> PreferResponse:
+    category = req.category
+    if category is None:
+        category = classify(req.prompt).primary
+    info = pref_store.record_preference(
+        prompt=req.prompt, category=category.value, model=req.model
+    )
+    return PreferResponse(ok=True, **info)
 
 
 @router.get("/sessions", response_model=list[SessionSummary])

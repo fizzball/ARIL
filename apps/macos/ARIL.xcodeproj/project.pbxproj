@@ -10,6 +10,7 @@
 		11DF1396F1C5933598399718 /* ARILApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */; };
 		17A3C70916F018539718B02E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F569C76A392C4EAF2B396EB7 /* AppState.swift */; };
 		22022D6BC26C6FFE70F5A810 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464CC3D69B6588E73D3EF50F /* APIModels.swift */; };
+		3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */; };
 		43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */; };
 		4B8284C195B20A12359734B4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F7258E2BF863107D0D1C2F /* ContentView.swift */; };
 		5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */; };
@@ -29,6 +30,7 @@
 		1416251B652DE7DE8C09313A /* MessageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListView.swift; sourceTree = "<group>"; };
 		4471C3658442F237DC5C1C61 /* CompareResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareResultsView.swift; sourceTree = "<group>"; };
 		464CC3D69B6588E73D3EF50F /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGatewayManager.swift; sourceTree = "<group>"; };
 		51A5248C42FB7C5D311DC40B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligencePanelView.swift; sourceTree = "<group>"; };
 		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -77,6 +79,7 @@
 			children = (
 				464CC3D69B6588E73D3EF50F /* APIModels.swift */,
 				A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */,
+				48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -185,6 +188,7 @@
 				9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */,
 				D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */,
 				43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */,
+				3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */,
 				D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */,
 				EF19B318BFD33393131FB656 /* Models.swift in Sources */,
 				B8EB569822A0AC3A6D7FFD52 /* SettingsView.swift in Sources */,

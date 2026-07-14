@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatDetailView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var theme: ThemeStore
 
     private var isEmpty: Bool {
         (state.selectedSession?.messages.isEmpty ?? true)
@@ -9,8 +10,8 @@ struct ChatDetailView: View {
 
     var body: some View {
         ZStack {
-            ARILTheme.background.ignoresSafeArea()
-            BackgroundTexture()
+            theme.palette.background.ignoresSafeArea()
+            BackgroundTexture(accent: theme.palette.accent)
 
             VStack(spacing: 0) {
                 if isEmpty && state.compareResults.isEmpty {
@@ -25,8 +26,8 @@ struct ChatDetailView: View {
                     }
                 }
 
-                if state.showIntelligencePanel, let preview = state.preview {
-                    IntelligencePanelView(preview: preview)
+                if state.showIntelligencePanel {
+                    IntelligencePanelView()
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .padding(.horizontal, 24)
                         .padding(.bottom, 8)
@@ -46,12 +47,10 @@ struct ChatDetailView: View {
 }
 
 private struct BackgroundTexture: View {
+    let accent: Color
     var body: some View {
         RadialGradient(
-            colors: [
-                Color(red: 0.18, green: 0.14, blue: 0.10).opacity(0.55),
-                Color.clear,
-            ],
+            colors: [accent.opacity(0.18), Color.clear],
             center: .center,
             startRadius: 40,
             endRadius: 520

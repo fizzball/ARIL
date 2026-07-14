@@ -140,6 +140,7 @@ class CompareRequest(BaseModel):
     routing_profile: RoutingProfile | None = None
     session_id: str | None = None
     use_cache: bool = True
+    run_probe: bool = True
 
 
 class CompareResult(BaseModel):
@@ -149,6 +150,7 @@ class CompareResult(BaseModel):
     output_tokens: int
     cost_usd: float
     latency_ms: int
+    probe_latency_ms: int | None = None
     cached: bool = False
     error: str | None = None
 
@@ -157,6 +159,37 @@ class CompareResponse(BaseModel):
     session_id: str
     route_category: RouteCategory
     results: list[CompareResult]
+    probe: list[dict] = Field(default_factory=list)
+
+
+class ProbeRequest(BaseModel):
+    models: list[str] = Field(min_length=1)
+
+
+class ProbeResult(BaseModel):
+    model: str
+    latency_ms: int
+    error: str | None = None
+
+
+class ProbeResponse(BaseModel):
+    results: list[ProbeResult]
+
+
+class PreferRequest(BaseModel):
+    prompt: str
+    model: str
+    category: RouteCategory | None = None
+    session_id: str | None = None
+
+
+class PreferResponse(BaseModel):
+    ok: bool
+    category: str
+    fingerprint: str
+    model: str
+    category_wins: int
+    fingerprint_wins: int
 
 
 class SessionSummary(BaseModel):

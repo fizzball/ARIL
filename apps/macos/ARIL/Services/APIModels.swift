@@ -248,12 +248,14 @@ struct CompareRequestDTO: Encodable {
     let routingProfile: APIRoutingProfile?
     let sessionId: String?
     let useCache: Bool
+    let runProbe: Bool
 
     enum CodingKeys: String, CodingKey {
         case messages, models, temperature
         case routingProfile = "routing_profile"
         case sessionId = "session_id"
         case useCache = "use_cache"
+        case runProbe = "run_probe"
     }
 }
 
@@ -265,6 +267,7 @@ struct CompareResultDTO: Codable, Identifiable {
     let outputTokens: Int
     let costUsd: Double
     let latencyMs: Int
+    let probeLatencyMs: Int?
     let cached: Bool
     let error: String?
 
@@ -274,6 +277,7 @@ struct CompareResultDTO: Codable, Identifiable {
         case outputTokens = "output_tokens"
         case costUsd = "cost_usd"
         case latencyMs = "latency_ms"
+        case probeLatencyMs = "probe_latency_ms"
     }
 }
 
@@ -286,5 +290,32 @@ struct CompareResponseDTO: Codable {
         case results
         case sessionId = "session_id"
         case routeCategory = "route_category"
+    }
+}
+
+struct PreferRequestDTO: Encodable {
+    let prompt: String
+    let model: String
+    let category: RouteCategory?
+    let sessionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, model, category
+        case sessionId = "session_id"
+    }
+}
+
+struct PreferResponseDTO: Codable {
+    let ok: Bool
+    let category: String
+    let fingerprint: String
+    let model: String
+    let categoryWins: Int
+    let fingerprintWins: Int
+
+    enum CodingKeys: String, CodingKey {
+        case ok, category, fingerprint, model
+        case categoryWins = "category_wins"
+        case fingerprintWins = "fingerprint_wins"
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct EmptyHeroView: View {
+    @EnvironmentObject private var theme: ThemeStore
     @State private var appeared = false
 
     var body: some View {
@@ -8,19 +9,19 @@ struct EmptyHeroView: View {
             Spacer()
             Text("ARIL")
                 .font(ARILTheme.wordmarkFont)
-                .foregroundStyle(ARILTheme.cream)
+                .foregroundStyle(theme.palette.text)
                 .tracking(4)
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 8)
 
             Text("Adaptive Routing Intelligent Layer")
                 .font(ARILTheme.captionFont)
-                .foregroundStyle(ARILTheme.gold)
+                .foregroundStyle(theme.palette.accent)
                 .opacity(appeared ? 1 : 0)
 
             Text("Enter task. ARIL grades the prompt, routes the model, and estimates cost before you send.")
                 .font(ARILTheme.bodyFont)
-                .foregroundStyle(ARILTheme.creamMuted)
+                .foregroundStyle(theme.palette.textMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
                 .opacity(appeared ? 1 : 0)

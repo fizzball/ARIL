@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var theme: ThemeStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -11,7 +12,7 @@ struct ContentView: View {
         } detail: {
             ChatDetailView()
         }
-        .background(ARILTheme.background)
+        .background(theme.palette.background)
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
                 Button { Task { await state.refreshHealth() } } label: {
@@ -20,7 +21,7 @@ struct ContentView: View {
                 .help("Refresh gateway status")
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.palette.colorScheme)
         .task {
             await state.refreshHealth()
         }

@@ -2,24 +2,28 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
-
-    private let models = [
-        "openai/gpt-4.1",
-        "openai/gpt-4.1-mini",
-        "anthropic/claude-sonnet-4",
-        "anthropic/claude-opus-4",
-        "google/gemini-2.5-flash",
-        "meta-llama/llama-3.3-70b-instruct",
-    ]
+    @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
         TabView {
             Form {
+                Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
+                    .onChange(of: state.soloMode) { _, _ in
+                        state.saveSoloMode()
+                    }
+                Text(state.gatewayManager.lastMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 TextField("Gateway URL", text: $state.gatewayURL)
                     .onSubmit {
                         state.saveGatewayURL()
                         Task { await state.refreshHealth() }
                     }
+                TextField("API root path (optional)", text: Binding(
+                    get: { UserDefaults.standard.string(forKey: "aril.apiRoot") ?? "" },
+                    set: { UserDefaults.standard.set($0, forKey: "aril.apiRoot") }
+                ))
                 HStack {
                     Button("Check connection") {
                         state.saveGatewayURL()
@@ -37,28 +41,50 @@ struct SettingsView: View {
             .tabItem { Label("Gateway", systemImage: "network") }
 
             Form {
+                Picker("Default model", selection: Binding(
+                    get: { state.defaultModel },
+                    set: { state.setDefaultModel($0) }
+                )) {
+                    ForEach(AppState.modelCatalog, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+                Text("Manual mode uses the last selected model. Default is highlighted in the model menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 modelPicker("Coding", selection: $state.routingProfile.coding)
                 modelPicker("Security", selection: $state.routingProfile.security)
                 modelPicker("Cost", selection: $state.routingProfile.cost)
                 modelPicker("Performance", selection: $state.routingProfile.performance)
                 modelPicker("Confidence", selection: $state.routingProfile.confidence)
                 modelPicker("General", selection: $state.routingProfile.general)
-                Text("These mappings drive Auto route recommendations via OpenRouter.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Button("Save routing profile") {
                     state.saveRoutingProfile()
                 }
             }
             .padding()
             .tabItem { Label("Routing", systemImage: "arrow.triangle.branch") }
+
+            Form {
+                Picker("Theme", selection: $theme.option) {
+                    ForEach(AppThemeOption.allCases) { opt in
+                        Text(opt.label).tag(opt)
+                    }
+                }
+                Text("Noir, Slate, Light, and Forest palettes. Affects the whole client.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 560, height: 360)
+        .frame(width: 580, height: 400)
     }
 
     private func modelPicker(_ title: String, selection: Binding<String>) -> some View {
         Picker(title, selection: selection) {
-            ForEach(models, id: \.self) { model in
+            ForEach(AppState.modelCatalog, id: \.self) { model in
                 Text(model).tag(model)
             }
         }

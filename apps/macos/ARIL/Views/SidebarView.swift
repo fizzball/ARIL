@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var theme: ThemeStore
     @State private var query = ""
 
     private var filtered: [ChatSession] {
@@ -25,7 +26,7 @@ struct SidebarView: View {
             TextField("Search sessions…", text: $query)
                 .textFieldStyle(.plain)
                 .padding(8)
-                .background(ARILTheme.inputFill)
+                .background(theme.palette.inputFill)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .padding(.horizontal, 14)
                 .padding(.bottom, 12)
@@ -33,11 +34,11 @@ struct SidebarView: View {
             HStack {
                 Text("SESSIONS")
                     .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.creamMuted)
+                    .foregroundStyle(theme.palette.textMuted)
                 Spacer()
                 Text("\(state.sessions.count)")
                     .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.creamMuted)
+                    .foregroundStyle(theme.palette.textMuted)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 6)
@@ -46,7 +47,7 @@ struct SidebarView: View {
                 ForEach(filtered) { session in
                     Text(session.title)
                         .font(ARILTheme.bodyFont)
-                        .foregroundStyle(ARILTheme.cream)
+                        .foregroundStyle(theme.palette.text)
                         .lineLimit(1)
                         .tag(session.id)
                         .listRowBackground(Color.clear)
@@ -63,10 +64,10 @@ struct SidebarView: View {
                 Image(systemName: "ellipsis")
                 Spacer()
             }
-            .foregroundStyle(ARILTheme.creamMuted)
+            .foregroundStyle(theme.palette.textMuted)
             .padding(14)
         }
-        .background(ARILTheme.sidebar)
+        .background(theme.palette.sidebar)
     }
 
     private func sidebarButton(
@@ -84,10 +85,10 @@ struct SidebarView: View {
                 if let shortcut {
                     Text(shortcut)
                         .font(ARILTheme.captionFont)
-                        .foregroundStyle(ARILTheme.creamMuted.opacity(0.7))
+                        .foregroundStyle(theme.palette.textMuted.opacity(0.7))
                 }
             }
-            .foregroundStyle(ARILTheme.cream)
+            .foregroundStyle(theme.palette.text)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }

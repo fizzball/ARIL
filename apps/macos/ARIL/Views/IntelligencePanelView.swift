@@ -2,113 +2,136 @@ import SwiftUI
 
 struct IntelligencePanelView: View {
     @EnvironmentObject private var state: AppState
-    let preview: PreviewResponse
+    @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("Intelligence", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.gold)
-                if let source = preview.alternativesSource, source != "none" {
+                    .foregroundStyle(theme.palette.accent)
+
+                if case .analysing(let remaining) = state.analysisStatus {
+                    Text(remaining > 0 ? "Analysing prompt… \(remaining)s" : "Analysing prompt…")
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                } else if let source = state.preview?.alternativesSource, source != "none" {
                     Text(source.uppercased())
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(ARILTheme.gold.opacity(0.8))
+                        .foregroundStyle(theme.palette.accent.opacity(0.8))
                 }
+
                 Spacer()
-                Text(preview.classification.primary.label.uppercased())
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.creamMuted)
-                Text(String(format: "%.0f%% fit", preview.classification.confidence * 100))
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.creamMuted)
-            }
 
-            HStack(spacing: 16) {
-                metric("Grade", String(format: "%.0f%%", preview.grade.overall * 100))
-                metric("Est. tokens", "\(preview.cache.estimatedInputTokens)")
-                if let top = preview.routes.first {
-                    metric("Est. cost", String(format: "$%.4f", top.estimatedCostUsd))
-                }
-                metric("Model", short(preview.recommendedModel))
-                if preview.cache.eligible {
-                    metric(
-                        "Cache",
-                        preview.cache.wouldHit
-                            ? "hit ~\(Int(preview.cache.estimatedSavingsPct ?? 0))%"
-                            : "eligible"
-                    )
+                if let preview = state.preview, state.analysisStatus == .ready {
+                    Text(preview.classification.primary.label.uppercased())
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                    Text(String(format: "%.0f%% fit", preview.classification.confidence * 100))
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
                 }
             }
 
-            if !preview.grade.notes.isEmpty {
-                Text(preview.grade.notes.joined(separator: " "))
+            if case .analysing(let remaining) = state.analysisStatus {
+                Text(remaining > 0
+                      ? "Pause typing for \(remaining)s to finish analysis. Editing resets the timer."
+                      : "Running classification, grading, and route scoring…")
                     .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.creamMuted)
+                    .foregroundStyle(theme.palette.textMuted)
             }
 
-            if !preview.alternatives.isEmpty {
-                Text("Prompt alternatives")
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.gold)
-                ForEach(preview.alternatives) { alt in
-                    Button {
-                        state.applyAlternative(alt)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(alt.rationale)
-                                .font(ARILTheme.captionFont)
-                                .foregroundStyle(ARILTheme.cream)
-                            Text(alt.text)
-                                .font(ARILTheme.captionFont)
-                                .foregroundStyle(ARILTheme.creamMuted)
-                                .lineLimit(3)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(ARILTheme.backgroundElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            HStack {
-                Text("Temperature")
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.creamMuted)
-                Slider(value: $state.temperature, in: 0...2, step: 0.1)
-                Text(String(format: "%.1f", state.temperature))
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(ARILTheme.cream)
-                    .frame(width: 28, alignment: .trailing)
-
-                Picker("Mode", selection: $state.routeMode) {
-                    ForEach(RouteMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 220)
+            if let preview = state.preview, state.analysisStatus == .ready {
+                readyContent(preview)
             }
         }
         .padding(14)
-        .background(ARILTheme.backgroundElevated.opacity(0.95))
+        .background(theme.palette.backgroundElevated.opacity(0.95))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(ARILTheme.gold.opacity(0.25), lineWidth: 1)
+                .stroke(theme.palette.accent.opacity(0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func readyContent(_ preview: PreviewResponse) -> some View {
+        HStack(spacing: 16) {
+            metric("Grade", String(format: "%.0f%%", preview.grade.overall * 100))
+            metric("Est. tokens", "\(preview.cache.estimatedInputTokens)")
+            if let top = preview.routes.first {
+                metric("Est. cost", String(format: "$%.4f", top.estimatedCostUsd))
+            }
+            metric("Model", short(preview.recommendedModel))
+            metric(
+                "Cache",
+                preview.cache.eligible
+                    ? (preview.cache.wouldHit ? "cached" : "not cached")
+                    : "not eligible"
+            )
+        }
+
+        if !preview.grade.notes.isEmpty {
+            Text(preview.grade.notes.joined(separator: " "))
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(theme.palette.textMuted)
+        }
+
+        if !preview.alternatives.isEmpty {
+            Text("Prompt alternatives")
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(theme.palette.accent)
+            ForEach(preview.alternatives) { alt in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(alt.rationale)
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.text)
+                    Text(alt.text)
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                        .lineLimit(3)
+                    HStack {
+                        Button("Use in editor") {
+                            state.applyAlternative(alt)
+                        }
+                        .buttonStyle(.borderless)
+                        Button("Submit suggestion") {
+                            state.submitAlternative(alt)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(theme.palette.accentStrong)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(theme.palette.background)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+
+        HStack {
+            Text("Temperature")
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(theme.palette.textMuted)
+            Slider(value: $state.temperature, in: 0...2, step: 0.1)
+            Text(String(format: "%.1f", state.temperature))
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(theme.palette.text)
+                .frame(width: 28, alignment: .trailing)
+        }
     }
 
     private func metric(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title.uppercased())
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(ARILTheme.creamMuted)
+                .foregroundStyle(theme.palette.textMuted)
             Text(value)
                 .font(ARILTheme.bodyFont)
-                .foregroundStyle(ARILTheme.cream)
+                .foregroundStyle(theme.palette.text)
                 .lineLimit(1)
         }
     }

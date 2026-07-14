@@ -145,11 +145,16 @@ def score_routes(
         cost = round((in_tok + out_tok) / 1000 * rate, 6)
         fit_bonus = 0.35 if category == primary else 0.1
         cost_score = 1.0 - min(1.0, cost * 50)
-        score = round(fit_bonus + 0.4 * cost_score + 0.15, 3)
+        from app.core.preferences import confidence_boost
+
+        learn = confidence_boost(prompt, primary.value, model_id)
+        score = round(fit_bonus + 0.4 * cost_score + 0.15 + learn, 3)
         reasons = []
         if category == primary:
             reasons.append(f"Best fit for classification '{primary.value}'.")
             reasons.append(f"Mapped from Settings profile → {model_id}.")
+        if learn > 0:
+            reasons.append(f"Learned preference boost +{learn:.2f}.")
         if "mini" in model_id or "flash" in model_id:
             reasons.append("Lower cost / faster path.")
         if "opus" in model_id or "claude-sonnet" in model_id:

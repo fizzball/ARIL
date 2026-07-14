@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MessageListView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -26,16 +27,17 @@ struct MessageListView: View {
 }
 
 private struct MessageBubble: View {
+    @EnvironmentObject private var theme: ThemeStore
     let message: ChatMessage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(message.role == .user ? "You" : "ARIL")
                 .font(ARILTheme.captionFont)
-                .foregroundStyle(ARILTheme.gold)
+                .foregroundStyle(theme.palette.accent)
             Text(message.content)
                 .font(ARILTheme.bodyFont)
-                .foregroundStyle(ARILTheme.cream)
+                .foregroundStyle(theme.palette.text)
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

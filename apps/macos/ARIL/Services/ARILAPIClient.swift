@@ -88,6 +88,7 @@ final class ARILAPIClient {
         var done: StreamDoneEvent?
 
         for try await line in bytes.lines {
+            try Task.checkCancellation()
             if line.hasPrefix("event:") {
                 eventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
                 continue
@@ -127,6 +128,10 @@ final class ARILAPIClient {
 
     func compare(baseURL: String, request: CompareRequestDTO) async throws -> CompareResponseDTO {
         try await post(baseURL, path: "/v1/compare", body: request)
+    }
+
+    func prefer(baseURL: String, request: PreferRequestDTO) async throws -> PreferResponseDTO {
+        try await post(baseURL, path: "/v1/feedback/prefer", body: request)
     }
 
     private func post<Body: Encodable, Response: Decodable>(
