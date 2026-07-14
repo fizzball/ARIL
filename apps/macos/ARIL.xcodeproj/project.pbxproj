@@ -1,0 +1,386 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		11DF1396F1C5933598399718 /* ARILApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */; };
+		17A3C70916F018539718B02E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F569C76A392C4EAF2B396EB7 /* AppState.swift */; };
+		22022D6BC26C6FFE70F5A810 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464CC3D69B6588E73D3EF50F /* APIModels.swift */; };
+		43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */; };
+		4B8284C195B20A12359734B4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F7258E2BF863107D0D1C2F /* ContentView.swift */; };
+		5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */; };
+		647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */; };
+		8CC21960279B31457BD24A9C /* ARILAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */; };
+		9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */; };
+		B8EB569822A0AC3A6D7FFD52 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51A5248C42FB7C5D311DC40B /* SettingsView.swift */; };
+		C587B43D4CB59922264CEB43 /* ARILTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 796899604D33C1CBC8518B48 /* ARILTheme.swift */; };
+		C9EEFE93AA37F8AEA8B378A6 /* ChatDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */; };
+		D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */; };
+		D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1416251B652DE7DE8C09313A /* MessageListView.swift */; };
+		EF19B318BFD33393131FB656 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ECDA663B4CC8289E453914E /* Models.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1416251B652DE7DE8C09313A /* MessageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListView.swift; sourceTree = "<group>"; };
+		464CC3D69B6588E73D3EF50F /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
+		51A5248C42FB7C5D311DC40B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligencePanelView.swift; sourceTree = "<group>"; };
+		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		796899604D33C1CBC8518B48 /* ARILTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILTheme.swift; sourceTree = "<group>"; };
+		9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusFooterView.swift; sourceTree = "<group>"; };
+		9ECDA663B4CC8289E453914E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILAPIClient.swift; sourceTree = "<group>"; };
+		AF7F3C1872C5C680482304E6 /* ARIL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ARIL.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILApp.swift; sourceTree = "<group>"; };
+		D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDetailView.swift; sourceTree = "<group>"; };
+		E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		EBD5E146E4B831B21010D88F /* ARIL.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ARIL.entitlements; sourceTree = "<group>"; };
+		F569C76A392C4EAF2B396EB7 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyHeroView.swift; sourceTree = "<group>"; };
+		F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBarView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0443B34F40727214504FC1ED = {
+			isa = PBXGroup;
+			children = (
+				A5EC03571E8C74A754CF1DE1 /* ARIL */,
+				BC58FD019650C2A73EEFE93A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		0493559D824A550F9237AB90 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F569C76A392C4EAF2B396EB7 /* AppState.swift */,
+				9ECDA663B4CC8289E453914E /* Models.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		185F87B97D19EF971FC088FC /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				796899604D33C1CBC8518B48 /* ARILTheme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		96F353F44338F8C77459BEDF /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				464CC3D69B6588E73D3EF50F /* APIModels.swift */,
+				A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		9BCAA5F12B1E297FD764BD82 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */,
+				73F7258E2BF863107D0D1C2F /* ContentView.swift */,
+				F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */,
+				F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */,
+				5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */,
+				1416251B652DE7DE8C09313A /* MessageListView.swift */,
+				51A5248C42FB7C5D311DC40B /* SettingsView.swift */,
+				E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */,
+				9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A5EC03571E8C74A754CF1DE1 /* ARIL */ = {
+			isa = PBXGroup;
+			children = (
+				0493559D824A550F9237AB90 /* Models */,
+				96F353F44338F8C77459BEDF /* Services */,
+				185F87B97D19EF971FC088FC /* Theme */,
+				9BCAA5F12B1E297FD764BD82 /* Views */,
+				EBD5E146E4B831B21010D88F /* ARIL.entitlements */,
+				B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */,
+			);
+			path = ARIL;
+			sourceTree = "<group>";
+		};
+		BC58FD019650C2A73EEFE93A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AF7F3C1872C5C680482304E6 /* ARIL.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		26AE9FACA9736C59658894DA /* ARIL */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 10EC3AF507DECF6036430ACF /* Build configuration list for PBXNativeTarget "ARIL" */;
+			buildPhases = (
+				F32F8AC0CAF78498472E4BCD /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ARIL;
+			packageProductDependencies = (
+			);
+			productName = ARIL;
+			productReference = AF7F3C1872C5C680482304E6 /* ARIL.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B33028128746AC0E6BFCBF09 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 505E55EBB4BD2214D7873DAB /* Build configuration list for PBXProject "ARIL" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 0443B34F40727214504FC1ED;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = BC58FD019650C2A73EEFE93A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				26AE9FACA9736C59658894DA /* ARIL */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F32F8AC0CAF78498472E4BCD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				22022D6BC26C6FFE70F5A810 /* APIModels.swift in Sources */,
+				8CC21960279B31457BD24A9C /* ARILAPIClient.swift in Sources */,
+				11DF1396F1C5933598399718 /* ARILApp.swift in Sources */,
+				C587B43D4CB59922264CEB43 /* ARILTheme.swift in Sources */,
+				17A3C70916F018539718B02E /* AppState.swift in Sources */,
+				C9EEFE93AA37F8AEA8B378A6 /* ChatDetailView.swift in Sources */,
+				4B8284C195B20A12359734B4 /* ContentView.swift in Sources */,
+				9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */,
+				D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */,
+				43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */,
+				D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */,
+				EF19B318BFD33393131FB656 /* Models.swift in Sources */,
+				B8EB569822A0AC3A6D7FFD52 /* SettingsView.swift in Sources */,
+				5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */,
+				647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		57FBF9FDEDD500BBA9829662 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		64E3840D32EFC20772DD94EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 ARIL";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
+				PRODUCT_NAME = ARIL;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		8027498FFDDEEE1BD4DE11EE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		DAD30C8211CCC0807471FA67 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 ARIL";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
+				PRODUCT_NAME = ARIL;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		10EC3AF507DECF6036430ACF /* Build configuration list for PBXNativeTarget "ARIL" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				64E3840D32EFC20772DD94EB /* Debug */,
+				DAD30C8211CCC0807471FA67 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		505E55EBB4BD2214D7873DAB /* Build configuration list for PBXProject "ARIL" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8027498FFDDEEE1BD4DE11EE /* Debug */,
+				57FBF9FDEDD500BBA9829662 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B33028128746AC0E6BFCBF09 /* Project object */;
+}

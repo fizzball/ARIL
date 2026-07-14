@@ -1,0 +1,57 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @EnvironmentObject private var state: AppState
+
+    var body: some View {
+        TabView {
+            Form {
+                TextField("Gateway URL", text: $state.gatewayURL)
+                HStack {
+                    Button("Check connection") {
+                        Task { await state.refreshHealth() }
+                    }
+                    Text(state.gatewayStatus)
+                        .foregroundStyle(state.gatewayReady ? Color.secondary : Color.red)
+                }
+                Slider(value: $state.temperature, in: 0...2, step: 0.1) {
+                    Text("Default temperature")
+                }
+                Text(String(format: "%.1f", state.temperature))
+            }
+            .padding()
+            .tabItem { Label("Gateway", systemImage: "network") }
+
+            Form {
+                modelPicker("Coding", selection: $state.routingProfile.coding)
+                modelPicker("Security", selection: $state.routingProfile.security)
+                modelPicker("Cost", selection: $state.routingProfile.cost)
+                modelPicker("Performance", selection: $state.routingProfile.performance)
+                modelPicker("Confidence", selection: $state.routingProfile.confidence)
+                Text("These mappings drive Auto route recommendations.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .tabItem { Label("Routing", systemImage: "arrow.triangle.branch") }
+        }
+        .frame(width: 520, height: 320)
+    }
+
+    private func modelPicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(
+                [
+                    "openai/gpt-4.1",
+                    "openai/gpt-4.1-mini",
+                    "anthropic/claude-sonnet-4",
+                    "anthropic/claude-opus-4",
+                    "ollama/llama3.2",
+                ],
+                id: \.self
+            ) { model in
+                Text(model).tag(model)
+            }
+        }
+    }
+}

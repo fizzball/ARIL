@@ -1,0 +1,60 @@
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode / Swift
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+.swiftpm/
+Packages/
+Package.resolved
+!.xcode.env
+apps/macos/*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+*.egg
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+credentials.json
+secrets/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Logs / local data
+*.log
+data/
+.local/
+tmp/
+
+# Node (schemas tooling)
+node_modules/

@@ -1,0 +1,19 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    aril_env: str = "development"
+    aril_host: str = "127.0.0.1"
+    aril_port: int = 8741
+    aril_log_level: str = "info"
+    aril_default_temperature: float = 0.7
+    aril_cache_token_threshold: int = 1024
+
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    ollama_base_url: str = "http://127.0.0.1:11434"
+
+
+settings = Settings()
