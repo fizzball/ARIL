@@ -20,7 +20,6 @@ struct SidebarView: View {
                 sidebarButton("Preferences", systemImage: "gearshape", shortcut: "⌘,") {
                     openSettings()
                 }
-                sidebarButton("Capabilities", systemImage: "sparkles") {}
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
@@ -48,10 +47,7 @@ struct SidebarView: View {
 
             List(selection: $state.selectedSessionID) {
                 ForEach(filtered) { session in
-                    Text(session.title)
-                        .font(ARILTheme.bodyFont)
-                        .foregroundStyle(theme.palette.text)
-                        .lineLimit(1)
+                    SessionRow(session: session)
                         .tag(session.id)
                         .listRowBackground(Color.clear)
                 }
@@ -60,15 +56,6 @@ struct SidebarView: View {
             .scrollContentBackground(.hidden)
 
             Spacer(minLength: 0)
-
-            HStack(spacing: 16) {
-                Image(systemName: "house")
-                Image(systemName: "plus")
-                Image(systemName: "ellipsis")
-                Spacer()
-            }
-            .foregroundStyle(theme.palette.textMuted)
-            .padding(14)
         }
         .background(theme.palette.sidebar)
     }
@@ -96,5 +83,36 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SessionRow: View {
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var theme: ThemeStore
+    let session: ChatSession
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(session.title)
+                .font(ARILTheme.bodyFont)
+                .foregroundStyle(theme.palette.text)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if hovering {
+                Button {
+                    Task { await state.deleteSession(session.id) }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.palette.danger)
+                }
+                .buttonStyle(.plain)
+                .help("Delete session")
+            }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }

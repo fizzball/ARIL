@@ -9,6 +9,20 @@ enum AnalysisStatus: Equatable {
     case ready
 }
 
+enum GenerationPhase: Equatable {
+    case idle
+    case thinking
+    case streaming
+
+    var label: String {
+        switch self {
+        case .idle: return ""
+        case .thinking: return "Thinking"
+        case .streaming: return "Streaming"
+        }
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     static let modelCatalog = [
@@ -19,6 +33,9 @@ final class AppState: ObservableObject {
         "google/gemini-2.5-flash",
         "meta-llama/llama-3.3-70b-instruct",
     ]
+
+    /// Seconds of typing idle before prompt analysis runs.
+    static let analysisIdleSeconds = 2
 
     @Published var sessions: [ChatSession] = []
     @Published var selectedSessionID: UUID?
@@ -36,19 +53,26 @@ final class AppState: ObservableObject {
     @Published var analysisStatus: AnalysisStatus = .idle
     @Published var isPreviewing: Bool = false
     @Published var isSending: Bool = false
+    @Published var generationPhase: GenerationPhase = .idle
+    @Published var generationElapsedMs: Int = 0
     @Published var routingProfile: RoutingProfile = AppState.loadRoutingProfile()
     @Published var showIntelligencePanel: Bool = false
+    @Published var showAbout: Bool = false
     @Published var lastError: String?
     @Published var compareResults: [CompareResultDTO] = []
     @Published var lastCacheLabel: String = "—"
+    @Published var lastLatencyMs: Int?
+    @Published var estimatedLatencyMs: Int?
     @Published var preferredCompareModel: String?
     @Published var pendingAttachments: [PendingAttachment] = []
     @Published var webSearchEnabled: Bool = false
+    @Published var userDisplayName: String
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
     private var previewTask: Task<Void, Never>?
     private var sendTask: Task<Void, Never>?
+    private var generationTimerTask: Task<Void, Never>?
     private var lastUserPromptForPrefer: String = ""
 
     var selectedSession: ChatSession? {
@@ -60,6 +84,18 @@ final class AppState: ObservableObject {
         return isPreviewing
     }
 
+    /// Display name for user messages (falls back to "You").
+    var userLabel: String {
+        let trimmed = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "You" : trimmed
+    }
+
+    var appVersionString: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.2"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "32"
+        return "\(short) (\(build))"
+    }
+
     init() {
         let defaults = UserDefaults.standard
         let storedDefault = defaults.string(forKey: "aril.defaultModel") ?? "openai/gpt-4.1"
@@ -67,6 +103,7 @@ final class AppState: ObservableObject {
         selectedModel = defaults.string(forKey: "aril.lastModel") ?? storedDefault
         gatewayURL = defaults.string(forKey: "aril.gatewayURL") ?? "http://127.0.0.1:8741"
         soloMode = defaults.object(forKey: "aril.soloMode") as? Bool ?? true
+        userDisplayName = defaults.string(forKey: "aril.userDisplayName") ?? ""
         Task { await bootstrap() }
     }
 
@@ -94,6 +131,46 @@ final class AppState: ObservableObject {
         preferredCompareModel = nil
         pendingAttachments = []
         Task { await persistSelectedSession() }
+    }
+
+    func deleteSession(_ id: UUID) async {
+        sessions.removeAll { $0.id == id }
+        if selectedSessionID == id {
+            selectedSessionID = sessions.first?.id
+            draft = ""
+            preview = nil
+            showIntelligencePanel = false
+            analysisStatus = .idle
+            compareResults = []
+            preferredCompareModel = nil
+            pendingAttachments = []
+        }
+        if sessions.isEmpty {
+            createSession()
+        }
+        do {
+            try await client.deleteSession(baseURL: gatewayURL, id: id.uuidString)
+        } catch {
+            // Local removal already applied; gateway may be offline.
+            lastError = error.localizedDescription
+        }
+    }
+
+    func deleteAllSessions() async {
+        let ids = sessions.map(\.id)
+        sessions = []
+        selectedSessionID = nil
+        draft = ""
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        compareResults = []
+        preferredCompareModel = nil
+        pendingAttachments = []
+        for id in ids {
+            try? await client.deleteSession(baseURL: gatewayURL, id: id.uuidString)
+        }
+        createSession()
     }
 
     func refreshHealth() async {
@@ -157,7 +234,43 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(model, forKey: "aril.defaultModel")
     }
 
-    /// Called on every draft change — panel appears immediately; analysis after 3s idle.
+    func saveUserDisplayName() {
+        UserDefaults.standard.set(userDisplayName, forKey: "aril.userDisplayName")
+    }
+
+    /// Switching modes clears the draft so analysis starts fresh for the new mode.
+    func changeRouteMode(to mode: RouteMode) {
+        guard mode != routeMode else { return }
+        routeMode = mode
+        resetPromptForModeChange()
+    }
+
+    func reusePrompt(_ text: String) {
+        // Strip attachment suffix that we append for display.
+        let cleaned = text
+            .components(separatedBy: "\n\n[Attached:")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? text
+        draft = cleaned.hasPrefix("[Attached:") ? "" : cleaned
+        schedulePreview()
+    }
+
+    private func resetPromptForModeChange() {
+        previewTask?.cancel()
+        draft = ""
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        compareResults = []
+        preferredCompareModel = nil
+        estimatedLatencyMs = nil
+        lastError = nil
+        if routeMode == .manual {
+            selectedModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
+        }
+    }
+
+    /// Called on every draft change — panel appears immediately; analysis after idle.
     func schedulePreview() {
         previewTask?.cancel()
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -165,15 +278,18 @@ final class AppState: ObservableObject {
             showIntelligencePanel = false
             preview = nil
             analysisStatus = .idle
+            estimatedLatencyMs = nil
             return
         }
 
         showIntelligencePanel = true
         preview = nil
-        analysisStatus = .analysing(secondsRemaining: 3)
+        estimatedLatencyMs = nil
+        let idle = Self.analysisIdleSeconds
+        analysisStatus = .analysing(secondsRemaining: idle)
 
         previewTask = Task {
-            for remaining in [3, 2, 1] {
+            for remaining in stride(from: idle, through: 1, by: -1) {
                 guard !Task.isCancelled else { return }
                 analysisStatus = .analysing(secondsRemaining: remaining)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -191,14 +307,13 @@ final class AppState: ObservableObject {
         lastError = nil
         defer { isPreviewing = false }
         do {
-            let modelForPreview = routeMode == .manual ? selectedModel : selectedModel
             let result = try await client.preview(
                 baseURL: gatewayURL,
                 request: PreviewRequest(
                     prompt: text,
                     temperature: temperature,
                     routeMode: routeMode,
-                    preferredModel: modelForPreview,
+                    preferredModel: selectedModel,
                     sessionId: selectedSessionID?.uuidString,
                     routingProfile: APIRoutingProfile(routingProfile),
                     enhanceAlternatives: true
@@ -208,14 +323,27 @@ final class AppState: ObservableObject {
             showIntelligencePanel = true
             analysisStatus = .ready
             updateCacheLabel(from: result)
+            // Auto adopts the recommended model. Manual/Compare keep the user's pick
+            // (still run analysis for grade, fit, cost, alternatives).
             if routeMode == .auto {
                 selectedModel = result.recommendedModel
                 objectWillChange.send()
             }
-            // Manual keeps the user's explicit last selection
+            await refreshEstimatedLatency(for: result.recommendedModel)
         } catch {
             lastError = error.localizedDescription
             analysisStatus = .idle
+        }
+    }
+
+    private func refreshEstimatedLatency(for model: String) async {
+        do {
+            let response = try await client.probe(baseURL: gatewayURL, models: [model])
+            if let ms = response.results.first?.latencyMs {
+                estimatedLatencyMs = ms
+            }
+        } catch {
+            // Probe is best-effort; keep last known or nil.
         }
     }
 
@@ -229,8 +357,33 @@ final class AppState: ObservableObject {
     func stopGeneration() {
         sendTask?.cancel()
         sendTask = nil
+        endGenerationTracking(error: "Generation stopped")
+    }
+
+    private func beginGenerationTracking() {
+        generationPhase = .thinking
+        generationElapsedMs = 0
+        generationTimerTask?.cancel()
+        let started = Date()
+        generationTimerTask = Task {
+            while !Task.isCancelled {
+                generationElapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+    }
+
+    private func endGenerationTracking(error: String? = nil) {
+        generationTimerTask?.cancel()
+        generationTimerTask = nil
+        if generationElapsedMs > 0 {
+            lastLatencyMs = generationElapsedMs
+        }
+        generationPhase = .idle
         isSending = false
-        lastError = "Generation stopped"
+        if let error {
+            lastError = error
+        }
     }
 
     private func performSend(promptOverride: String?) async {
@@ -241,13 +394,16 @@ final class AppState: ObservableObject {
             draft = text
         }
 
+        // Always analyse first when we have text (including Manual — grades/alternatives),
+        // but Manual never adopts the recommended model.
         if !text.isEmpty, (preview == nil || analysisStatus != .ready) {
             await runPreview()
         }
 
         isSending = true
         lastError = nil
-        defer { isSending = false }
+        beginGenerationTracking()
+        defer { endGenerationTracking() }
 
         ensureSession()
         guard let sid = selectedSessionID,
@@ -268,11 +424,15 @@ final class AppState: ObservableObject {
         draft = ""
         let attachmentsForSend = pendingAttachments
         pendingAttachments = []
+        let lockedManualModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
         let compareModels: [String] = {
             if let routes = preview?.routes, routes.count >= 2 {
                 return Array(routes.prefix(2).map(\.modelId))
             }
-            return [selectedModel, routingProfile.cost]
+            // Distinct fallback pair so Compare always has two models
+            let a = routeMode == .manual ? lockedManualModel : selectedModel
+            let b = (a == routingProfile.cost) ? routingProfile.confidence : routingProfile.cost
+            return a == b ? [a, defaultModel] : [a, b]
         }()
         let cacheEligible = preview?.cache.eligible ?? false
         preview = nil
@@ -294,7 +454,7 @@ final class AppState: ObservableObject {
         }
 
         if routeMode == .manual {
-            selectedModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
+            selectedModel = lockedManualModel
         }
 
         let assistantID = UUID()
@@ -328,11 +488,17 @@ final class AppState: ObservableObject {
                           let i = self.sessions.firstIndex(where: { $0.id == sid }),
                           let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
                     else { return }
+                    if self.generationPhase == .thinking {
+                        self.generationPhase = .streaming
+                    }
                     self.sessions[i].messages[m].content += token
                 }
             }
             if Task.isCancelled { return }
             lastCacheLabel = (done.cached ?? false) ? "cached" : "not cached"
+            if let ms = done.latencyMs {
+                lastLatencyMs = ms
+            }
             sessions[idx].updatedAt = .now
             await refreshHealth()
         } catch is CancellationError {
@@ -346,6 +512,7 @@ final class AppState: ObservableObject {
                     sessions[idx].messages[m].content = response.message.content
                 }
                 lastCacheLabel = response.cached ? "cached" : "not cached"
+                generationPhase = .streaming
             } catch {
                 lastError = error.localizedDescription
                 sessions[idx].messages.removeAll { $0.id == assistantID }
@@ -354,6 +521,7 @@ final class AppState: ObservableObject {
     }
 
     private func sendCompare(sessionID: UUID, index: Int, history: [APIChatMessage], models: [String]) async {
+        generationPhase = .thinking
         do {
             let response = try await client.compare(
                 baseURL: gatewayURL,
@@ -368,8 +536,12 @@ final class AppState: ObservableObject {
                 )
             )
             if Task.isCancelled { return }
+            generationPhase = .streaming
             compareResults = response.results
             lastCacheLabel = response.results.contains(where: \.cached) ? "cached" : "not cached"
+            if let fastest = response.results.map(\.latencyMs).min() {
+                lastLatencyMs = fastest
+            }
             sessions[index].updatedAt = .now
             await refreshHealth()
         } catch {

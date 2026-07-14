@@ -244,6 +244,7 @@ struct StreamDoneEvent: Codable {
     let outputTokens: Int?
     let costUsd: Double?
     let cached: Bool?
+    let latencyMs: Int?
 
     enum CodingKeys: String, CodingKey {
         case model, cached
@@ -252,7 +253,27 @@ struct StreamDoneEvent: Codable {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case costUsd = "cost_usd"
+        case latencyMs = "latency_ms"
     }
+}
+
+struct ProbeRequestDTO: Encodable {
+    let models: [String]
+}
+
+struct ProbeResultDTO: Codable {
+    let model: String
+    let latencyMs: Int
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model, error
+        case latencyMs = "latency_ms"
+    }
+}
+
+struct ProbeResponseDTO: Codable {
+    let results: [ProbeResultDTO]
 }
 
 struct StreamTokenEvent: Codable {

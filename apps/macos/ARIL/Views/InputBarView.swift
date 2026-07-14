@@ -8,13 +8,17 @@ struct InputBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Picker("Mode", selection: $state.routeMode) {
+                Picker("Mode", selection: Binding(
+                    get: { state.routeMode },
+                    set: { state.changeRouteMode(to: $0) }
+                )) {
                     ForEach(RouteMode.allCases) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
+                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Compare runs two models.")
 
                 if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
                     Text(cat.label.uppercased())
@@ -24,12 +28,11 @@ struct InputBarView: View {
                 }
 
                 Toggle(isOn: $state.webSearchEnabled) {
-                    Label("Web", systemImage: "globe")
+                    Text("Web")
                         .font(ARILTheme.captionFont)
                 }
-                .toggleStyle(.button)
+                .toggleStyle(.checkbox)
                 .help("Enable OpenRouter live web search for this send")
-                .foregroundStyle(state.webSearchEnabled ? theme.palette.accent : theme.palette.textMuted)
 
                 Spacer()
             }
@@ -102,11 +105,7 @@ struct InputBarView: View {
                 } label: {
                     Text(shortModel(state.selectedModel))
                         .font(ARILTheme.captionFont)
-                        .foregroundStyle(
-                            state.selectedModel == state.defaultModel
-                                ? theme.palette.preferredHighlight
-                                : theme.palette.textMuted
-                        )
+                        .foregroundStyle(modelLabelColor)
                 }
                 .menuStyle(.borderlessButton)
                 .help(modelHelp)
@@ -161,11 +160,26 @@ struct InputBarView: View {
         .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.35 : 0.08), radius: 12, y: 4)
     }
 
-    private var modelHelp: String {
-        if state.routeMode == .auto {
-            return "Auto-selected for detected category"
+    private var modelLabelColor: Color {
+        // Red = locked / not auto-optimised (Manual or explicit pick outside Auto).
+        if state.routeMode == .manual {
+            return theme.palette.danger
         }
-        return state.selectedModel == state.defaultModel ? "Default model" : "Selected model"
+        if state.selectedModel == state.defaultModel {
+            return theme.palette.preferredHighlight
+        }
+        return theme.palette.textMuted
+    }
+
+    private var modelHelp: String {
+        switch state.routeMode {
+        case .auto:
+            return "Auto-selected for detected category"
+        case .manual:
+            return "Manual mode — model is locked (shown in red) and will not be swapped by ARIL"
+        case .compare:
+            return "Compare mode — two models will be evaluated side by side"
+        }
     }
 
     private func shortModel(_ id: String) -> String {

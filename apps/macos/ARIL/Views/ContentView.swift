@@ -1,9 +1,9 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
-    @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -16,17 +16,20 @@ struct ContentView: View {
         .background(theme.palette.background)
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
-                Button { Task { await state.refreshHealth() } } label: {
-                    Image(systemName: "arrow.clockwise")
+                Button {
+                    state.shutdown()
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
                 }
-                .help("Refresh gateway status")
+                .help("Quit ARIL")
 
                 Button {
-                    openSettings()
+                    state.showAbout = true
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "info.circle")
                 }
-                .help("Preferences (default model, categories, themes)")
+                .help("About ARIL")
             }
         }
         .preferredColorScheme(theme.palette.colorScheme)

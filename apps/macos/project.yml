@@ -7,8 +7,8 @@ options:
   groupSortPosition: top
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.3.2"
+    CURRENT_PROJECT_VERSION: "32"
     SWIFT_VERSION: "5.10"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
 targets:
@@ -23,11 +23,13 @@ targets:
         PRODUCT_NAME: ARIL
         INFOPLIST_KEY_CFBundleDisplayName: ARIL
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        INFOPLIST_KEY_NSHumanReadableCopyright: Copyright © 2026 ARIL
+        INFOPLIST_KEY_NSHumanReadableCopyright: Copyright © 2026 Ramon Ali
         GENERATE_INFOPLIST_FILE: YES
         COMBINE_HIDPI_IMAGES: YES
         ENABLE_HARDENED_RUNTIME: YES
-        # Allow local gateway during Phase 0
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "0.3.2"
+        CURRENT_PROJECT_VERSION: "32"
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
     entitlements:
       path: ARIL/ARIL.entitlements

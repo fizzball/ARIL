@@ -30,9 +30,10 @@ struct IntelligencePanelView: View {
                     Text(preview.classification.primary.label.uppercased())
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.textMuted)
-                    Text(String(format: "%.0f%% fit", preview.classification.confidence * 100))
-                        .font(ARILTheme.captionFont)
-                        .foregroundStyle(theme.palette.textMuted)
+                    HelpMetricLabel(
+                        title: String(format: "%.0f%% fit", preview.classification.confidence * 100),
+                        help: "How well the prompt matches the detected category. Higher means routing is more confident."
+                    )
                 }
             }
 
@@ -61,16 +62,34 @@ struct IntelligencePanelView: View {
     private func readyContent(_ preview: PreviewResponse) -> some View {
         HStack(spacing: 16) {
             metric(
-                "Prompt Grade",
+                "Grade",
                 String(format: "%.0f%%", preview.grade.overall * 100),
                 help: "Prompt quality score (clarity, constraints, success criteria, token efficiency) — not model accuracy."
             )
-            metric("Est. tokens", "\(preview.cache.estimatedInputTokens)")
+            metric("Tokens", "\(preview.cache.estimatedInputTokens)")
             if let top = preview.routes.first {
-                metric("Est. cost", String(format: "$%.4f", top.estimatedCostUsd))
+                metric(
+                    "Cost",
+                    String(format: "$%.4f", top.estimatedCostUsd),
+                    help: "Estimated USD cost for the top recommended route (input + expected output)."
+                )
+            }
+            if let latency = state.estimatedLatencyMs ?? state.lastLatencyMs {
+                metric(
+                    "Latency",
+                    "\(latency)ms",
+                    help: "Round-trip probe latency for the recommended model, or last completed request time."
+                )
             }
             metric("Category", preview.classification.primary.label)
-            metric("Model", short(preview.recommendedModel))
+            metric(
+                "Model",
+                short(state.routeMode == .manual ? state.selectedModel : preview.recommendedModel),
+                valueColor: state.routeMode == .manual ? theme.palette.danger : theme.palette.text,
+                help: state.routeMode == .manual
+                    ? "Manual mode keeps this model (highlighted red) — ARIL will not swap it."
+                    : "Recommended model for this prompt."
+            )
             if preview.cache.eligible {
                 metric("Cache", preview.cache.wouldHit ? "cached" : "not cached")
             }
@@ -126,20 +145,70 @@ struct IntelligencePanelView: View {
         }
     }
 
-    private func metric(_ title: String, _ value: String, help: String? = nil) -> some View {
+    private func metric(
+        _ title: String,
+        _ value: String,
+        valueColor: Color? = nil,
+        help: String? = nil
+    ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
+            if let help {
+                HelpMetricTitle(title: title, help: help)
+            } else {
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.palette.textMuted)
+            }
             Text(value)
                 .font(ARILTheme.bodyFont)
-                .foregroundStyle(theme.palette.text)
+                .foregroundStyle(valueColor ?? theme.palette.text)
                 .lineLimit(1)
         }
-        .help(help ?? "")
     }
 
     private func short(_ id: String) -> String {
         id.split(separator: "/").last.map(String.init) ?? id
+    }
+}
+
+/// Compact label with hoverable info icon (cursor changes to indicate help is available).
+private struct HelpMetricTitle: View {
+    @EnvironmentObject private var theme: ThemeStore
+    let title: String
+    let help: String
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(theme.palette.textMuted)
+            Image(systemName: hovering ? "info.circle.fill" : "info.circle")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(hovering ? theme.palette.accent : theme.palette.textMuted.opacity(0.7))
+                .onHover { hovering = $0 }
+        }
+        .help(help)
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct HelpMetricLabel: View {
+    @EnvironmentObject private var theme: ThemeStore
+    let title: String
+    let help: String
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title)
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(theme.palette.textMuted)
+            Image(systemName: hovering ? "info.circle.fill" : "info.circle")
+                .font(.system(size: 9))
+                .foregroundStyle(hovering ? theme.palette.accent : theme.palette.textMuted.opacity(0.7))
+        }
+        .help(help)
+        .onHover { hovering = $0 }
     }
 }

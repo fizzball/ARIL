@@ -7,6 +7,16 @@ struct EmptyHeroView: View {
     var body: some View {
         VStack(spacing: 14) {
             Spacer()
+            Image("ARILMark")
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 88, height: 88)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
+                .opacity(appeared ? 1 : 0)
+                .scaleEffect(appeared ? 1 : 0.92)
+
             Text("ARIL")
                 .font(ARILTheme.wordmarkFont)
                 .foregroundStyle(theme.palette.text)
@@ -14,7 +24,7 @@ struct EmptyHeroView: View {
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 8)
 
-            Text("Adaptive Routing Intelligent Layer")
+            Text("Adaptive Routing Intelligence Layer")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.accent)
                 .opacity(appeared ? 1 : 0)

@@ -27,11 +27,24 @@ struct StatusFooterView: View {
                     )
             }
 
-            if let err = state.lastError {
+            if state.generationPhase != .idle {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("\(state.generationPhase.label) · \(elapsedLabel)")
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.accent)
+                        .monospacedDigit()
+                }
+            } else if let err = state.lastError {
                 Text(err)
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.danger)
                     .lineLimit(1)
+            } else if let latency = state.lastLatencyMs {
+                Text("Last \(latency)ms")
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.textMuted.opacity(0.8))
             }
 
             Spacer()
@@ -39,7 +52,7 @@ struct StatusFooterView: View {
             Text(state.routeMode.label)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted)
-            Text("# v0.3.1")
+            Text("# v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.2")")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted.opacity(0.7))
         }
@@ -51,5 +64,11 @@ struct StatusFooterView: View {
                 .fill(theme.palette.hairline)
                 .frame(height: 1)
         }
+    }
+
+    private var elapsedLabel: String {
+        let ms = state.generationElapsedMs
+        if ms < 1000 { return "\(ms)ms" }
+        return String(format: "%.1fs", Double(ms) / 1000.0)
     }
 }

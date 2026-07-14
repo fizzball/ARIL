@@ -40,13 +40,23 @@ struct SettingsView: View {
                     state.saveGatewayURL()
                     Task { await state.refreshHealth() }
                 }
-                Text(state.gatewayStatus)
-                    .foregroundStyle(state.gatewayReady ? Color.secondary : Color.red)
+                Text(state.gatewayReady ? "Gateway ready" : "Gateway not ready")
+                    .foregroundStyle(state.gatewayReady ? Color.green : Color.red)
             }
             Slider(value: $state.temperature, in: 0...2, step: 0.1) {
                 Text("Default temperature")
             }
             Text(String(format: "%.1f", state.temperature))
+
+            Section("Sessions") {
+                Text("Removes all chat history from this Mac and the local gateway.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Delete all past sessions", role: .destructive) {
+                    Task { await state.deleteAllSessions() }
+                }
+                .disabled(state.sessions.isEmpty)
+            }
         }
         .padding()
     }
@@ -102,17 +112,31 @@ struct SettingsView: View {
 
     private var appearanceTab: some View {
         Form {
-            Picker("Theme", selection: $theme.option) {
-                ForEach(AppThemeOption.allCases) { opt in
-                    Text(opt.label).tag(opt)
-                }
+            Section("Identity") {
+                TextField("Your name", text: $state.userDisplayName)
+                    .onSubmit { state.saveUserDisplayName() }
+                    .onChange(of: state.userDisplayName) { _, _ in
+                        state.saveUserDisplayName()
+                    }
+                Text("Replaces the “You” label on your messages in chat. Leave blank to keep “You”.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .pickerStyle(.radioGroup)
-            Text("Noir, Slate, Light, and Forest. Applies across the whole client.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            Section("Theme") {
+                Picker("Theme", selection: $theme.option) {
+                    ForEach(AppThemeOption.allCases) { opt in
+                        Text(opt.label).tag(opt)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                Text("Noir, Slate, Light, and Forest. Applies across the whole client.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
+        .formStyle(.grouped)
     }
 
     private func recommended(for category: RouteCategory) -> [String] {

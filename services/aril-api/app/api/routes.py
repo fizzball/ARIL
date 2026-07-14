@@ -187,6 +187,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     key = prompt_cache.make_key(messages=msg_dicts, model=model, temperature=temperature)
 
     async def event_generator():
+        stream_started = time.perf_counter()
         # Cache short-circuit for large prompts (skip when web/attachments)
         if req.use_cache and not req.web_search and not req.attachments and prompt_cache.eligible(est):
             hit = prompt_cache.peek(key)
@@ -202,6 +203,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     "output_tokens": int(hit.get("output_tokens") or 0),
                     "cost_usd": float(hit.get("cost_usd") or 0.0) * 0.45,
                     "cached": True,
+                    "latency_ms": int((time.perf_counter() - stream_started) * 1000),
                 }
                 assistant = ChatMessage(role="assistant", content=content)
                 session_store.upsert_session(
@@ -276,6 +278,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 messages=list(req.messages) + [assistant],
             )
         )
+        meta["latency_ms"] = int((time.perf_counter() - stream_started) * 1000)
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
 
     return StreamingResponse(

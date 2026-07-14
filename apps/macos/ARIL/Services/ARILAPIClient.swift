@@ -66,6 +66,13 @@ final class ARILAPIClient {
         return try decode(data)
     }
 
+    func deleteSession(baseURL: String, id: String) async throws {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/sessions/\(id)"))
+        req.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+    }
+
     /// Consume SSE from `/v1/chat/stream`.
     func chatStream(
         baseURL: String,
@@ -86,6 +93,8 @@ final class ARILAPIClient {
         var eventName = "message"
         var dataLines: [String] = []
         var done: StreamDoneEvent?
+        var receivedTokens = false
+        var lastModel: String?
 
         for try await line in bytes.lines {
             try Task.checkCancellation()
@@ -106,6 +115,8 @@ final class ARILAPIClient {
 
                 if name == "token" {
                     if let token = try? decoder.decode(StreamTokenEvent.self, from: Data(payload.utf8)) {
+                        receivedTokens = true
+                        if let model = token.model { lastModel = model }
                         onToken(token.content)
                     }
                 } else if name == "done" {
@@ -120,14 +131,30 @@ final class ARILAPIClient {
             }
         }
 
-        guard let done else {
-            throw ARILAPIError.stream("Stream ended without done event")
+        if let done { return done }
+
+        // Connection closed after tokens — treat as a finished stream rather than a cryptic error.
+        if receivedTokens {
+            return StreamDoneEvent(
+                sessionId: request.sessionId ?? "",
+                model: lastModel ?? request.model ?? "unknown",
+                routeCategory: nil,
+                inputTokens: nil,
+                outputTokens: nil,
+                costUsd: nil,
+                cached: false,
+                latencyMs: nil
+            )
         }
-        return done
+        throw ARILAPIError.stream("No response received from the model. Try sending again.")
     }
 
     func compare(baseURL: String, request: CompareRequestDTO) async throws -> CompareResponseDTO {
         try await post(baseURL, path: "/v1/compare", body: request)
+    }
+
+    func probe(baseURL: String, models: [String]) async throws -> ProbeResponseDTO {
+        try await post(baseURL, path: "/v1/probe", body: ProbeRequestDTO(models: models))
     }
 
     func prefer(baseURL: String, request: PreferRequestDTO) async throws -> PreferResponseDTO {

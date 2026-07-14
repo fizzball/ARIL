@@ -25,6 +25,11 @@ struct ARILApp: App {
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
+            CommandGroup(replacing: .appInfo) {
+                Button("About ARIL") {
+                    appState.showAbout = true
+                }
+            }
         }
 
         Settings {
