@@ -37,6 +37,22 @@ final class AppState: ObservableObject {
     /// Factory default for Preferences → Models (app default picker).
     static let factoryDefaultModel = "openai/gpt-4.1"
 
+    /// Built-in USD / 1K rates used when OpenRouter isn’t configured or pricing can’t be fetched.
+    /// Keep in sync with `services/aril-api/app/routing/pricing.py` FALLBACK_COST_PER_1K.
+    static let fallbackModelPricing: [String: (promptPer1k: Double, completionPer1k: Double)] = [
+        "openai/gpt-4.1": (0.002, 0.008),
+        "openai/gpt-4.1-mini": (0.0004, 0.0016),
+        "anthropic/claude-sonnet-4": (0.003, 0.015),
+        "anthropic/claude-opus-4": (0.015, 0.075),
+        "google/gemini-2.5-flash": (0.0003, 0.0025),
+        "google/gemini-2.5-flash-image": (0.0003, 0.0025),
+        "meta-llama/llama-3.3-70b-instruct": (0.0001, 0.0003),
+    ]
+
+    private static let genericFallbackPromptPer1k = 0.01
+    private static let genericFallbackCompletionPer1k = 0.03
+    private static let defaultWebSearchPerRequest = 0.005
+
     /// Seconds of typing idle before prompt analysis runs (Preferences; 0…10, step 0.5).
     @Published var analysisIdleSeconds: Double = 2.0
     /// Master switch — when on, enabled MCP server entries are considered configured.
@@ -184,6 +200,9 @@ final class AppState: ObservableObject {
         loadDeletedSessionIDs()
         // Restore history synchronously so the first frame never looks empty.
         loadLocalSessions()
+        // Seed built-in rates immediately so Preferences / Model costs aren’t blank
+        // before the gateway answers (or when no OpenRouter key is configured).
+        applyDefaultModelPricing()
         objectWillChange.send()
         Task { await bootstrap() }
     }
@@ -385,8 +404,74 @@ final class AppState: ObservableObject {
         reconcileSelection()
         // Do not auto-create an empty session — count stays 0 until the user starts one.
         saveLocalSessions()
-        await refreshModelPricing(forceRefresh: true)
+        // Always keep default rates available; overlay live OpenRouter pricing only when a key is set.
+        applyDefaultModelPricing()
+        if openRouterConfigured {
+            await refreshModelPricing(forceRefresh: true)
+        } else {
+            fillMissingPricingWithDefaults()
+        }
         objectWillChange.send()
+    }
+
+    /// Whether current pricing rows are mostly built-in defaults (no live OpenRouter overlay).
+    var usingDefaultModelPricing: Bool {
+        guard !modelPricingByID.isEmpty else { return true }
+        return modelPricingByID.values.contains(where: { $0.source == "fallback" })
+            && (!openRouterConfigured || modelPricingByID.values.allSatisfy { $0.source == "fallback" })
+    }
+
+    /// Seed / refresh built-in fallback rates for catalog + mapped models.
+    func applyDefaultModelPricing() {
+        var next = modelPricingByID
+        for (id, rates) in Self.fallbackModelPricing {
+            if let existing = next[id], existing.source == "openrouter" {
+                continue
+            }
+            next[id] = ModelPricingDTO(
+                id: id,
+                promptPer1k: rates.promptPer1k,
+                completionPer1k: rates.completionPer1k,
+                webSearchPerRequest: Self.defaultWebSearchPerRequest,
+                source: "fallback"
+            )
+        }
+        for id in pricingModelIDs where next[id] == nil {
+            next[id] = ModelPricingDTO(
+                id: id,
+                promptPer1k: Self.genericFallbackPromptPer1k,
+                completionPer1k: Self.genericFallbackCompletionPer1k,
+                webSearchPerRequest: Self.defaultWebSearchPerRequest,
+                source: "fallback"
+            )
+        }
+        modelPricingByID = next
+    }
+
+    private func fillMissingPricingWithDefaults() {
+        var next = modelPricingByID
+        var changed = false
+        for id in pricingModelIDs where next[id] == nil {
+            if let rates = Self.fallbackModelPricing[id] {
+                next[id] = ModelPricingDTO(
+                    id: id,
+                    promptPer1k: rates.promptPer1k,
+                    completionPer1k: rates.completionPer1k,
+                    webSearchPerRequest: Self.defaultWebSearchPerRequest,
+                    source: "fallback"
+                )
+            } else {
+                next[id] = ModelPricingDTO(
+                    id: id,
+                    promptPer1k: Self.genericFallbackPromptPer1k,
+                    completionPer1k: Self.genericFallbackCompletionPer1k,
+                    webSearchPerRequest: Self.defaultWebSearchPerRequest,
+                    source: "fallback"
+                )
+            }
+            changed = true
+        }
+        if changed { modelPricingByID = next }
     }
 
     /// Models whose rates should be known for Preferences + Auto routing analysis.
@@ -419,8 +504,11 @@ final class AppState: ObservableObject {
                 next[row.id] = row
             }
             modelPricingByID = next
+            fillMissingPricingWithDefaults()
         } catch {
-            // Keep prior rates / analysis can fall back server-side.
+            // Gateway / OpenRouter unavailable — keep or restore built-in defaults.
+            applyDefaultModelPricing()
+            fillMissingPricingWithDefaults()
         }
     }
 
@@ -633,8 +721,12 @@ final class AppState: ObservableObject {
             openRouterKeyMessage = "API key saved."
             UserDefaults.standard.set(key, forKey: "aril.openRouterAPIKey")
             await refreshHealth()
+            await refreshModelPricing(forceRefresh: true)
         } catch {
             openRouterKeyMessage = error.localizedDescription
+            // Treat a rejected / invalid key save as unconfigured for pricing.
+            applyDefaultModelPricing()
+            fillMissingPricingWithDefaults()
         }
     }
 
@@ -647,6 +739,7 @@ final class AppState: ObservableObject {
             isEditingOpenRouterKey = true
             openRouterKeyMessage = "API key cleared. Add a key to use live models."
             UserDefaults.standard.removeObject(forKey: "aril.openRouterAPIKey")
+            applyDefaultModelPricing()
             await refreshHealth()
         } catch {
             openRouterKeyMessage = error.localizedDescription

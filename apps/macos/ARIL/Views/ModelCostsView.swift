@@ -55,7 +55,9 @@ struct ModelCostsView: View {
                 .accessibilityLabel("Close")
             }
 
-            Text("OpenRouter USD rates — input / output per 1K tokens.")
+            Text(state.openRouterConfigured
+                 ? "OpenRouter USD rates — input / output per 1K tokens."
+                 : "Built-in default rates — add an OpenRouter API key in Preferences for live pricing.")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted)
 
