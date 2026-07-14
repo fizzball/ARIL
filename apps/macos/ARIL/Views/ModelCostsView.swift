@@ -42,6 +42,17 @@ struct ModelCostsView: View {
                     ProgressView()
                         .controlSize(.small)
                 }
+                Button {
+                    state.showModelCosts = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Close")
+                .accessibilityLabel("Close")
             }
 
             Text("OpenRouter USD rates — input / output per 1K tokens.")
