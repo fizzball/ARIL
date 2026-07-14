@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     aril_default_temperature: float = 0.7
     aril_cache_token_threshold: int = 1024
 
+    # Primary: OpenRouter (one key → many models)
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_site_url: str = "https://github.com/fizzball/ARIL"
+    openrouter_app_name: str = "ARIL"
+
+    # Optional direct providers (unused when OpenRouter is configured)
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     ollama_base_url: str = "http://127.0.0.1:11434"

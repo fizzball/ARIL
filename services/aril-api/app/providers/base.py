@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from app.core.config import settings
+
 
 @dataclass
 class ProviderMessage:
@@ -35,7 +37,7 @@ class LLMProvider(ABC):
 
 
 class StubProvider(LLMProvider):
-    """Phase 0 placeholder — no external network calls."""
+    """Offline placeholder when no OpenRouter key is configured."""
 
     name = "stub"
 
@@ -50,7 +52,7 @@ class StubProvider(LLMProvider):
         reply = (
             f"[ARIL stub · {model} · temp={temperature:.2f}]\n\n"
             f"Received your prompt ({len(last_user)} chars). "
-            "Provider adapters will replace this echo in Phase 1."
+            "Set OPENROUTER_API_KEY to enable live multi-model routing."
         )
         in_tok = max(1, len(last_user) // 4)
         out_tok = max(1, len(reply) // 4)
@@ -64,7 +66,10 @@ class StubProvider(LLMProvider):
         )
 
 
-# Registry placeholders for Phase 1+
-PROVIDERS: dict[str, LLMProvider] = {
-    "stub": StubProvider(),
-}
+def get_chat_provider() -> LLMProvider:
+    """Prefer OpenRouter for single-key multi-model switching; else stub."""
+    if settings.openrouter_api_key.strip():
+        from app.providers.openrouter import OpenRouterProvider
+
+        return OpenRouterProvider()
+    return StubProvider()
