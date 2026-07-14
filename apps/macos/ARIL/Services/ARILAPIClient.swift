@@ -125,6 +125,10 @@ final class ARILAPIClient {
         return done
     }
 
+    func compare(baseURL: String, request: CompareRequestDTO) async throws -> CompareResponseDTO {
+        try await post(baseURL, path: "/v1/compare", body: request)
+    }
+
     private func post<Body: Encodable, Response: Decodable>(
         _ baseURL: String,
         path: String,

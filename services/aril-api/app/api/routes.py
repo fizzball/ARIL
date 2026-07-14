@@ -1,25 +1,40 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.core import cache as prompt_cache
 from app.core import sessions as session_store
 from app.core.config import settings
 from app.core.schemas import (
     ChatRequest,
     ChatResponse,
     ChatMessage,
+    CompareRequest,
+    CompareResponse,
+    CompareResult,
     PreviewRequest,
     PreviewResponse,
     SessionDetail,
     SessionSummary,
     SessionUpsert,
 )
-from app.providers.base import ProviderMessage, get_chat_provider
-from app.routing.pipeline import DEFAULT_PROFILE, build_preview, classify, estimate_tokens, resolve_profile
+from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
+from app.routing.pipeline import (
+    DEFAULT_PROFILE,
+    build_preview,
+    classify,
+    estimate_tokens,
+    grade_prompt,
+    resolve_profile,
+    score_routes,
+)
+from app.routing.rewrite import llm_alternatives
 
 router = APIRouter(prefix="/v1")
 
@@ -31,53 +46,99 @@ def _resolve_model(req_model: str | None, last_user: str, profile) -> tuple[str,
     return model, classification
 
 
+def _msg_dicts(messages: list[ChatMessage]) -> list[dict[str, str]]:
+    return [{"role": m.role, "content": m.content} for m in messages]
+
+
+async def _complete_cached(
+    *,
+    messages: list[ChatMessage],
+    model: str,
+    temperature: float,
+    use_cache: bool,
+) -> tuple[ProviderResult, bool]:
+    provider = get_chat_provider()
+    msg_dicts = _msg_dicts(messages)
+    est = estimate_tokens(" ".join(m.content for m in messages))
+    key = prompt_cache.make_key(messages=msg_dicts, model=model, temperature=temperature)
+
+    if use_cache and prompt_cache.eligible(est):
+        hit = prompt_cache.peek(key)
+        if hit:
+            return (
+                ProviderResult(
+                    content=hit["content"],
+                    model=hit.get("model") or model,
+                    input_tokens=int(hit.get("input_tokens") or est),
+                    output_tokens=int(hit.get("output_tokens") or 0),
+                    cost_usd=float(hit.get("cost_usd") or 0.0),
+                    cached=True,
+                ),
+                True,
+            )
+
+    result = await provider.complete(
+        [ProviderMessage(role=m.role, content=m.content) for m in messages],
+        model=model,
+        temperature=temperature,
+    )
+    if use_cache and prompt_cache.eligible(result.input_tokens or est):
+        prompt_cache.put(
+            key,
+            {
+                "content": result.content,
+                "model": result.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "cost_usd": result.cost_usd,
+            },
+        )
+    return result, False
+
+
 @router.post("/preview", response_model=PreviewResponse)
 async def preview(req: PreviewRequest) -> PreviewResponse:
-    """Classify, grade, suggest alternatives, and rank routes — no provider call."""
-    return build_preview(req)
+    """Classify, grade, optionally LLM-rewrite alternatives, rank routes."""
+    grade = grade_prompt(req.prompt)
+    alts = None
+    source = "heuristic"
+    if req.enhance_alternatives and grade.overall < 0.78:
+        alts = await llm_alternatives(req.prompt, grade)
+        if settings.openrouter_api_key.strip() and alts and any(
+            a.id.startswith("llm-") for a in alts
+        ):
+            source = "llm"
+    return build_preview(req, alternatives=alts, alternatives_source=source)
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
-    """Execute a chat turn via OpenRouter (or stub if no key)."""
+    """Execute a chat turn via OpenRouter (or stub if no key), with optional cache."""
     last_user = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
     model, classification = _resolve_model(req.model, last_user, req.routing_profile)
-
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
-    provider = get_chat_provider()
+
     try:
-        result = await provider.complete(
-            [ProviderMessage(role=m.role, content=m.content) for m in req.messages],
+        result, cached = await _complete_cached(
+            messages=req.messages,
             model=model,
             temperature=temperature,
+            use_cache=req.use_cache,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     session_id = req.session_id or str(uuid.uuid4())
-    title = None
-    if last_user:
-        title = last_user[:42] if not req.session_id else None
-
-    # Persist the latest assistant turn (and user if last message is user)
-    user_msg = req.messages[-1] if req.messages and req.messages[-1].role == "user" else None
     assistant = ChatMessage(role="assistant", content=result.content)
-    if user_msg is not None:
-        # If client sent full history, store the whole thread
-        session_store.upsert_session(
-            SessionUpsert(
-                id=session_id,
-                title=title or (last_user[:42] if last_user else "New session"),
-                messages=list(req.messages) + [assistant],
-            )
+    session_store.upsert_session(
+        SessionUpsert(
+            id=session_id,
+            title=last_user[:42] if last_user else "New session",
+            messages=list(req.messages) + [assistant],
         )
-    else:
-        session_store.append_turn(session_id, title=title, user=None, assistant=assistant)
-
-    in_tok = result.input_tokens
-    cached = bool(req.use_cache and in_tok > settings.aril_cache_token_threshold)
+    )
 
     return ChatResponse(
         session_id=session_id,
@@ -85,7 +146,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         model=result.model,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        cost_usd=result.cost_usd * (0.55 if cached else 1.0),
+        cost_usd=result.cost_usd * (0.45 if cached else 1.0),
         cached=cached,
         route_category=classification.primary,
     )
@@ -100,10 +161,40 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
     session_id = req.session_id or str(uuid.uuid4())
-    provider = get_chat_provider()
-    provider_messages = [ProviderMessage(role=m.role, content=m.content) for m in req.messages]
+    msg_dicts = _msg_dicts(req.messages)
+    est = estimate_tokens(last_user)
+    key = prompt_cache.make_key(messages=msg_dicts, model=model, temperature=temperature)
 
     async def event_generator():
+        # Cache short-circuit for large prompts
+        if req.use_cache and prompt_cache.eligible(est):
+            hit = prompt_cache.peek(key)
+            if hit:
+                content = hit["content"]
+                payload = json.dumps({"content": content, "model": hit.get("model") or model})
+                yield f"event: token\ndata: {payload}\n\n"
+                meta = {
+                    "session_id": session_id,
+                    "model": hit.get("model") or model,
+                    "route_category": classification.primary.value,
+                    "input_tokens": int(hit.get("input_tokens") or est),
+                    "output_tokens": int(hit.get("output_tokens") or 0),
+                    "cost_usd": float(hit.get("cost_usd") or 0.0) * 0.45,
+                    "cached": True,
+                }
+                assistant = ChatMessage(role="assistant", content=content)
+                session_store.upsert_session(
+                    SessionUpsert(
+                        id=session_id,
+                        title=last_user[:42] if last_user else "New session",
+                        messages=list(req.messages) + [assistant],
+                    )
+                )
+                yield f"event: done\ndata: {json.dumps(meta)}\n\n"
+                return
+
+        provider = get_chat_provider()
+        provider_messages = [ProviderMessage(role=m.role, content=m.content) for m in req.messages]
         parts: list[str] = []
         meta = {
             "session_id": session_id,
@@ -112,6 +203,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             "input_tokens": 0,
             "output_tokens": 0,
             "cost_usd": 0.0,
+            "cached": False,
         }
         try:
             async for chunk in provider.stream(
@@ -135,6 +227,17 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             return
 
         full = "".join(parts)
+        if req.use_cache and prompt_cache.eligible(int(meta["input_tokens"] or est)):
+            prompt_cache.put(
+                key,
+                {
+                    "content": full,
+                    "model": meta["model"],
+                    "input_tokens": meta["input_tokens"],
+                    "output_tokens": meta["output_tokens"],
+                    "cost_usd": meta["cost_usd"],
+                },
+            )
         assistant = ChatMessage(role="assistant", content=full)
         session_store.upsert_session(
             SessionUpsert(
@@ -142,9 +245,6 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 title=last_user[:42] if last_user else "New session",
                 messages=list(req.messages) + [assistant],
             )
-        )
-        meta["cached"] = bool(
-            req.use_cache and meta["input_tokens"] > settings.aril_cache_token_threshold
         )
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
 
@@ -156,6 +256,85 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post("/compare", response_model=CompareResponse)
+async def compare(req: CompareRequest) -> CompareResponse:
+    """Run the same prompt across multiple models and return side-by-side results."""
+    last_user = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+    classification = classify(last_user)
+    temperature = (
+        req.temperature if req.temperature is not None else settings.aril_default_temperature
+    )
+    profile = resolve_profile(req.routing_profile)
+    routes = score_routes(last_user or " ", classification.primary, profile)
+    models = req.models or [r.model_id for r in routes[: settings.aril_compare_model_count]]
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    models = [m for m in models if not (m in seen or seen.add(m))]
+    if len(models) < 2:
+        # Ensure at least two candidates
+        for mid in profile.values():
+            if mid not in seen:
+                models.append(mid)
+                seen.add(mid)
+            if len(models) >= 2:
+                break
+
+    session_id = req.session_id or str(uuid.uuid4())
+
+    async def run_one(model: str) -> CompareResult:
+        started = time.perf_counter()
+        try:
+            result, cached = await _complete_cached(
+                messages=req.messages,
+                model=model,
+                temperature=temperature,
+                use_cache=req.use_cache,
+            )
+            ms = int((time.perf_counter() - started) * 1000)
+            return CompareResult(
+                model=result.model,
+                content=result.content,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_usd=result.cost_usd * (0.45 if cached else 1.0),
+                latency_ms=ms,
+                cached=cached,
+            )
+        except Exception as exc:  # noqa: BLE001
+            ms = int((time.perf_counter() - started) * 1000)
+            return CompareResult(
+                model=model,
+                content="",
+                input_tokens=0,
+                output_tokens=0,
+                cost_usd=0.0,
+                latency_ms=ms,
+                error=str(exc),
+            )
+
+    results = await asyncio.gather(*[run_one(m) for m in models])
+    # Persist a summary note into the session
+    summary_bits = []
+    for r in results:
+        if r.error:
+            summary_bits.append(f"### {r.model}\nError: {r.error}")
+        else:
+            summary_bits.append(f"### {r.model}\n{r.content}")
+    assistant = ChatMessage(role="assistant", content="\n\n".join(summary_bits))
+    session_store.upsert_session(
+        SessionUpsert(
+            id=session_id,
+            title=f"Compare: {(last_user or 'prompt')[:32]}",
+            messages=list(req.messages) + [assistant],
+        )
+    )
+    return CompareResponse(
+        session_id=session_id,
+        route_category=classification.primary,
+        results=list(results),
     )
 
 

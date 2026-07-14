@@ -19,6 +19,8 @@ final class AppState: ObservableObject {
     @Published var routingProfile: RoutingProfile = AppState.loadRoutingProfile()
     @Published var showIntelligencePanel: Bool = false
     @Published var lastError: String?
+    @Published var compareResults: [CompareResultDTO] = []
+    @Published var lastCached: Bool = false
 
     private let client = ARILAPIClient()
     private var previewTask: Task<Void, Never>?
@@ -128,7 +130,8 @@ final class AppState: ObservableObject {
                     routeMode: routeMode,
                     preferredModel: selectedModel,
                     sessionId: selectedSessionID?.uuidString,
-                    routingProfile: APIRoutingProfile(routingProfile)
+                    routingProfile: APIRoutingProfile(routingProfile),
+                    enhanceAlternatives: true
                 )
             )
             preview = result
@@ -163,11 +166,24 @@ final class AppState: ObservableObject {
             sessions[idx].title = String(text.prefix(42))
         }
         draft = ""
+        let compareModels: [String] = {
+            if let routes = preview?.routes, routes.count >= 2 {
+                return Array(routes.prefix(2).map(\.modelId))
+            }
+            return [selectedModel, routingProfile.cost]
+        }()
         preview = nil
         showIntelligencePanel = false
+        compareResults = []
+        lastCached = false
 
         let historyForAPI = sessions[idx].messages.map {
             APIChatMessage(role: $0.role.rawValue, content: $0.content)
+        }
+
+        if routeMode == .compare {
+            await sendCompare(sessionID: sid, index: idx, history: historyForAPI, models: compareModels)
+            return
         }
 
         let assistantID = UUID()
@@ -185,7 +201,7 @@ final class AppState: ObservableObject {
         )
 
         do {
-            _ = try await client.chatStream(baseURL: gatewayURL, request: request) { [weak self] token in
+            let done = try await client.chatStream(baseURL: gatewayURL, request: request) { [weak self] token in
                 Task { @MainActor in
                     guard let self,
                           let i = self.sessions.firstIndex(where: { $0.id == sid }),
@@ -194,20 +210,51 @@ final class AppState: ObservableObject {
                     self.sessions[i].messages[m].content += token
                 }
             }
+            lastCached = done.cached ?? false
             sessions[idx].updatedAt = .now
             await refreshHealth()
         } catch {
             lastError = error.localizedDescription
-            // Fallback to non-streaming
             do {
                 let response = try await client.chat(baseURL: gatewayURL, request: request)
                 if let m = sessions[idx].messages.firstIndex(where: { $0.id == assistantID }) {
                     sessions[idx].messages[m].content = response.message.content
                 }
+                lastCached = response.cached
             } catch {
                 lastError = error.localizedDescription
                 sessions[idx].messages.removeAll { $0.id == assistantID }
             }
+        }
+    }
+
+    private func sendCompare(sessionID: UUID, index: Int, history: [APIChatMessage], models: [String]) async {
+        do {
+            let response = try await client.compare(
+                baseURL: gatewayURL,
+                request: CompareRequestDTO(
+                    messages: history,
+                    models: models,
+                    temperature: temperature,
+                    routingProfile: APIRoutingProfile(routingProfile),
+                    sessionId: sessionID.uuidString,
+                    useCache: true
+                )
+            )
+            compareResults = response.results
+            let combined = response.results.map { result in
+                if let err = result.error {
+                    return "### \(result.model)\nError: \(err)"
+                }
+                let cacheNote = result.cached ? " · cached" : ""
+                return "### \(result.model) (\(result.latencyMs)ms · $\(String(format: "%.4f", result.costUsd))\(cacheNote))\n\(result.content)"
+            }.joined(separator: "\n\n")
+            sessions[index].messages.append(ChatMessage(role: .assistant, content: combined))
+            sessions[index].updatedAt = .now
+            lastCached = response.results.contains(where: \.cached)
+            await refreshHealth()
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 

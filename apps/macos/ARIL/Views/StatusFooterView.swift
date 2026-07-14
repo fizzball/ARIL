@@ -34,7 +34,12 @@ struct StatusFooterView: View {
             Text(state.routeMode.label)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(ARILTheme.creamMuted)
-            Text("# v0.1.0")
+            if state.lastCached {
+                Text("cache hit")
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(ARILTheme.gold)
+            }
+            Text("# v0.2.0")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(ARILTheme.creamMuted.opacity(0.7))
         }

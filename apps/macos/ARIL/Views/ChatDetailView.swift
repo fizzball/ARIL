@@ -13,12 +13,16 @@ struct ChatDetailView: View {
             BackgroundTexture()
 
             VStack(spacing: 0) {
-                if isEmpty {
+                if isEmpty && state.compareResults.isEmpty {
                     EmptyHeroView()
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
                     MessageListView()
                         .transition(.opacity)
+                    if !state.compareResults.isEmpty {
+                        CompareResultsView(results: state.compareResults)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
 
                 if state.showIntelligencePanel, let preview = state.preview {
@@ -36,6 +40,7 @@ struct ChatDetailView: View {
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.86), value: state.showIntelligencePanel)
             .animation(.easeInOut(duration: 0.28), value: isEmpty)
+            .animation(.easeInOut(duration: 0.25), value: state.compareResults.count)
         }
     }
 }

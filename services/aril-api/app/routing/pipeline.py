@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 
 from app.core.config import settings
@@ -171,10 +170,15 @@ def score_routes(
     return rows
 
 
-def build_preview(req: PreviewRequest) -> PreviewResponse:
+def build_preview(
+    req: PreviewRequest,
+    *,
+    alternatives: list[PromptAlternative] | None = None,
+    alternatives_source: str = "heuristic",
+) -> PreviewResponse:
     classification = classify(req.prompt)
     grade = grade_prompt(req.prompt)
-    alts = alternatives_for(req.prompt, grade)
+    alts = alternatives if alternatives is not None else alternatives_for(req.prompt, grade)
     profile = resolve_profile(req.routing_profile)
     routes = score_routes(req.prompt, classification.primary, profile)
     temp = req.temperature if req.temperature is not None else settings.aril_default_temperature
@@ -186,8 +190,22 @@ def build_preview(req: PreviewRequest) -> PreviewResponse:
 
     in_tok = estimate_tokens(req.prompt)
     eligible = in_tok > settings.aril_cache_token_threshold
-    digest = hashlib.sha256(req.prompt.encode()).hexdigest()
-    would_hit = eligible and digest.endswith(("0", "1", "2", "3"))
+    would_hit = False
+    savings = None
+    if eligible:
+        from app.core import cache as prompt_cache
+
+        key = prompt_cache.make_key(
+            messages=[{"role": "user", "content": req.prompt}],
+            model=recommended,
+            temperature=temp,
+        )
+        would_hit = prompt_cache.peek(key) is not None
+        savings = prompt_cache.savings_pct() if would_hit else 25.0
+
+    src = alternatives_source
+    if not alts:
+        src = "none"
 
     return PreviewResponse(
         classification=classification,
@@ -200,8 +218,9 @@ def build_preview(req: PreviewRequest) -> PreviewResponse:
             estimated_input_tokens=in_tok,
             threshold=settings.aril_cache_token_threshold,
             would_hit=would_hit,
-            estimated_savings_pct=45.0 if would_hit else (25.0 if eligible else None),
+            estimated_savings_pct=savings,
         ),
         temperature=temp,
         route_mode=req.route_mode,
+        alternatives_source=src,  # type: ignore[arg-type]
     )

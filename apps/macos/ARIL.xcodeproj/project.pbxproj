@@ -21,11 +21,13 @@
 		C9EEFE93AA37F8AEA8B378A6 /* ChatDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */; };
 		D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */; };
 		D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1416251B652DE7DE8C09313A /* MessageListView.swift */; };
+		E5676938CCEC2F485B4CC994 /* CompareResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4471C3658442F237DC5C1C61 /* CompareResultsView.swift */; };
 		EF19B318BFD33393131FB656 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ECDA663B4CC8289E453914E /* Models.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1416251B652DE7DE8C09313A /* MessageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListView.swift; sourceTree = "<group>"; };
+		4471C3658442F237DC5C1C61 /* CompareResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareResultsView.swift; sourceTree = "<group>"; };
 		464CC3D69B6588E73D3EF50F /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		51A5248C42FB7C5D311DC40B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligencePanelView.swift; sourceTree = "<group>"; };
@@ -83,6 +85,7 @@
 			isa = PBXGroup;
 			children = (
 				D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */,
+				4471C3658442F237DC5C1C61 /* CompareResultsView.swift */,
 				73F7258E2BF863107D0D1C2F /* ContentView.swift */,
 				F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */,
 				F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */,
@@ -177,6 +180,7 @@
 				C587B43D4CB59922264CEB43 /* ARILTheme.swift in Sources */,
 				17A3C70916F018539718B02E /* AppState.swift in Sources */,
 				C9EEFE93AA37F8AEA8B378A6 /* ChatDetailView.swift in Sources */,
+				E5676938CCEC2F485B4CC994 /* CompareResultsView.swift in Sources */,
 				4B8284C195B20A12359734B4 /* ContentView.swift in Sources */,
 				9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */,
 				D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */,

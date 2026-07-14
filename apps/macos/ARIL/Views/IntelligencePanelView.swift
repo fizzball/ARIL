@@ -10,6 +10,11 @@ struct IntelligencePanelView: View {
                 Label("Intelligence", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(ARILTheme.gold)
+                if let source = preview.alternativesSource, source != "none" {
+                    Text(source.uppercased())
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(ARILTheme.gold.opacity(0.8))
+                }
                 Spacer()
                 Text(preview.classification.primary.label.uppercased())
                     .font(ARILTheme.captionFont)

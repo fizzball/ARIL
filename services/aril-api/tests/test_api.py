@@ -17,7 +17,10 @@ def test_health():
 def test_preview_coding():
     r = client.post(
         "/v1/preview",
-        json={"prompt": "Refactor this Python function and add unit tests for edge cases."},
+        json={
+            "prompt": "Refactor this Python function and add unit tests for edge cases.",
+            "enhance_alternatives": False,
+        },
     )
     assert r.status_code == 200
     body = r.json()
@@ -32,6 +35,7 @@ def test_preview_with_routing_profile():
         "/v1/preview",
         json={
             "prompt": "Write a secure auth middleware in Swift",
+            "enhance_alternatives": False,
             "routing_profile": {
                 "coding": "google/gemini-2.5-flash",
                 "security": "anthropic/claude-sonnet-4",
@@ -45,9 +49,48 @@ def test_preview_with_routing_profile():
     assert r.status_code == 200
     body = r.json()
     assert body["classification"]["primary"] in ("coding", "security")
-    # Primary category's mapped model should appear in routes
     model_ids = {row["model_id"] for row in body["routes"]}
     assert "google/gemini-2.5-flash" in model_ids or "anthropic/claude-sonnet-4" in model_ids
+
+
+def test_compare_endpoint():
+    r = client.post(
+        "/v1/compare",
+        json={
+            "messages": [{"role": "user", "content": "Reply with the word COMPARE_OK only."}],
+            "models": ["openai/gpt-4.1-mini"],
+            "temperature": 0,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["results"]) >= 1
+    assert body["session_id"]
+
+
+def test_prompt_cache_module():
+    from app.core import cache as prompt_cache
+
+    key = prompt_cache.make_key(
+        messages=[{"role": "user", "content": "hello cache"}],
+        model="openai/gpt-4.1-mini",
+        temperature=0.0,
+    )
+    prompt_cache.put(
+        key,
+        {
+            "content": "cached-content",
+            "model": "openai/gpt-4.1-mini",
+            "input_tokens": 2000,
+            "output_tokens": 10,
+            "cost_usd": 0.01,
+        },
+    )
+    hit = prompt_cache.peek(key)
+    assert hit is not None
+    assert hit["content"] == "cached-content"
+    assert prompt_cache.eligible(2000) is True
+    assert prompt_cache.eligible(10) is False
 
 
 def test_chat_stub_or_live():

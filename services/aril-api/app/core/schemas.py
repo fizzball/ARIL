@@ -90,6 +90,7 @@ class PreviewRequest(BaseModel):
     preferred_model: str | None = None
     session_id: str | None = None
     routing_profile: RoutingProfile | None = None
+    enhance_alternatives: bool = True
 
 
 class PreviewResponse(BaseModel):
@@ -101,6 +102,7 @@ class PreviewResponse(BaseModel):
     cache: CacheInsight
     temperature: float
     route_mode: RouteMode
+    alternatives_source: Literal["none", "heuristic", "llm"] = "heuristic"
 
 
 class ChatMessage(BaseModel):
@@ -129,6 +131,32 @@ class ChatResponse(BaseModel):
     cost_usd: float
     cached: bool
     route_category: RouteCategory
+
+
+class CompareRequest(BaseModel):
+    messages: list[ChatMessage]
+    models: list[str] | None = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    routing_profile: RoutingProfile | None = None
+    session_id: str | None = None
+    use_cache: bool = True
+
+
+class CompareResult(BaseModel):
+    model: str
+    content: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    latency_ms: int
+    cached: bool = False
+    error: str | None = None
+
+
+class CompareResponse(BaseModel):
+    session_id: str
+    route_category: RouteCategory
+    results: list[CompareResult]
 
 
 class SessionSummary(BaseModel):

@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     aril_log_level: str = "info"
     aril_default_temperature: float = 0.7
     aril_cache_token_threshold: int = 1024
+    aril_rewrite_model: str = "openai/gpt-4.1-mini"
+    aril_compare_model_count: int = 2
 
     # Primary: OpenRouter (one key → many models)
     openrouter_api_key: str = ""

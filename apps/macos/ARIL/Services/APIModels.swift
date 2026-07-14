@@ -41,6 +41,7 @@ struct PreviewRequest: Encodable {
     let preferredModel: String?
     let sessionId: String?
     let routingProfile: APIRoutingProfile?
+    let enhanceAlternatives: Bool
 
     enum CodingKeys: String, CodingKey {
         case prompt, temperature
@@ -48,6 +49,7 @@ struct PreviewRequest: Encodable {
         case preferredModel = "preferred_model"
         case sessionId = "session_id"
         case routingProfile = "routing_profile"
+        case enhanceAlternatives = "enhance_alternatives"
     }
 }
 
@@ -60,11 +62,13 @@ struct PreviewResponse: Codable, Equatable {
     let cache: CacheInsight
     let temperature: Double
     let routeMode: RouteMode
+    let alternativesSource: String?
 
     enum CodingKeys: String, CodingKey {
         case classification, grade, alternatives, routes, cache, temperature
         case recommendedModel = "recommended_model"
         case routeMode = "route_mode"
+        case alternativesSource = "alternatives_source"
     }
 }
 
@@ -235,4 +239,52 @@ struct StreamDoneEvent: Codable {
 struct StreamTokenEvent: Codable {
     let content: String
     let model: String?
+}
+
+struct CompareRequestDTO: Encodable {
+    let messages: [APIChatMessage]
+    let models: [String]?
+    let temperature: Double?
+    let routingProfile: APIRoutingProfile?
+    let sessionId: String?
+    let useCache: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case messages, models, temperature
+        case routingProfile = "routing_profile"
+        case sessionId = "session_id"
+        case useCache = "use_cache"
+    }
+}
+
+struct CompareResultDTO: Codable, Identifiable {
+    var id: String { "\(model)-\(latencyMs)-\(inputTokens)-\(outputTokens)" }
+    let model: String
+    let content: String
+    let inputTokens: Int
+    let outputTokens: Int
+    let costUsd: Double
+    let latencyMs: Int
+    let cached: Bool
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case model, content, cached, error
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case costUsd = "cost_usd"
+        case latencyMs = "latency_ms"
+    }
+}
+
+struct CompareResponseDTO: Codable {
+    let sessionId: String
+    let routeCategory: RouteCategory
+    let results: [CompareResultDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case results
+        case sessionId = "session_id"
+        case routeCategory = "route_category"
+    }
 }
