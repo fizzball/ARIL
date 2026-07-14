@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 enum AnalysisStatus: Equatable {
     case idle
-    case analysing(secondsRemaining: Int)
+    case analysing(secondsRemaining: Double)
     case ready
 }
 
@@ -34,12 +34,18 @@ final class AppState: ObservableObject {
         "meta-llama/llama-3.3-70b-instruct",
     ]
 
-    /// Seconds of typing idle before prompt analysis runs.
-    static let analysisIdleSeconds = 2
+    /// Seconds of typing idle before prompt analysis runs (Preferences; 0…10, step 0.5).
+    @Published var analysisIdleSeconds: Double = 2.0
+    /// Master switch — when on, enabled MCP server entries are considered configured.
+    @Published var mcpEnabled: Bool = false
+    @Published var mcpServers: [MCPServerConfig] = []
 
     @Published var sessions: [ChatSession] = []
     @Published var selectedSessionID: UUID?
     @Published var draft: String = ""
+    /// Preference default — persisted; applied to session temperature on launch / when prefs change.
+    @Published var defaultTemperature: Double = 0.7
+    /// Session temperature used by analysis + sends; resets to `defaultTemperature` on launch.
     @Published var temperature: Double = 0.7
     @Published var routeMode: RouteMode = .auto
     @Published var selectedModel: String
@@ -68,6 +74,8 @@ final class AppState: ObservableObject {
     @Published var webSearchEnabled: Bool = false
     @Published var userDisplayName: String
     @Published var showRoutingAnalysis: Bool = false
+    @Published var showExchangeLog: Bool = false
+    @Published var exchangeLog: [ExchangeLogEntry] = []
     @Published var classifications: [ClassificationRecordDTO] = []
     @Published var compareCategoryDraft: [String: RouteCategory] = [:]
     @Published var compareAccuracyDraft: [String: Double] = [:]
@@ -103,9 +111,14 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.2"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "32"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.4"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "34"
         return "\(short) (\(build))"
+    }
+
+    /// At least one ready MCP server while MCP use is enabled.
+    var hasConfiguredMCPServers: Bool {
+        mcpEnabled && mcpServers.contains(where: \.isReady)
     }
 
     init() {
@@ -116,25 +129,141 @@ final class AppState: ObservableObject {
         gatewayURL = defaults.string(forKey: "aril.gatewayURL") ?? "http://127.0.0.1:8741"
         soloMode = defaults.object(forKey: "aril.soloMode") as? Bool ?? true
         userDisplayName = defaults.string(forKey: "aril.userDisplayName") ?? ""
+        let storedTemp = Self.clampedTemperature(
+            defaults.object(forKey: "aril.defaultTemperature") as? Double ?? 0.7
+        )
+        defaultTemperature = storedTemp
+        temperature = storedTemp
+        analysisIdleSeconds = Self.clampedIdleSeconds(
+            defaults.object(forKey: "aril.analysisIdleSeconds") as? Double ?? 2.0
+        )
+        mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
+        mcpServers = Self.loadMCPServers()
         loadDeletedSessionIDs()
+        // Restore history synchronously so the first frame never looks empty.
+        loadLocalSessions()
+        objectWillChange.send()
         Task { await bootstrap() }
     }
 
+    /// Clamp temperature to the 0…1 UI range (0.1 steps preferred by sliders).
+    static func clampedTemperature(_ value: Double) -> Double {
+        min(1, max(0, (value * 10).rounded() / 10))
+    }
+
+    /// Clamp analysis idle to 0…10 in 0.5s steps.
+    static func clampedIdleSeconds(_ value: Double) -> Double {
+        min(10, max(0, (value * 2).rounded() / 2))
+    }
+
+    /// Persist the Preferences default and mirror it into the session temperature.
+    func setDefaultTemperature(_ value: Double) {
+        let clamped = Self.clampedTemperature(value)
+        defaultTemperature = clamped
+        temperature = clamped
+        UserDefaults.standard.set(clamped, forKey: "aril.defaultTemperature")
+    }
+
+    func setAnalysisIdleSeconds(_ value: Double) {
+        let clamped = Self.clampedIdleSeconds(value)
+        analysisIdleSeconds = clamped
+        UserDefaults.standard.set(clamped, forKey: "aril.analysisIdleSeconds")
+    }
+
+    static let maxExchangeLogCapacity = 20
+
+    func recordExchange(
+        prompt: String,
+        response: String,
+        model: String,
+        mode: String,
+        status: ExchangeLogEntry.Status,
+        latencyMs: Int? = nil,
+        errorMessage: String? = nil
+    ) {
+        let entry = ExchangeLogEntry(
+            prompt: prompt,
+            response: response,
+            model: model,
+            mode: mode,
+            status: status,
+            latencyMs: latencyMs,
+            errorMessage: errorMessage
+        )
+        exchangeLog.insert(entry, at: 0)
+        if exchangeLog.count > Self.maxExchangeLogCapacity {
+            exchangeLog = Array(exchangeLog.prefix(Self.maxExchangeLogCapacity))
+        }
+    }
+
+    func clearExchangeLog() {
+        exchangeLog = []
+    }
+
+    func setMCPEnabled(_ enabled: Bool) {
+        mcpEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.mcpEnabled")
+    }
+
+    func addMCPServer() {
+        mcpServers.append(MCPServerConfig(name: "New MCP server"))
+        persistMCPServers()
+    }
+
+    func updateMCPServer(_ server: MCPServerConfig) {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == server.id }) else { return }
+        mcpServers[idx] = server
+        persistMCPServers()
+    }
+
+    func removeMCPServer(_ id: UUID) {
+        mcpServers.removeAll { $0.id == id }
+        persistMCPServers()
+    }
+
+    func persistMCPServers() {
+        if let data = try? JSONEncoder().encode(mcpServers) {
+            UserDefaults.standard.set(data, forKey: "aril.mcpServers")
+        }
+    }
+
+    private static func loadMCPServers() -> [MCPServerConfig] {
+        guard let data = UserDefaults.standard.data(forKey: "aril.mcpServers"),
+              let servers = try? JSONDecoder().decode([MCPServerConfig].self, from: data) else {
+            return []
+        }
+        return servers
+    }
+
     private func bootstrap() async {
+        // Cache already loaded in init; refresh again in case another process wrote.
+        loadLocalSessions()
         if soloMode {
             await gatewayManager.ensureRunning()
             gatewayURL = gatewayManager.baseURL
         }
-        await refreshHealth()
-        await loadSessions()
-        if selectedSessionID == nil {
-            createSession()
+        await refreshHealth(reloadSessionsOnReady: false)
+        await loadSessions(retryCount: 8)
+        reconcileSelection()
+        // Do not auto-create an empty session — count stays 0 until the user starts one.
+        saveLocalSessions()
+        objectWillChange.send()
+    }
+
+    /// Keep sidebar / chat selection pinned to a real session after list reloads.
+    private func reconcileSelection() {
+        if let selectedSessionID, sessions.contains(where: { $0.id == selectedSessionID }) {
+            return
         }
+        selectedSessionID = sessions.first?.id
     }
 
     func createSession() {
         let session = ChatSession(title: "New session", messages: [])
-        sessions.insert(session, at: 0)
+        // Reassign the array so @Published / sidebar ForEach always refresh.
+        var next = sessions
+        next.insert(session, at: 0)
+        sessions = next
         selectedSessionID = session.id
         draft = ""
         preview = nil
@@ -143,6 +272,8 @@ final class AppState: ObservableObject {
         compareResults = []
         preferredCompareModel = nil
         pendingAttachments = []
+        saveLocalSessions()
+        objectWillChange.send()
         Task { await persistSelectedSession() }
     }
 
@@ -161,9 +292,8 @@ final class AppState: ObservableObject {
             preferredCompareModel = nil
             pendingAttachments = []
         }
-        if sessions.isEmpty {
-            createSession()
-        }
+        // Leave an empty sidebar (count 0) — a session is created only when the user sends.
+        saveLocalSessions()
         do {
             try await client.deleteSession(baseURL: gatewayURL, id: sid)
         } catch {
@@ -184,6 +314,7 @@ final class AppState: ObservableObject {
         compareResults = []
         preferredCompareModel = nil
         pendingAttachments = []
+        saveLocalSessions()
         do {
             try await client.deleteAllSessions(baseURL: gatewayURL)
         } catch {
@@ -191,7 +322,6 @@ final class AppState: ObservableObject {
                 try? await client.deleteSession(baseURL: gatewayURL, id: id.uuidString.lowercased())
             }
         }
-        createSession()
     }
 
     private func persistDeletedSessionIDs() {
@@ -204,7 +334,8 @@ final class AppState: ObservableObject {
         deletedSessionIDs = Set(values.compactMap { UUID(uuidString: $0) })
     }
 
-    func refreshHealth() async {
+    func refreshHealth(reloadSessionsOnReady: Bool = true) async {
+        let wasReady = gatewayReady
         do {
             let health = try await client.health(baseURL: gatewayURL)
             gatewayReady = health.status == "ok"
@@ -213,14 +344,22 @@ final class AppState: ObservableObject {
             if health.gateway == "ready" {
                 let solo = soloMode ? " · Solo" : ""
                 if openRouterConfigured {
-                    gatewayStatus = "Gateway ready · OpenRouter\(solo)"
+                    gatewayStatus = "Gateway ready\(solo)"
                 } else {
-                    gatewayStatus = "OpenRouter API key required\(solo)"
+                    gatewayStatus = "API key required\(solo)"
                 }
             } else {
                 gatewayStatus = health.status
             }
             await refreshOpenRouterKeyStatus()
+            // Reload history once the gateway becomes available after a cold start.
+            // Skipped during bootstrap (which already loads sessions) to avoid races
+            // that clear List selection and look like lost history.
+            if reloadSessionsOnReady, gatewayReady, !wasReady {
+                await loadSessions(retryCount: 5)
+                reconcileSelection()
+                saveLocalSessions()
+            }
         } catch {
             gatewayReady = false
             gatewayStatus = soloMode ? "Starting solo gateway…" : "Gateway offline"
@@ -288,38 +427,82 @@ final class AppState: ObservableObject {
         openRouterKeyMessage = nil
     }
 
-    func loadSessions() async {
-        do {
-            let summaries = try await client.listSessions(baseURL: gatewayURL)
-            var loaded: [ChatSession] = []
-            for summary in summaries.prefix(40) {
-                guard let uuid = UUID(uuidString: summary.id) else { continue }
-                if let detail = try? await client.getSession(baseURL: gatewayURL, id: summary.id) {
-                    let messages = detail.messages.compactMap { msg -> ChatMessage? in
-                        guard let role = ChatMessage.Role(rawValue: msg.role) else { return nil }
-                        return ChatMessage(role: role, content: msg.content)
-                    }
-                    loaded.append(
-                        ChatSession(
-                            id: uuid,
-                            title: detail.title,
-                            messages: messages,
-                            updatedAt: ISO8601DateFormatter().date(from: detail.updatedAt) ?? .now
+    func loadSessions(retryCount: Int = 1) async {
+        let previousSelected = selectedSessionID
+        for attempt in 0..<max(1, retryCount) {
+            do {
+                let summaries = try await client.listSessions(baseURL: gatewayURL)
+                var loaded: [ChatSession] = []
+                for summary in summaries.prefix(40) {
+                    guard let uuid = UUID(uuidString: summary.id) else { continue }
+                    if deletedSessionIDs.contains(uuid) { continue }
+                    do {
+                        let detail = try await client.getSession(baseURL: gatewayURL, id: summary.id)
+                        let messages = detail.messages.compactMap { msg -> ChatMessage? in
+                            guard let role = ChatMessage.Role(rawValue: msg.role) else { return nil }
+                            return ChatMessage(role: role, content: msg.content)
+                        }
+                        loaded.append(
+                            ChatSession(
+                                id: uuid,
+                                title: detail.title,
+                                messages: messages,
+                                updatedAt: Self.parseAPIDate(detail.updatedAt) ?? .now
+                            )
                         )
-                    )
+                    } catch {
+                        // Skip a single bad/oversized session; keep trying others.
+                        continue
+                    }
                 }
-            }
-            if !loaded.isEmpty {
-                sessions = loaded.filter { !deletedSessionIDs.contains($0.id) }
-                if sessions.isEmpty {
-                    createSession()
-                } else {
-                    selectedSessionID = sessions.first?.id
+
+                if !loaded.isEmpty || !summaries.isEmpty {
+                    // Merge gateway history with any local-only sessions / longer local copies.
+                    sessions = Self.mergeSessions(local: sessions, remote: loaded)
+                    sessions.removeAll { deletedSessionIDs.contains($0.id) }
+                    sessions.sort { $0.updatedAt > $1.updatedAt }
+                    if let previousSelected, sessions.contains(where: { $0.id == previousSelected }) {
+                        selectedSessionID = previousSelected
+                    } else {
+                        reconcileSelection()
+                    }
+                    // Re-publish so List/MessageList refresh even when IDs are unchanged.
+                    noteSessionsChanged()
+                    return
                 }
+
+                if attempt + 1 < retryCount {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    continue
+                }
+                return
+            } catch {
+                if attempt + 1 < retryCount {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    continue
+                }
+                // Keep local sessions if gateway history is unavailable
+                return
             }
-        } catch {
-            // Keep local sessions if gateway history is unavailable
         }
+    }
+
+    /// Prefer the richer copy of each session id (more messages / newer update).
+    private static func mergeSessions(local: [ChatSession], remote: [ChatSession]) -> [ChatSession] {
+        var byID: [UUID: ChatSession] = [:]
+        for session in local + remote {
+            if let existing = byID[session.id] {
+                if session.messages.count > existing.messages.count {
+                    byID[session.id] = session
+                } else if session.messages.count == existing.messages.count,
+                          session.updatedAt > existing.updatedAt {
+                    byID[session.id] = session
+                }
+            } else {
+                byID[session.id] = session
+            }
+        }
+        return Array(byID.values)
     }
 
     func selectModel(_ model: String) {
@@ -384,14 +567,24 @@ final class AppState: ObservableObject {
         showIntelligencePanel = true
         preview = nil
         estimatedLatencyMs = nil
-        let idle = Self.analysisIdleSeconds
+        let idle = analysisIdleSeconds
         analysisStatus = .analysing(secondsRemaining: idle)
 
         previewTask = Task {
-            for remaining in stride(from: idle, through: 1, by: -1) {
+            if idle <= 0 {
+                guard !Task.isCancelled else { return }
+                await runPreview()
+                return
+            }
+            // Count down in 0.5s ticks so fractional idle preferences display correctly.
+            var remaining = idle
+            while remaining > 0 {
                 guard !Task.isCancelled else { return }
                 analysisStatus = .analysing(secondsRemaining: remaining)
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let slice = min(0.5, remaining)
+                try? await Task.sleep(nanoseconds: UInt64(slice * 1_000_000_000))
+                remaining = (remaining - slice)
+                if remaining < 0.05 { remaining = 0 }
             }
             guard !Task.isCancelled else { return }
             await runPreview()
@@ -448,6 +641,10 @@ final class AppState: ObservableObject {
 
     func send(promptOverride: String? = nil) {
         sendTask?.cancel()
+        // Show stop control immediately — including during pre-send analysis.
+        isSending = true
+        lastError = nil
+        beginGenerationTracking()
         sendTask = Task {
             await performSend(promptOverride: promptOverride)
         }
@@ -480,12 +677,39 @@ final class AppState: ObservableObject {
         }
         generationPhase = .idle
         isSending = false
+        // Ensure sidebar / bubbles refresh after in-place session mutations.
+        noteSessionsChanged()
         if let error {
             lastError = error
         }
     }
 
+    /// Reassign `sessions` so @Published always notifies (in-place element edits often do not).
+    private func noteSessionsChanged() {
+        sessions = sessions
+        saveLocalSessions()
+    }
+
+    /// Mutate a session and publish; bumps updatedAt and moves it to the top of the sidebar.
+    private func updateSession(_ id: UUID, _ mutate: (inout ChatSession) -> Void) {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        var next = sessions
+        mutate(&next[idx])
+        next[idx].updatedAt = .now
+        let touched = next.remove(at: idx)
+        next.insert(touched, at: 0)
+        sessions = next
+        saveLocalSessions()
+    }
+
     private func performSend(promptOverride: String?) async {
+        // isSending / generation timer already started in send()
+        defer {
+            if isSending {
+                endGenerationTracking()
+            }
+        }
+
         let text = (promptOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
 
@@ -493,20 +717,17 @@ final class AppState: ObservableObject {
             draft = text
         }
 
-        // Always analyse first when we have text (including Manual — grades/alternatives),
-        // but Manual never adopts the recommended model.
         if !text.isEmpty, (preview == nil || analysisStatus != .ready) {
             await runPreview()
+            if Task.isCancelled {
+                return
+            }
         }
 
-        isSending = true
         lastError = nil
-        beginGenerationTracking()
-        defer { endGenerationTracking() }
 
         ensureSession()
-        guard let sid = selectedSessionID,
-              let idx = sessions.firstIndex(where: { $0.id == sid }) else { return }
+        guard let sid = selectedSessionID else { return }
 
         let attachmentNote: String = {
             guard !pendingAttachments.isEmpty else { return "" }
@@ -516,10 +737,15 @@ final class AppState: ObservableObject {
         let displayText = text.isEmpty ? attachmentNote : text + attachmentNote
 
         lastUserPromptForPrefer = text.isEmpty ? displayText : text
-        sessions[idx].messages.append(ChatMessage(role: .user, content: displayText))
-        if sessions[idx].title == "New session" {
-            sessions[idx].title = String((text.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : text).prefix(42))
+        updateSession(sid) { session in
+            session.messages.append(ChatMessage(role: .user, content: displayText))
+            if session.title == "New session" {
+                session.title = String(
+                    (text.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : text).prefix(42)
+                )
+            }
         }
+        guard let idx = sessions.firstIndex(where: { $0.id == sid }) else { return }
         draft = ""
         let attachmentsForSend = pendingAttachments
         pendingAttachments = []
@@ -555,7 +781,7 @@ final class AppState: ObservableObject {
         lastCacheLabel = cacheEligible ? "not cached" : "not eligible"
 
         let historyForAPI = sessions[idx].messages.map {
-            APIChatMessage(role: $0.role.rawValue, content: $0.content)
+            APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForAPI($0.content))
         }
 
         if Task.isCancelled { return }
@@ -570,7 +796,10 @@ final class AppState: ObservableObject {
         }
 
         let assistantID = UUID()
-        sessions[idx].messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
+        updateSession(sid) { session in
+            session.messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
+        }
+        guard sessions.contains(where: { $0.id == sid }) else { return }
 
         let attachmentDTOs = attachmentsForSend.map {
             AttachmentDTO(
@@ -603,7 +832,10 @@ final class AppState: ObservableObject {
                     if self.generationPhase == .thinking {
                         self.generationPhase = .streaming
                     }
-                    self.sessions[i].messages[m].content += token
+                    // Reassign array so @Published notifies during streaming.
+                    var next = self.sessions
+                    next[i].messages[m].content += token
+                    self.sessions = next
                 }
             }
             if Task.isCancelled { return }
@@ -612,41 +844,99 @@ final class AppState: ObservableObject {
             if let ms = done.latencyMs {
                 lastLatencyMs = ms
             }
-            sessions[idx].updatedAt = .now
+            let responseText = sessions.first(where: { $0.id == sid })?
+                .messages.first(where: { $0.id == assistantID })?.content ?? ""
+            recordExchange(
+                prompt: displayText,
+                response: responseText,
+                model: done.model,
+                mode: routeMode.label,
+                status: .completed,
+                latencyMs: done.latencyMs ?? lastLatencyMs
+            )
+            updateSession(sid) { _ in }
+            await persistSelectedSession()
             await refreshHealth()
         } catch is CancellationError {
-            sessions[idx].messages.removeAll { $0.id == assistantID && $0.content.isEmpty }
+            let partial = sessions.first(where: { $0.id == sid })?
+                .messages.first(where: { $0.id == assistantID })?.content ?? ""
+            if !partial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recordExchange(
+                    prompt: displayText,
+                    response: partial,
+                    model: selectedModel,
+                    mode: routeMode.label,
+                    status: .cancelled,
+                    latencyMs: generationElapsedMs
+                )
+            }
+            updateSession(sid) { session in
+                session.messages.removeAll { $0.id == assistantID && $0.content.isEmpty }
+            }
         } catch {
             if Task.isCancelled { return }
             // If tokens already landed in the bubble, treat as success and don't scream.
             let alreadyHasContent: Bool = {
-                guard let m = sessions[idx].messages.firstIndex(where: { $0.id == assistantID }) else { return false }
-                return !sessions[idx].messages[m].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                guard let session = sessions.first(where: { $0.id == sid }),
+                      let msg = session.messages.first(where: { $0.id == assistantID })
+                else { return false }
+                return !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }()
             if alreadyHasContent {
                 lastError = nil
-                sessions[idx].updatedAt = .now
+                let responseText = sessions.first(where: { $0.id == sid })?
+                    .messages.first(where: { $0.id == assistantID })?.content ?? ""
+                recordExchange(
+                    prompt: displayText,
+                    response: responseText,
+                    model: selectedModel,
+                    mode: routeMode.label,
+                    status: .completed,
+                    latencyMs: lastLatencyMs ?? generationElapsedMs
+                )
+                updateSession(sid) { _ in }
+                await persistSelectedSession()
                 await refreshHealth()
                 return
             }
             do {
                 let response = try await client.chat(baseURL: gatewayURL, request: request)
-                if let m = sessions[idx].messages.firstIndex(where: { $0.id == assistantID }) {
-                    sessions[idx].messages[m].content = response.message.content
+                updateSession(sid) { session in
+                    if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                        session.messages[m].content = response.message.content
+                    }
                 }
                 lastError = nil
                 lastCacheLabel = response.cached ? "cached" : "not cached"
                 generationPhase = .streaming
-                sessions[idx].updatedAt = .now
+                recordExchange(
+                    prompt: displayText,
+                    response: response.message.content,
+                    model: response.model,
+                    mode: routeMode.label,
+                    status: .completed
+                )
+                await persistSelectedSession()
             } catch {
                 lastError = error.localizedDescription
-                sessions[idx].messages.removeAll { $0.id == assistantID }
+                recordExchange(
+                    prompt: displayText,
+                    response: "",
+                    model: selectedModel,
+                    mode: routeMode.label,
+                    status: .error,
+                    errorMessage: error.localizedDescription
+                )
+                updateSession(sid) { session in
+                    session.messages.removeAll { $0.id == assistantID }
+                }
             }
         }
     }
 
     private func sendCompare(sessionID: UUID, index: Int, history: [APIChatMessage], models: [String]) async {
         generationPhase = .thinking
+        let promptText = history.last(where: { $0.role == "user" })?.content ?? lastUserPromptForPrefer
         do {
             let response = try await client.compare(
                 baseURL: gatewayURL,
@@ -675,42 +965,138 @@ final class AppState: ObservableObject {
             if let fastest = response.results.map(\.latencyMs).min() {
                 lastLatencyMs = fastest
             }
-            sessions[index].updatedAt = .now
-            await refreshHealth()
+            let summary = response.results.map { result in
+                let preview = String(result.content.prefix(240))
+                return "[\(shortModelLeaf(result.model))] \(preview)"
+            }.joined(separator: "\n\n---\n\n")
+            recordExchange(
+                prompt: promptText,
+                response: summary,
+                model: models.joined(separator: ", "),
+                mode: RouteMode.compare.label,
+                status: .compare,
+                latencyMs: lastLatencyMs
+            )
+            // Persist the user prompt already appended locally; Prefer commits the reply.
+            await persistSelectedSession()
         } catch {
             if !Task.isCancelled {
                 lastError = error.localizedDescription
+                recordExchange(
+                    prompt: promptText,
+                    response: "",
+                    model: models.joined(separator: ", "),
+                    mode: RouteMode.compare.label,
+                    status: .error,
+                    errorMessage: error.localizedDescription
+                )
             }
         }
     }
 
+    private func shortModelLeaf(_ id: String) -> String {
+        id.split(separator: "/").last.map(String.init) ?? id
+    }
+
+    /// Drop embedded base64 images / huge blobs from outbound context (UI keeps originals).
+    static func sanitizeContentForAPI(_ content: String) -> String {
+        guard !content.isEmpty else { return content }
+        var text = content
+        if let md = try? NSRegularExpression(
+            pattern: #"!\[[^\]]*\]\(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+\)"#,
+            options: [.caseInsensitive]
+        ) {
+            text = md.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "![Generated image](omitted-from-context)"
+            )
+        }
+        if let raw = try? NSRegularExpression(
+            pattern: #"data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{200,}"#,
+            options: [.caseInsensitive]
+        ) {
+            text = raw.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "data:image/(omitted-from-context)"
+            )
+        }
+        let maxChars = 24_000
+        if text.count > maxChars {
+            let keep = text.prefix(maxChars - 40)
+            text = String(keep) + "\n\n…[truncated for model context]"
+        }
+        return text
+    }
+
     func preferCompareResult(_ result: CompareResultDTO) async {
-        preferredCompareModel = result.model
-        selectModel(result.model)
+        let prompt = lastUserPromptForPrefer
         let suggested = result.suggestedCategory
         let chosenCategory = compareCategoryDraft[result.model] ?? suggested
         let accuracy = compareAccuracyDraft[result.model]
         let overridden = chosenCategory != nil && chosenCategory != suggested
+
+        // Commit the preferred exchange into the transcript immediately, then
+        // leave Judge for Auto — do not call selectModel (that forces Manual).
+        preferredCompareModel = result.model
+        if let sid = selectedSessionID {
+            updateSession(sid) { session in
+                while let last = session.messages.last,
+                      last.role == .assistant,
+                      last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    session.messages.removeLast()
+                }
+                let lastIsMatchingUser = session.messages.last.map {
+                    $0.role == .user && $0.content == prompt
+                } ?? false
+                if !lastIsMatchingUser {
+                    session.messages.append(ChatMessage(role: .user, content: prompt))
+                }
+                session.messages.append(ChatMessage(role: .assistant, content: result.content))
+            }
+        }
+
+        compareResults = []
+        preferredCompareModel = result.model
+        routeMode = .auto
+        draft = ""
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        isSending = false
+        generationPhase = .idle
+        generationTimerTask?.cancel()
+        generationTimerTask = nil
+
+        recordExchange(
+            prompt: prompt,
+            response: result.content,
+            model: result.model,
+            mode: "\(RouteMode.compare.label) · Prefer",
+            status: .completed,
+            latencyMs: result.latencyMs
+        )
+        saveLocalSessions()
+
+        // Teach routing off the UI path so Prefer never feels hung.
         do {
             _ = try await client.prefer(
                 baseURL: gatewayURL,
                 request: PreferRequestDTO(
-                    prompt: lastUserPromptForPrefer,
+                    prompt: prompt,
                     model: result.model,
                     category: chosenCategory,
                     accuracy: accuracy,
                     categoryOverridden: overridden,
-                    sessionId: selectedSessionID?.uuidString
+                    sessionId: selectedSessionID?.uuidString.lowercased()
                 )
             )
-            if let idx = sessions.firstIndex(where: { $0.id == selectedSessionID }) {
-                sessions[idx].messages.append(
-                    ChatMessage(role: .assistant, content: result.content)
-                )
-            }
+            await persistSelectedSession()
             await loadClassifications()
         } catch {
             lastError = error.localizedDescription
+            await persistSelectedSession()
         }
     }
 
@@ -845,6 +1231,7 @@ final class AppState: ObservableObject {
     }
 
     func shutdown() {
+        saveLocalSessions()
         gatewayManager.stop()
     }
 
@@ -881,14 +1268,67 @@ final class AppState: ObservableObject {
         }
     }
 
+    private var localSessionsURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("ARIL", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("sessions-cache.json")
+    }
+
+    private struct LocalSessionsCache: Codable {
+        var selectedSessionID: UUID?
+        var sessions: [ChatSession]
+    }
+
+    private func loadLocalSessions() {
+        let url = localSessionsURL
+        guard let data = try? Data(contentsOf: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .deferredToDate
+        guard let cache = try? decoder.decode(LocalSessionsCache.self, from: data) else { return }
+        let restored = cache.sessions.filter { !deletedSessionIDs.contains($0.id) }
+        guard !restored.isEmpty else { return }
+        // Prefer richer local copy when bootstrap races with an empty in-memory list.
+        sessions = Self.mergeSessions(local: sessions, remote: restored)
+            .sorted { $0.updatedAt > $1.updatedAt }
+        if let selected = cache.selectedSessionID, sessions.contains(where: { $0.id == selected }) {
+            selectedSessionID = selected
+        } else {
+            reconcileSelection()
+        }
+    }
+
+    private func saveLocalSessions() {
+        let cache = LocalSessionsCache(selectedSessionID: selectedSessionID, sessions: sessions)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .deferredToDate
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(cache) else { return }
+        try? data.write(to: localSessionsURL, options: [.atomic])
+    }
+
+    /// Gateway timestamps use fractional seconds; default ISO8601DateFormatter misses them.
+    private static func parseAPIDate(_ raw: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFraction.date(from: raw) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: raw)
+    }
+
     private func persistSelectedSession() async {
         guard let session = selectedSession else { return }
         // Never re-upsert a locally deleted session id.
         if deletedSessionIDs.contains(session.id) { return }
+        saveLocalSessions()
         let payload = SessionUpsertDTO(
             id: session.id.uuidString.lowercased(),
             title: session.title,
-            messages: session.messages.map { APIChatMessage(role: $0.role.rawValue, content: $0.content) }
+            messages: session.messages.map {
+                APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForAPI($0.content))
+            }
         )
         _ = try? await client.upsertSession(baseURL: gatewayURL, session: payload)
     }

@@ -29,7 +29,7 @@ class RoutingProfile(BaseModel):
     coding: str = "openai/gpt-4.1"
     security: str = "anthropic/claude-sonnet-4"
     reasoning: str = "anthropic/claude-opus-4"
-    vision: str = "google/gemini-2.5-flash"
+    vision: str = "google/gemini-2.5-flash-image"
     cost: str = "openai/gpt-4.1-mini"
     performance: str = "google/gemini-2.5-flash"
     confidence: str = "anthropic/claude-opus-4"

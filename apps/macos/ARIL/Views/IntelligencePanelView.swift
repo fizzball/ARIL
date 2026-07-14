@@ -12,7 +12,9 @@ struct IntelligencePanelView: View {
                     .foregroundStyle(theme.palette.accent)
 
                 if case .analysing(let remaining) = state.analysisStatus {
-                    Text(remaining > 0 ? "Analysing prompt… \(remaining)s" : "Analysing prompt…")
+                    Text(remaining > 0
+                          ? String(format: "Analysing prompt… %.1fs", remaining)
+                          : "Analysing prompt…")
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.textMuted)
                     ProgressView()
@@ -50,7 +52,7 @@ struct IntelligencePanelView: View {
 
             if case .analysing(let remaining) = state.analysisStatus {
                 Text(remaining > 0
-                      ? "Pause typing for \(remaining)s to finish analysis. Editing resets the timer."
+                      ? String(format: "Pause typing for %.1fs to finish analysis. Editing resets the timer.", remaining)
                       : "Running classification, grading, and route scoring…")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.textMuted)
@@ -61,12 +63,13 @@ struct IntelligencePanelView: View {
             }
         }
         .padding(14)
-        .background(theme.palette.backgroundElevated.opacity(0.95))
+        .background(theme.palette.analysisFill)
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(theme.palette.accent.opacity(0.25), lineWidth: 1)
+                .stroke(theme.palette.accent.opacity(0.55), lineWidth: 1.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.4 : 0.1), radius: 10, y: 3)
     }
 
     @ViewBuilder
@@ -79,10 +82,26 @@ struct IntelligencePanelView: View {
             )
             metric("Tokens", "\(preview.cache.estimatedInputTokens)")
             if let top = preview.routes.first {
+                let willCache = preview.cache.eligible && preview.cache.wouldHit
+                let costWarning = state.hasConfiguredMCPServers || state.webSearchEnabled
+                let baseHelp = "Estimated USD cost for the top recommended route (input + expected output)."
+                let warnHelp = "If Web search or MCP servers are used, costs may increase."
+                let cacheHelp = "This prompt looks cacheable — expected to hit the prompt cache (shown in green)."
+                let costColor: Color? = {
+                    if willCache { return Color(red: 0.35, green: 0.78, blue: 0.45) }
+                    if costWarning { return Color(red: 0.95, green: 0.80, blue: 0.20) }
+                    return nil
+                }()
+                let costHelp: String = {
+                    if willCache { return "\(baseHelp) \(cacheHelp)" }
+                    if costWarning { return "\(baseHelp) \(warnHelp)" }
+                    return baseHelp
+                }()
                 metric(
                     "Cost",
                     String(format: "$%.4f", top.estimatedCostUsd),
-                    help: "Estimated USD cost for the top recommended route (input + expected output)."
+                    valueColor: costColor,
+                    help: costHelp
                 )
             }
             if let latency = state.estimatedLatencyMs ?? state.lastLatencyMs {
@@ -133,15 +152,17 @@ struct IntelligencePanelView: View {
                         .foregroundStyle(theme.palette.textMuted)
                         .lineLimit(3)
                     HStack {
-                        Button("Use in editor") {
+                        Button("Edit") {
                             state.applyAlternative(alt)
                         }
-                        .buttonStyle(.borderless)
-                        Button("Submit suggestion") {
+                        .buttonStyle(.bordered)
+                        .help("Copy this recommended prompt into the entry field")
+                        Button("Submit") {
                             state.submitAlternative(alt)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(theme.palette.accentStrong)
+                        .help("Send this recommended prompt now")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

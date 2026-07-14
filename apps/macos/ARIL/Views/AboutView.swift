@@ -8,13 +8,8 @@ struct AboutView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 16) {
-                Image("ARILMark")
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
+                ARILGhostMark(color: theme.palette.accent, lineWidth: 2.2)
                     .frame(width: 72, height: 72)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("ARIL")
@@ -74,14 +69,19 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.4", changes: [
+            "Session history restores on launch (local cache + gateway merge; selection no longer clears)",
+            "Ghost mark sits beside the ARIL label in chat bubbles",
+        ]),
         ChangelogEntry(version: "0.3.3", changes: [
             "Compare runs 3 models with category + accuracy feedback that teaches future routing",
             "Preferences → Learning lists editable prompt classifications",
             "Analysis button shows confidence-index breakdown and overrides",
             "Deleted sessions stay deleted (tombstones + bulk delete API)",
+            "Preferences → MCP to configure servers; Cost estimate highlights yellow when MCP is in use",
         ]),
         ChangelogEntry(version: "0.3.2", changes: [
-            "Web search as a checkbox toggle; prompt analysis after 2s idle",
+            "Web search as a checkbox toggle; configurable prompt analysis idle delay",
             "Manual mode grades prompts without swapping models (red lock)",
             "Mode switches clear the draft; Compare uses a reliable model pair",
             "Live Thinking/Streaming status with elapsed timer",

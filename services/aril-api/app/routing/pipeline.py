@@ -46,9 +46,9 @@ CATEGORY_RECOMMENDATIONS: dict[RouteCategory, list[str]] = {
         "anthropic/claude-sonnet-4",
     ],
     RouteCategory.vision: [
+        "google/gemini-2.5-flash-image",
         "google/gemini-2.5-flash",
         "openai/gpt-4.1",
-        "anthropic/claude-sonnet-4",
     ],
     RouteCategory.cost: [
         "openai/gpt-4.1-mini",
@@ -88,6 +88,24 @@ VISION_HINTS = re.compile(
     r"\b(image|screenshot|photo|picture|diagram|chart|visual|ocr|describe what you see|looking at)\b",
     re.I,
 )
+# Text-to-image / generative intent (checked before generic vision)
+IMAGE_GEN_HINTS = re.compile(
+    r"("
+    r"\b(generate|create|draw|paint|make|design|render|illustrate)\b.{0,40}\b(image|picture|illustration|photo|artwork|logo|icon|portrait|scene)\b"
+    r"|"
+    r"\b(image|picture|illustration|artwork|logo)\b.{0,20}\b(of|showing|depicting|with)\b"
+    r"|"
+    r"\b(text[\s-]?to[\s-]?image|dall[\s-]?e|stable diffusion|flux)\b"
+    r")",
+    re.I,
+)
+
+# OpenRouter chat model that can emit images when modalities=["image","text"]
+IMAGE_GEN_MODEL = "google/gemini-2.5-flash-image"
+
+
+def wants_image_generation(prompt: str) -> bool:
+    return bool(IMAGE_GEN_HINTS.search(prompt or ""))
 
 
 def estimate_tokens(text: str) -> int:
@@ -103,6 +121,12 @@ def resolve_profile(profile: RoutingProfile | None) -> dict[RouteCategory, str]:
 
 def classify(prompt: str) -> ClassificationResult:
     secondary: list[RouteCategory] = []
+    if wants_image_generation(prompt):
+        return ClassificationResult(
+            primary=RouteCategory.vision,
+            secondary=[RouteCategory.general],
+            confidence=0.86,
+        )
     if VISION_HINTS.search(prompt):
         return ClassificationResult(
             primary=RouteCategory.vision,
@@ -323,6 +347,8 @@ def build_preview(
         recommended = req.preferred_model
     elif user_override and user_override.model and user_override.category_overridden:
         recommended = user_override.model
+    elif wants_image_generation(req.prompt):
+        recommended = IMAGE_GEN_MODEL
     else:
         recommended = profile_pick
 

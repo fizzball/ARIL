@@ -11,6 +11,39 @@ from app.core.config import settings
 from app.providers.base import LLMProvider, ProviderMessage, ProviderResult, StreamChunk
 
 
+def _extract_message_content(message: dict) -> str:
+    """Flatten text + OpenRouter image payloads into markdown-friendly content."""
+    content = message.get("content") or ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "text" and item.get("text"):
+                parts.append(str(item["text"]))
+            elif item.get("type") == "image_url":
+                url = ((item.get("image_url") or {}) if isinstance(item.get("image_url"), dict) else {}).get(
+                    "url"
+                ) or item.get("url")
+                if url:
+                    parts.append(f"![Generated image]({url})")
+        content = "\n\n".join(parts)
+
+    images = message.get("images") or []
+    image_mds: list[str] = []
+    for img in images:
+        if not isinstance(img, dict):
+            continue
+        image_url = img.get("image_url") if isinstance(img.get("image_url"), dict) else {}
+        url = (image_url or {}).get("url") or img.get("url")
+        if url:
+            image_mds.append(f"![Generated image]({url})")
+    if image_mds:
+        extra = "\n\n".join(image_mds)
+        content = f"{content}\n\n{extra}".strip() if content else extra
+    return content if isinstance(content, str) else str(content)
+
+
 class OpenRouterProvider(LLMProvider):
     name = "openrouter"
 
@@ -59,6 +92,7 @@ class OpenRouterProvider(LLMProvider):
         temperature: float,
         stream: bool,
         web_search: bool,
+        generate_image: bool = False,
     ) -> dict:
         payload: dict = {
             "model": model,
@@ -71,6 +105,13 @@ class OpenRouterProvider(LLMProvider):
         if web_search:
             # OpenRouter web plugin — live search grounded answers
             payload["plugins"] = [{"id": "web"}]
+        if generate_image:
+            # Required for image-capable chat models (Gemini Flash Image, etc.)
+            model_l = (model or "").lower()
+            if any(tok in model_l for tok in ("flux", "sourceful", "seedream", "dall-e", "dalle")):
+                payload["modalities"] = ["image"]
+            else:
+                payload["modalities"] = ["image", "text"]
         return payload
 
     async def complete(
@@ -80,10 +121,16 @@ class OpenRouterProvider(LLMProvider):
         model: str,
         temperature: float,
         web_search: bool = False,
+        generate_image: bool = False,
     ) -> ProviderResult:
         self._require_key()
         payload = self._build_payload(
-            messages, model=model, temperature=temperature, stream=False, web_search=web_search
+            messages,
+            model=model,
+            temperature=temperature,
+            stream=False,
+            web_search=web_search,
+            generate_image=generate_image,
         )
 
         async with httpx.AsyncClient(timeout=180.0) as client:
@@ -102,7 +149,7 @@ class OpenRouterProvider(LLMProvider):
             raise RuntimeError(f"OpenRouter returned no choices: {data!r}")
 
         message = choices[0].get("message") or {}
-        content = message.get("content") or ""
+        content = _extract_message_content(message)
         usage = data.get("usage") or {}
         in_tok = int(usage.get("prompt_tokens") or 0)
         out_tok = int(usage.get("completion_tokens") or 0)
@@ -124,10 +171,36 @@ class OpenRouterProvider(LLMProvider):
         model: str,
         temperature: float,
         web_search: bool = False,
+        generate_image: bool = False,
     ) -> AsyncIterator[StreamChunk]:
+        # Image generation is more reliable as a single non-stream completion.
+        if generate_image:
+            result = await self.complete(
+                messages,
+                model=model,
+                temperature=temperature,
+                web_search=web_search,
+                generate_image=True,
+            )
+            if result.content:
+                yield StreamChunk(content=result.content, model=result.model)
+            yield StreamChunk(
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_usd=result.cost_usd,
+                done=True,
+            )
+            return
+
         self._require_key()
         payload = self._build_payload(
-            messages, model=model, temperature=temperature, stream=True, web_search=web_search
+            messages,
+            model=model,
+            temperature=temperature,
+            stream=True,
+            web_search=web_search,
+            generate_image=False,
         )
 
         async with httpx.AsyncClient(timeout=None) as client:
@@ -156,7 +229,16 @@ class OpenRouterProvider(LLMProvider):
                     choices = data.get("choices") or []
                     if choices:
                         delta = choices[0].get("delta") or {}
-                        chunk.content = delta.get("content") or ""
+                        # Prefer incremental text; also fold any image payloads.
+                        text = delta.get("content") or ""
+                        if isinstance(text, list):
+                            text = _extract_message_content({"content": text})
+                        images = delta.get("images") or (choices[0].get("message") or {}).get("images")
+                        if images:
+                            folded = _extract_message_content({"content": text, "images": images})
+                            chunk.content = folded
+                        else:
+                            chunk.content = text if isinstance(text, str) else str(text)
                         chunk.finish_reason = choices[0].get("finish_reason")
                     usage = data.get("usage") or {}
                     if usage:

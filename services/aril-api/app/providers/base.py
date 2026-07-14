@@ -47,6 +47,7 @@ class LLMProvider(ABC):
         model: str,
         temperature: float,
         web_search: bool = False,
+        generate_image: bool = False,
     ) -> ProviderResult:
         raise NotImplementedError
 
@@ -57,10 +58,15 @@ class LLMProvider(ABC):
         model: str,
         temperature: float,
         web_search: bool = False,
+        generate_image: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """Default: emit the full completion as a single chunk."""
         result = await self.complete(
-            messages, model=model, temperature=temperature, web_search=web_search
+            messages,
+            model=model,
+            temperature=temperature,
+            web_search=web_search,
+            generate_image=generate_image,
         )
         if result.content:
             yield StreamChunk(content=result.content, model=result.model)
@@ -85,11 +91,13 @@ class StubProvider(LLMProvider):
         model: str,
         temperature: float,
         web_search: bool = False,
+        generate_image: bool = False,
     ) -> ProviderResult:
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         web = " · web" if web_search else ""
+        img = " · image" if generate_image else ""
         reply = (
-            f"[ARIL stub · {model} · temp={temperature:.2f}{web}]\n\n"
+            f"[ARIL stub · {model} · temp={temperature:.2f}{web}{img}]\n\n"
             f"Received your prompt ({len(last_user)} chars). "
             "Set OPENROUTER_API_KEY to enable live multi-model routing."
         )

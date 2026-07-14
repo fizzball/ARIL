@@ -37,7 +37,21 @@ struct ContentView: View {
         }
         .background(theme.palette.background)
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    state.showExchangeLog = true
+                } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                }
+                .help("Log analysis — last 20 sends and responses")
+
+                Button {
+                    openSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help("Preferences")
+
                 Button {
                     state.shutdown()
                     NSApplication.shared.terminate(nil)
@@ -54,9 +68,15 @@ struct ContentView: View {
                 .help("About ARIL")
             }
         }
+        .sheet(isPresented: $state.showExchangeLog) {
+            LogAnalysisView()
+                .environmentObject(state)
+                .environmentObject(theme)
+        }
         .preferredColorScheme(theme.palette.colorScheme)
         .task {
-            await state.refreshHealth()
+            // Health only — bootstrap owns the first session load to avoid a selection race.
+            await state.refreshHealth(reloadSessionsOnReady: false)
         }
     }
 }

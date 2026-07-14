@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
@@ -7,17 +8,36 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             gatewayTab
-                .tabItem { Label("Gateway", systemImage: "network") }
+                .tabItem { Label("General", systemImage: "gearshape") }
             routingTab
                 .tabItem { Label("Models", systemImage: "cpu") }
+            mcpTab
+                .tabItem { Label("MCP", systemImage: "server.rack") }
             learningTab
                 .tabItem { Label("Learning", systemImage: "brain") }
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 640, height: 520)
+        .frame(width: 640, height: 540)
+        .navigationTitle("Preferences")
         .task {
             await state.loadClassifications()
+            Self.renameSettingsWindow()
+        }
+        .onAppear {
+            Self.renameSettingsWindow()
+        }
+    }
+
+    /// macOS Settings scene defaults to "Settings"; prefer "Preferences".
+    private static func renameSettingsWindow() {
+        DispatchQueue.main.async {
+            for window in NSApplication.shared.windows {
+                let title = window.title
+                if title == "Settings" || title == "ARIL Settings" || title.hasSuffix("Settings") {
+                    window.title = "Preferences"
+                }
+            }
         }
     }
 
@@ -110,13 +130,16 @@ struct SettingsView: View {
                     HStack {
                         Text("Temperature")
                         Spacer(minLength: 0)
-                        Text(String(format: "%.1f", state.temperature))
+                        Text(String(format: "%.1f", state.defaultTemperature))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
 
                     // Native Form Slider ignores maxWidth on macOS — draw a full-width track.
-                    FullWidthTemperatureSlider(value: $state.temperature)
+                    FullWidthTemperatureSlider(value: Binding(
+                        get: { state.defaultTemperature },
+                        set: { state.setDefaultTemperature($0) }
+                    ))
 
                     HStack(spacing: 0) {
                         Text("0 · Accuracy")
@@ -127,9 +150,37 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    Text("Applies to the analysis panel on launch and whenever you change this default. Mid-session slider changes stay until the next launch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
+            }
+
+            Section("Prompt analysis delay") {
+                HStack {
+                    Text("Idle before analysis")
+                    Spacer()
+                    Stepper(
+                        value: Binding(
+                            get: { state.analysisIdleSeconds },
+                            set: { state.setAnalysisIdleSeconds($0) }
+                        ),
+                        in: 0...10,
+                        step: 0.5
+                    ) {
+                        Text(state.analysisIdleSeconds == 0
+                              ? "Immediate"
+                              : String(format: "%.1f s", state.analysisIdleSeconds))
+                            .monospacedDigit()
+                            .frame(minWidth: 72, alignment: .trailing)
+                    }
+                }
+                Text("How long to wait after you stop typing before running prompt analysis. 0 runs immediately; up to 10 seconds in 0.5s steps.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Sessions") {
@@ -146,8 +197,8 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .task {
             await state.refreshOpenRouterKeyStatus()
-            if state.temperature > 1 {
-                state.temperature = 1
+            if state.defaultTemperature > 1 || state.defaultTemperature < 0 {
+                state.setDefaultTemperature(state.defaultTemperature)
             }
         }
     }
@@ -194,6 +245,40 @@ struct SettingsView: View {
                         .labelsHidden()
                     }
                     .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding()
+        .formStyle(.grouped)
+    }
+
+    private var mcpTab: some View {
+        Form {
+            Section("MCP servers") {
+                Toggle("Use MCP servers", isOn: Binding(
+                    get: { state.mcpEnabled },
+                    set: { state.setMCPEnabled($0) }
+                ))
+                Text("When enabled with at least one ready server, cost estimates are highlighted to warn that tool use may raise spend. Add servers below even before enabling.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if state.mcpServers.isEmpty {
+                    Text("No MCP servers yet. Add one to point at a local stdio process or an SSE/HTTP endpoint.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach($state.mcpServers) { $server in
+                        MCPServerRow(server: $server) {
+                            state.removeMCPServer(server.id)
+                        }
+                        .onChange(of: server) { _, _ in
+                            state.persistMCPServers()
+                        }
+                    }
+                }
+
+                Button("Add MCP server") {
+                    state.addMCPServer()
                 }
             }
         }
@@ -383,5 +468,37 @@ private struct ClassificationRow: View {
                 accuracy = acc
             }
         }
+    }
+}
+
+private struct MCPServerRow: View {
+    @Binding var server: MCPServerConfig
+    var onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Toggle(isOn: $server.enabled) {
+                    TextField("Name", text: $server.name)
+                }
+                Spacer(minLength: 8)
+                Button("Remove", role: .destructive, action: onRemove)
+                    .buttonStyle(.borderless)
+            }
+
+            Picker("Transport", selection: $server.transport) {
+                ForEach(MCPTransport.allCases) { transport in
+                    Text(transport.label).tag(transport)
+                }
+            }
+
+            if server.transport == .stdio {
+                TextField("Command (e.g. npx or /usr/local/bin/server)", text: $server.endpoint)
+                TextField("Arguments (optional, space-separated)", text: $server.args)
+            } else {
+                TextField("URL (e.g. https://host/mcp)", text: $server.endpoint)
+            }
+        }
+        .padding(.vertical, 6)
     }
 }

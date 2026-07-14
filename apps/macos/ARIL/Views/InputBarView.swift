@@ -18,7 +18,7 @@ struct InputBarView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
-                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Compare runs two models.")
+                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge runs three models for side-by-side review.")
 
                 if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
                     Text(cat.label.uppercased())
@@ -80,6 +80,8 @@ struct InputBarView: View {
                     .font(ARILTheme.bodyFont)
                     .foregroundStyle(theme.palette.text)
                     .lineLimit(1...6)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
                     .focused($focused)
                     .onChange(of: state.draft) { _, _ in
                         state.schedulePreview()
@@ -88,64 +90,72 @@ struct InputBarView: View {
                         state.send()
                     }
 
-                Menu {
-                    ForEach(AppState.modelCatalog, id: \.self) { model in
-                        Button {
-                            state.selectModel(model)
-                        } label: {
-                            HStack {
-                                Text(model)
-                                if model == state.defaultModel {
-                                    Text("DEFAULT")
-                                        .font(.caption2)
+                HStack(alignment: .bottom, spacing: 8) {
+                    Menu {
+                        ForEach(AppState.modelCatalog, id: \.self) { model in
+                            Button {
+                                state.selectModel(model)
+                            } label: {
+                                HStack {
+                                    Text(model)
+                                    if model == state.defaultModel {
+                                        Text("DEFAULT")
+                                            .font(.caption2)
+                                    }
                                 }
                             }
                         }
+                    } label: {
+                        Text(shortModel(state.selectedModel))
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(modelLabelColor)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 128, alignment: .trailing)
                     }
-                } label: {
-                    Text(shortModel(state.selectedModel))
-                        .font(ARILTheme.captionFont)
-                        .foregroundStyle(modelLabelColor)
-                }
-                .menuStyle(.borderlessButton)
-                .help(modelHelp)
+                    .menuStyle(.borderlessButton)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help(modelHelp)
 
-                if state.isSending {
-                    Button {
-                        state.stopGeneration()
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(theme.palette.danger)
-                                .frame(width: 28, height: 28)
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
+                    if state.isSending {
+                        Button {
+                            state.stopGeneration()
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(theme.palette.danger)
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
                         }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Stop generation")
-                } else {
-                    Button {
-                        state.send()
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(theme.palette.accentStrong)
-                                .frame(width: 28, height: 28)
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(theme.palette.background)
+                        .buttonStyle(.plain)
+                        .help("Stop generation")
+                        .keyboardShortcut(.cancelAction)
+                    } else {
+                        Button {
+                            state.send()
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(theme.palette.accentStrong)
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(theme.palette.background)
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(
+                            state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                && state.pendingAttachments.isEmpty
+                        )
+                        .opacity(
+                            state.draft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
+                        )
+                        .help("Send")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(
-                        state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            && state.pendingAttachments.isEmpty
-                    )
-                    .opacity(
-                        state.draft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
-                    )
                 }
             }
         }
@@ -178,7 +188,7 @@ struct InputBarView: View {
         case .manual:
             return "Manual mode — model is locked (shown in red) and will not be swapped by ARIL"
         case .compare:
-            return "Compare mode — two models will be evaluated side by side"
+            return "Judge mode — three models are evaluated side by side"
         }
     }
 

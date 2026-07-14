@@ -17,10 +17,6 @@ struct StatusFooterView: View {
                         : theme.palette.textMuted
                 )
 
-            Text(state.chatProvider)
-                .font(ARILTheme.captionFont)
-                .foregroundStyle(theme.palette.textMuted.opacity(0.7))
-
             if state.lastCacheLabel == "cached" || state.lastCacheLabel == "not cached" {
                 Text(state.lastCacheLabel)
                     .font(ARILTheme.captionFont)

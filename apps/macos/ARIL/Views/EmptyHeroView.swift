@@ -7,15 +7,11 @@ struct EmptyHeroView: View {
     var body: some View {
         VStack(spacing: 14) {
             Spacer()
-            Image("ARILMark")
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
+            ARILGhostMark(color: theme.palette.accent, lineWidth: 2.4)
                 .frame(width: 88, height: 88)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
                 .opacity(appeared ? 1 : 0)
                 .scaleEffect(appeared ? 1 : 0.92)
+                .offset(y: appeared ? 0 : 6)
 
             Text("ARIL")
                 .font(ARILTheme.wordmarkFont)

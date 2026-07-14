@@ -8,7 +8,7 @@ struct CompareResultsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Compare — 3 models analysed. Adjust category / accuracy, then Prefer to teach routing.")
+            Text("Judge — 3 models analysed. Adjust category / accuracy, then Prefer to teach routing.")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.accent)
                 .padding(.horizontal, 28)
@@ -73,12 +73,18 @@ private struct CompareCard: View {
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.danger)
             } else {
-                Text(result.content)
-                    .font(ARILTheme.bodyFont)
-                    .foregroundStyle(theme.palette.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(maxHeight: 180, alignment: .top)
+                ScrollView {
+                    Text(result.content)
+                        .font(ARILTheme.bodyFont)
+                        .foregroundStyle(theme.palette.text)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 180, alignment: .top)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(theme.palette.hairline, lineWidth: 1)
+                )
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Response category")

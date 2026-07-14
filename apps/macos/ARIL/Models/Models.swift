@@ -7,7 +7,7 @@ enum RouteMode: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .auto: return "Auto"
         case .manual: return "Manual"
-        case .compare: return "Compare"
+        case .compare: return "Judge"
         }
     }
 }
@@ -133,7 +133,7 @@ struct RoutingProfile: Hashable, Codable {
     }
 }
 
-struct ChatSession: Identifiable, Hashable {
+struct ChatSession: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var messages: [ChatMessage]
@@ -147,8 +147,8 @@ struct ChatSession: Identifiable, Hashable {
     }
 }
 
-struct ChatMessage: Identifiable, Hashable {
-    enum Role: String, Hashable {
+struct ChatMessage: Identifiable, Hashable, Codable {
+    enum Role: String, Hashable, Codable {
         case system, user, assistant
     }
 
@@ -182,5 +182,100 @@ struct PendingAttachment: Identifiable, Hashable {
         let kb = Double(data.count) / 1024.0
         if kb < 1024 { return String(format: "%.0f KB", kb) }
         return String(format: "%.1f MB", kb / 1024.0)
+    }
+}
+
+enum MCPTransport: String, CaseIterable, Identifiable, Codable {
+    case stdio
+    case sse
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .stdio: return "stdio (local command)"
+        case .sse: return "SSE / HTTP"
+        }
+    }
+}
+
+/// User-configured MCP server entry (Preferences). Runtime wiring can consume this list later.
+struct MCPServerConfig: Identifiable, Hashable, Codable {
+    var id: UUID
+    var name: String
+    var transport: MCPTransport
+    /// Executable for stdio, or base URL for SSE/HTTP.
+    var endpoint: String
+    /// Optional argv for stdio (space-separated).
+    var args: String
+    var enabled: Bool
+
+    init(
+        id: UUID = UUID(),
+        name: String = "",
+        transport: MCPTransport = .stdio,
+        endpoint: String = "",
+        args: String = "",
+        enabled: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.transport = transport
+        self.endpoint = endpoint
+        self.args = args
+        self.enabled = enabled
+    }
+
+    var isReady: Bool {
+        enabled && !endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        let leaf = endpoint.split(separator: "/").last.map(String.init) ?? endpoint
+        return leaf.isEmpty ? "Untitled MCP server" : leaf
+    }
+}
+
+/// In-memory turn log for Preferences-style analysis (last N send/response pairs).
+struct ExchangeLogEntry: Identifiable, Hashable {
+    enum Status: String, Hashable {
+        case completed
+        case error
+        case cancelled
+        case compare
+    }
+
+    let id: UUID
+    let timestamp: Date
+    let prompt: String
+    var response: String
+    var model: String
+    var mode: String
+    var status: Status
+    var latencyMs: Int?
+    var errorMessage: String?
+
+    init(
+        id: UUID = UUID(),
+        timestamp: Date = .now,
+        prompt: String,
+        response: String,
+        model: String,
+        mode: String,
+        status: Status,
+        latencyMs: Int? = nil,
+        errorMessage: String? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.prompt = prompt
+        self.response = response
+        self.model = model
+        self.mode = mode
+        self.status = status
+        self.latencyMs = latencyMs
+        self.errorMessage = errorMessage
     }
 }

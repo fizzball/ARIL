@@ -3,9 +3,82 @@
 from __future__ import annotations
 
 import base64
+import re
 
 from app.core.schemas import Attachment, ChatMessage
 from app.providers.base import ProviderMessage
+
+# Markdown images / raw data URLs — usually generated images retained in history.
+_DATA_IMAGE_MD = re.compile(
+    r"!\[[^\]]*\]\(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+\)",
+    re.IGNORECASE,
+)
+_DATA_IMAGE_RAW = re.compile(
+    r"data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{200,}",
+    re.IGNORECASE,
+)
+
+# Soft caps so follow-up turns don't exceed smaller model windows (e.g. 32k).
+_MAX_MESSAGE_CHARS = 24_000
+_MAX_TOTAL_CHARS = 96_000  # ~24k tokens rough; leave headroom for system/plugins
+
+
+def sanitize_content_for_context(content: str) -> str:
+    """Strip embedded base64 images / huge blobs that blow up chat context."""
+    if not content:
+        return content
+    text = _DATA_IMAGE_MD.sub("![Generated image](omitted-from-context)", content)
+    text = _DATA_IMAGE_RAW.sub("data:image/(omitted-from-context)", text)
+    if len(text) > _MAX_MESSAGE_CHARS:
+        keep = _MAX_MESSAGE_CHARS - 80
+        text = text[:keep] + "\n\n…[truncated for model context]"
+    return text
+
+
+def sanitize_chat_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Return a copy of messages safe to send as LLM context."""
+    return [
+        ChatMessage(role=m.role, content=sanitize_content_for_context(m.content))
+        for m in messages
+    ]
+
+
+def trim_provider_messages(
+    messages: list[ProviderMessage],
+    *,
+    max_total_chars: int = _MAX_TOTAL_CHARS,
+) -> list[ProviderMessage]:
+    """Keep the newest turns within a character budget (drop oldest first)."""
+    if not messages:
+        return messages
+
+    total = sum(len(m.content or "") for m in messages)
+    if total <= max_total_chars:
+        return messages
+
+    kept: list[ProviderMessage] = []
+    budget = max_total_chars
+    # Always try to keep the latest user/assistant turns.
+    for m in reversed(messages):
+        size = len(m.content or "")
+        if kept and size > budget:
+            continue
+        if size > budget and not kept:
+            # Single oversized latest message already sanitized/capped.
+            kept.append(m)
+            break
+        kept.append(m)
+        budget -= size
+        if budget <= 0:
+            break
+    kept.reverse()
+    if len(kept) < len(messages):
+        note = ProviderMessage(
+            role="system",
+            content="[Earlier conversation turns were omitted to fit the model context window.]",
+        )
+        return [note] + kept
+    return kept
 
 
 def attachments_to_provider_messages(
@@ -13,17 +86,18 @@ def attachments_to_provider_messages(
     attachments: list[Attachment] | None,
 ) -> list[ProviderMessage]:
     """Convert chat history; fold attachments into the last user turn."""
+    safe = sanitize_chat_messages(messages)
     out: list[ProviderMessage] = []
     last_user_idx = None
-    for i, m in enumerate(messages):
+    for i, m in enumerate(safe):
         out.append(ProviderMessage(role=m.role, content=m.content))
         if m.role == "user":
             last_user_idx = i
 
     if not attachments or last_user_idx is None:
-        return out
+        return trim_provider_messages(out)
 
-    text_bits: list[str] = [messages[last_user_idx].content]
+    text_bits: list[str] = [safe[last_user_idx].content]
     parts: list[dict] = []
     has_image = False
 
@@ -65,4 +139,4 @@ def attachments_to_provider_messages(
     else:
         out[last_user_idx] = ProviderMessage(role="user", content=combined)
 
-    return out
+    return trim_provider_messages(out)

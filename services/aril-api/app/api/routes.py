@@ -37,16 +37,18 @@ from app.core.schemas import (
     SessionUpsert,
 )
 from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
-from app.providers.messages import attachments_to_provider_messages
+from app.providers.messages import attachments_to_provider_messages, sanitize_content_for_context
 from app.routing.pipeline import (
     CATEGORY_RECOMMENDATIONS,
     DEFAULT_PROFILE,
+    IMAGE_GEN_MODEL,
     build_preview,
     classify,
     estimate_tokens,
     grade_prompt,
     resolve_profile,
     score_routes,
+    wants_image_generation,
 )
 from app.routing.probe import probe_models
 from app.routing.rewrite import llm_alternatives
@@ -58,6 +60,10 @@ def _resolve_model(req_model: str | None, last_user: str, profile) -> tuple[str,
     classification = classify(last_user)
     mapping = resolve_profile(profile) if profile is not None else DEFAULT_PROFILE
     model = req_model or mapping[classification.primary]
+    if wants_image_generation(last_user):
+        model_l = (model or "").lower()
+        if not any(tok in model_l for tok in ("image", "flux", "dall-e", "dalle", "seedream", "sourceful")):
+            model = IMAGE_GEN_MODEL
     return model, classification
 
 
@@ -73,12 +79,13 @@ async def _complete_cached(
     use_cache: bool,
     attachments: list | None = None,
     web_search: bool = False,
+    generate_image: bool = False,
 ) -> tuple[ProviderResult, bool]:
     provider = get_chat_provider()
     provider_messages = attachments_to_provider_messages(messages, attachments or [])
     msg_dicts = _msg_dicts(messages)
-    # Don't cache web search or multimodal turns (dynamic / large)
-    cacheable = use_cache and not web_search and not attachments
+    # Don't cache web search, multimodal, or image generation turns
+    cacheable = use_cache and not web_search and not attachments and not generate_image
     est = estimate_tokens(" ".join(m.content for m in messages))
     key = prompt_cache.make_key(
         messages=msg_dicts,
@@ -106,6 +113,7 @@ async def _complete_cached(
         model=model,
         temperature=temperature,
         web_search=web_search,
+        generate_image=generate_image,
     )
     if cacheable and prompt_cache.eligible(result.input_tokens or est):
         prompt_cache.put(
@@ -144,6 +152,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
+    generate_image = wants_image_generation(last_user)
 
     try:
         result, cached = await _complete_cached(
@@ -153,18 +162,19 @@ async def chat(req: ChatRequest) -> ChatResponse:
             use_cache=req.use_cache,
             attachments=req.attachments,
             web_search=req.web_search,
+            generate_image=generate_image,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     session_id = req.session_id or str(uuid.uuid4())
+    # Return full content to the client (may include generated image data URLs).
     assistant = ChatMessage(role="assistant", content=result.content)
-    session_store.upsert_session(
-        SessionUpsert(
-            id=session_id,
-            title=last_user[:42] if last_user else "New session",
-            messages=list(req.messages) + [assistant],
-        )
+    session_store.record_chat_turn(
+        session_id,
+        title=last_user[:42] if last_user else "New session",
+        user_content=last_user,
+        assistant_content=result.content,
     )
 
     return ChatResponse(
@@ -187,6 +197,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
+    generate_image = wants_image_generation(last_user)
     session_id = req.session_id or str(uuid.uuid4())
     msg_dicts = _msg_dicts(req.messages)
     est = estimate_tokens(last_user)
@@ -194,8 +205,14 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
     async def event_generator():
         stream_started = time.perf_counter()
-        # Cache short-circuit for large prompts (skip when web/attachments)
-        if req.use_cache and not req.web_search and not req.attachments and prompt_cache.eligible(est):
+        # Cache short-circuit for large prompts (skip when web/attachments/image-gen)
+        if (
+            req.use_cache
+            and not req.web_search
+            and not req.attachments
+            and not generate_image
+            and prompt_cache.eligible(est)
+        ):
             hit = prompt_cache.peek(key)
             if hit:
                 content = hit["content"]
@@ -212,12 +229,11 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     "latency_ms": int((time.perf_counter() - stream_started) * 1000),
                 }
                 assistant = ChatMessage(role="assistant", content=content)
-                session_store.upsert_session(
-                    SessionUpsert(
-                        id=session_id,
-                        title=last_user[:42] if last_user else "New session",
-                        messages=list(req.messages) + [assistant],
-                    )
+                session_store.record_chat_turn(
+                    session_id,
+                    title=last_user[:42] if last_user else "New session",
+                    user_content=last_user,
+                    assistant_content=content,
                 )
                 yield f"event: done\ndata: {json.dumps(meta)}\n\n"
                 return
@@ -241,6 +257,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 model=model,
                 temperature=temperature,
                 web_search=req.web_search,
+                generate_image=generate_image,
             ):
                 if chunk.content:
                     parts.append(chunk.content)
@@ -260,29 +277,31 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             return
 
         full = "".join(parts)
+        # Persist a slim copy so later turns don't rehydrate multi-hundred-kB base64 images.
+        stored_full = sanitize_content_for_context(full)
         if (
             req.use_cache
             and not req.web_search
             and not req.attachments
+            and not generate_image
             and prompt_cache.eligible(int(meta["input_tokens"] or est))
         ):
             prompt_cache.put(
                 key,
                 {
-                    "content": full,
+                    "content": stored_full,
                     "model": meta["model"],
                     "input_tokens": meta["input_tokens"],
                     "output_tokens": meta["output_tokens"],
                     "cost_usd": meta["cost_usd"],
                 },
             )
-        assistant = ChatMessage(role="assistant", content=full)
-        session_store.upsert_session(
-            SessionUpsert(
-                id=session_id,
-                title=last_user[:42] if last_user else "New session",
-                messages=list(req.messages) + [assistant],
-            )
+        # Client still received the full streamed content (including images) above.
+        session_store.record_chat_turn(
+            session_id,
+            title=last_user[:42] if last_user else "New session",
+            user_content=last_user,
+            assistant_content=stored_full,
         )
         meta["latency_ms"] = int((time.perf_counter() - stream_started) * 1000)
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
@@ -369,25 +388,8 @@ async def compare(req: CompareRequest) -> CompareResponse:
             )
 
     results = await asyncio.gather(*[run_one(m) for m in models])
-    # Persist a summary note into the session (skip if session was deleted)
-    summary_bits = []
-    for r in results:
-        if r.error:
-            summary_bits.append(f"### {r.model}\nError: {r.error}")
-        else:
-            cat = r.suggested_category.value if r.suggested_category else "?"
-            probe_bit = f" · probe {r.probe_latency_ms}ms" if r.probe_latency_ms is not None else ""
-            summary_bits.append(
-                f"### {r.model} ({r.latency_ms}ms{probe_bit} · {cat})\n{r.content}"
-            )
-    assistant = ChatMessage(role="assistant", content="\n\n".join(summary_bits))
-    session_store.upsert_session(
-        SessionUpsert(
-            id=session_id,
-            title=f"Compare: {(last_user or 'prompt')[:32]}",
-            messages=list(req.messages) + [assistant],
-        )
-    )
+    # Do not rewrite session history with a 3-model dump. The client commits
+    # the preferred user/assistant turn when the user picks Prefer.
     return CompareResponse(
         session_id=session_id,
         route_category=classification.primary,

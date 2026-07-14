@@ -30,6 +30,29 @@ def _norm_id(session_id: str | None) -> str:
     return session_id.strip().lower()
 
 
+def _sanitize_message_dict(msg: dict) -> dict:
+    from app.providers.messages import sanitize_content_for_context
+
+    content = msg.get("content") or ""
+    cleaned = sanitize_content_for_context(content)
+    if cleaned == content:
+        return msg
+    out = dict(msg)
+    out["content"] = cleaned
+    return out
+
+
+def _sanitize_row(row: dict) -> tuple[dict, bool]:
+    msgs = row.get("messages") or []
+    cleaned = [_sanitize_message_dict(m) if isinstance(m, dict) else m for m in msgs]
+    dirty = cleaned != msgs
+    if not dirty:
+        return row, False
+    out = dict(row)
+    out["messages"] = cleaned
+    return out, True
+
+
 def _ensure_loaded() -> None:
     """Load once per process — even when the session map is empty after deletes."""
     global _SESSIONS, _TOMBSTONES, _LOADED
@@ -62,6 +85,11 @@ def _ensure_loaded() -> None:
     for sid in list(_SESSIONS.keys()):
         if sid in _TOMBSTONES:
             del _SESSIONS[sid]
+            dirty = True
+            continue
+        cleaned_row, row_dirty = _sanitize_row(_SESSIONS[sid])
+        if row_dirty:
+            _SESSIONS[sid] = cleaned_row
             dirty = True
     _LOADED = True
     if dirty:
@@ -122,10 +150,16 @@ def upsert_session(payload: SessionUpsert) -> SessionDetail | None:
         # Do not resurrect a deleted session via late chat/compare upserts.
         if sid in _TOMBSTONES:
             return None
+        new_msgs = [_sanitize_message_dict(m.model_dump()) for m in payload.messages]
+        existing = _SESSIONS.get(sid)
+        old_msgs = list((existing or {}).get("messages") or [])
+        # Never clobber a longer history with a shorter payload (common after a cold-start race).
+        if old_msgs and len(new_msgs) < len(old_msgs):
+            new_msgs = old_msgs
         row = {
-            "title": payload.title,
+            "title": payload.title or (existing or {}).get("title") or "Untitled",
             "updated_at": _now(),
-            "messages": [m.model_dump() for m in payload.messages],
+            "messages": new_msgs,
         }
         _SESSIONS[sid] = row
         _persist()
@@ -133,7 +167,56 @@ def upsert_session(payload: SessionUpsert) -> SessionDetail | None:
             id=sid,
             title=row["title"],
             updated_at=row["updated_at"],
-            messages=payload.messages,
+            messages=[ChatMessage(**m) for m in new_msgs],
+        )
+
+
+def record_chat_turn(
+    session_id: str,
+    *,
+    title: str | None,
+    user_content: str,
+    assistant_content: str,
+) -> SessionDetail | None:
+    """Append one user/assistant turn without replacing prior history."""
+    from app.providers.messages import sanitize_content_for_context
+
+    with _LOCK:
+        _ensure_loaded()
+        sid = _norm_id(session_id)
+        if sid in _TOMBSTONES:
+            return None
+        user_content = sanitize_content_for_context(user_content or "")
+        assistant_content = sanitize_content_for_context(assistant_content or "")
+        row = _SESSIONS.get(sid) or {
+            "title": title or "New session",
+            "updated_at": _now(),
+            "messages": [],
+        }
+        if title:
+            row["title"] = title
+        msgs = list(row.get("messages") or [])
+        # Drop trailing empty assistant placeholders
+        while msgs and msgs[-1].get("role") == "assistant" and not str(
+            msgs[-1].get("content") or ""
+        ).strip():
+            msgs.pop()
+        if not (
+            msgs
+            and msgs[-1].get("role") == "user"
+            and msgs[-1].get("content") == user_content
+        ):
+            msgs.append({"role": "user", "content": user_content})
+        msgs.append({"role": "assistant", "content": assistant_content})
+        row["messages"] = msgs
+        row["updated_at"] = _now()
+        _SESSIONS[sid] = row
+        _persist()
+        return SessionDetail(
+            id=sid,
+            title=row["title"],
+            updated_at=row["updated_at"],
+            messages=[ChatMessage(**m) for m in msgs],
         )
 
 
@@ -158,9 +241,9 @@ def append_turn(
             row["title"] = title
         msgs = list(row.get("messages") or [])
         if user:
-            msgs.append(user.model_dump())
+            msgs.append(_sanitize_message_dict(user.model_dump()))
         if assistant:
-            msgs.append(assistant.model_dump())
+            msgs.append(_sanitize_message_dict(assistant.model_dump()))
         row["messages"] = msgs
         row["updated_at"] = _now()
         _SESSIONS[sid] = row

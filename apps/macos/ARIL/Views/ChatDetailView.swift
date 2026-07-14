@@ -19,9 +19,12 @@ struct ChatDetailView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
                     MessageListView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
                         .transition(.opacity)
                     if !state.compareResults.isEmpty {
                         CompareResultsView(results: state.compareResults)
+                            .frame(maxHeight: 320)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
