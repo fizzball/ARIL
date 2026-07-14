@@ -1,4 +1,4 @@
-"""Heuristic classifier / grader / router — Phase 0 deterministic stubs."""
+"""Heuristic classifier / grader / router."""
 
 from __future__ import annotations
 
@@ -15,24 +15,18 @@ from app.core.schemas import (
     PromptAlternative,
     PromptGrade,
     RouteCategory,
+    RoutingProfile,
 )
 
-# Category → preferred model (mirrors client default RoutingProfile)
-DEFAULT_PROFILE: dict[RouteCategory, str] = {
-    RouteCategory.coding: "openai/gpt-4.1",
-    RouteCategory.security: "anthropic/claude-sonnet-4",
-    RouteCategory.cost: "openai/gpt-4.1-mini",
-    RouteCategory.performance: "openai/gpt-4.1-mini",
-    RouteCategory.confidence: "anthropic/claude-opus-4",
-    RouteCategory.general: "openai/gpt-4.1",
-}
+DEFAULT_PROFILE = RoutingProfile().as_map()
 
 COST_PER_1K: dict[str, float] = {
     "openai/gpt-4.1": 0.01,
     "openai/gpt-4.1-mini": 0.002,
     "anthropic/claude-sonnet-4": 0.012,
     "anthropic/claude-opus-4": 0.04,
-    "ollama/llama3.2": 0.0,
+    "google/gemini-2.5-flash": 0.0015,
+    "meta-llama/llama-3.3-70b-instruct": 0.0008,
 }
 
 CODING_HINTS = re.compile(
@@ -47,6 +41,13 @@ SECURITY_HINTS = re.compile(
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+def resolve_profile(profile: RoutingProfile | None) -> dict[RouteCategory, str]:
+    base = dict(DEFAULT_PROFILE)
+    if profile is not None:
+        base.update(profile.as_map())
+    return base
 
 
 def classify(prompt: str) -> ClassificationResult:
@@ -128,11 +129,16 @@ def alternatives_for(prompt: str, grade: PromptGrade) -> list[PromptAlternative]
     ]
 
 
-def score_routes(prompt: str, primary: RouteCategory) -> list[ModelEstimate]:
+def score_routes(
+    prompt: str,
+    primary: RouteCategory,
+    profile: dict[RouteCategory, str] | None = None,
+) -> list[ModelEstimate]:
+    mapping = profile or DEFAULT_PROFILE
     in_tok = estimate_tokens(prompt)
     out_tok = min(2048, max(128, in_tok // 2))
     rows: list[ModelEstimate] = []
-    for category, model_id in DEFAULT_PROFILE.items():
+    for category, model_id in mapping.items():
         if category == RouteCategory.general and primary != RouteCategory.general:
             continue
         provider = model_id.split("/", 1)[0]
@@ -144,9 +150,8 @@ def score_routes(prompt: str, primary: RouteCategory) -> list[ModelEstimate]:
         reasons = []
         if category == primary:
             reasons.append(f"Best fit for classification '{primary.value}'.")
-        if rate == 0.0:
-            reasons.append("Local/free provider.")
-        if "mini" in model_id:
+            reasons.append(f"Mapped from Settings profile → {model_id}.")
+        if "mini" in model_id or "flash" in model_id:
             reasons.append("Lower cost / faster path.")
         if "opus" in model_id or "claude-sonnet" in model_id:
             reasons.append("Higher capability prior.")
@@ -170,17 +175,17 @@ def build_preview(req: PreviewRequest) -> PreviewResponse:
     classification = classify(req.prompt)
     grade = grade_prompt(req.prompt)
     alts = alternatives_for(req.prompt, grade)
-    routes = score_routes(req.prompt, classification.primary)
+    profile = resolve_profile(req.routing_profile)
+    routes = score_routes(req.prompt, classification.primary, profile)
     temp = req.temperature if req.temperature is not None else settings.aril_default_temperature
 
     if req.preferred_model and req.route_mode.value == "manual":
         recommended = req.preferred_model
     else:
-        recommended = routes[0].model_id if routes else DEFAULT_PROFILE[classification.primary]
+        recommended = routes[0].model_id if routes else profile[classification.primary]
 
     in_tok = estimate_tokens(req.prompt)
     eligible = in_tok > settings.aril_cache_token_threshold
-    # Deterministic "would_hit" for identical long prompts in stub mode
     digest = hashlib.sha256(req.prompt.encode()).hexdigest()
     would_hit = eligible and digest.endswith(("0", "1", "2", "3"))
 

@@ -53,6 +53,7 @@ secrets/
 # Logs / local data
 *.log
 data/
+services/aril-api/data/
 .local/
 tmp/
 

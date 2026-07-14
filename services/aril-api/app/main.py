@@ -25,10 +25,13 @@ app.include_router(router)
 
 @app.get("/health")
 async def health() -> dict:
+    openrouter = bool(settings.openrouter_api_key.strip())
     return {
         "status": "ok",
         "service": "aril-api",
         "version": "0.1.0",
         "env": settings.aril_env,
         "gateway": "ready",
+        "chat_provider": "openrouter" if openrouter else "stub",
+        "openrouter_configured": openrouter,
     }

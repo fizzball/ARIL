@@ -1,11 +1,14 @@
-"""OpenRouter provider — single API for multi-model routing."""
+"""OpenRouter provider — single API for multi-model routing + SSE streaming."""
 
 from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterator
 
 import httpx
 
 from app.core.config import settings
-from app.providers.base import LLMProvider, ProviderMessage, ProviderResult
+from app.providers.base import LLMProvider, ProviderMessage, ProviderResult, StreamChunk
 
 
 class OpenRouterProvider(LLMProvider):
@@ -26,6 +29,21 @@ class OpenRouterProvider(LLMProvider):
         self.site_url = site_url or settings.openrouter_site_url
         self.app_name = app_name or settings.openrouter_app_name
 
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": self.site_url,
+            "X-Title": self.app_name,
+        }
+
+    def _require_key(self) -> None:
+        if not self.api_key:
+            raise RuntimeError(
+                "OPENROUTER_API_KEY is not set. Add it to services/aril-api/.env "
+                "(https://openrouter.ai/keys)."
+            )
+
     async def complete(
         self,
         messages: list[ProviderMessage],
@@ -33,18 +51,7 @@ class OpenRouterProvider(LLMProvider):
         model: str,
         temperature: float,
     ) -> ProviderResult:
-        if not self.api_key:
-            raise RuntimeError(
-                "OPENROUTER_API_KEY is not set. Add it to services/aril-api/.env "
-                "(https://openrouter.ai/keys)."
-            )
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": self.site_url,
-            "X-Title": self.app_name,
-        }
+        self._require_key()
         payload = {
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
@@ -54,7 +61,7 @@ class OpenRouterProvider(LLMProvider):
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
-                headers=headers,
+                headers=self._headers(),
                 json=payload,
             )
             if response.status_code >= 400:
@@ -71,12 +78,7 @@ class OpenRouterProvider(LLMProvider):
         usage = data.get("usage") or {}
         in_tok = int(usage.get("prompt_tokens") or 0)
         out_tok = int(usage.get("completion_tokens") or 0)
-        # OpenRouter may include native cost (USD) on usage
-        cost = usage.get("cost")
-        if cost is None:
-            cost = 0.0
-        else:
-            cost = float(cost)
+        cost = float(usage.get("cost") or 0.0)
 
         return ProviderResult(
             content=content,
@@ -86,3 +88,56 @@ class OpenRouterProvider(LLMProvider):
             cost_usd=round(cost, 6),
             cached=False,
         )
+
+    async def stream(
+        self,
+        messages: list[ProviderMessage],
+        *,
+        model: str,
+        temperature: float,
+    ) -> AsyncIterator[StreamChunk]:
+        self._require_key()
+        payload = {
+            "model": model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "temperature": temperature,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+            ) as response:
+                if response.status_code >= 400:
+                    detail = (await response.aread()).decode("utf-8", errors="replace")[:800]
+                    raise RuntimeError(f"OpenRouter error {response.status_code}: {detail}")
+
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    chunk = StreamChunk(model=data.get("model") or model)
+                    choices = data.get("choices") or []
+                    if choices:
+                        delta = choices[0].get("delta") or {}
+                        chunk.content = delta.get("content") or ""
+                        chunk.finish_reason = choices[0].get("finish_reason")
+                    usage = data.get("usage") or {}
+                    if usage:
+                        chunk.input_tokens = int(usage.get("prompt_tokens") or 0)
+                        chunk.output_tokens = int(usage.get("completion_tokens") or 0)
+                        chunk.cost_usd = float(usage.get("cost") or 0.0)
+                    yield chunk
+
+        yield StreamChunk(done=True)

@@ -46,7 +46,7 @@ Goal: ship a runnable shell — Hermes-styled SwiftUI client + FastAPI gateway w
 
 ## Next (Phase 1)
 
-- Streaming chat (SSE)
-- Persist sessions to SwiftData / API
-- Real OpenAI / Anthropic / Ollama adapters
-- Sync RoutingProfile from Settings into preview scoring on the server
+- [x] Streaming chat (SSE)
+- [x] Persist sessions to API (+ client load)
+- [x] Real OpenRouter dispatch (live)
+- [x] Sync RoutingProfile from Settings into preview scoring

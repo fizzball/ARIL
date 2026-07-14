@@ -12,12 +12,6 @@ struct ChatSession: Identifiable, Hashable {
         self.messages = messages
         self.updatedAt = updatedAt
     }
-
-    static let samples: [ChatSession] = [
-        ChatSession(title: "Planning routing weights for ARIL", messages: []),
-        ChatSession(title: "Security review prompt patterns", messages: []),
-        ChatSession(title: "Cost vs confidence tradeoffs", messages: []),
-    ]
 }
 
 struct ChatMessage: Identifiable, Hashable {
@@ -54,18 +48,20 @@ enum RouteCategory: String, CaseIterable, Codable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
-struct RoutingProfile: Hashable {
+struct RoutingProfile: Hashable, Codable {
     var coding: String
     var security: String
     var cost: String
     var performance: String
     var confidence: String
+    var general: String
 
     static let `default` = RoutingProfile(
         coding: "openai/gpt-4.1",
         security: "anthropic/claude-sonnet-4",
         cost: "openai/gpt-4.1-mini",
         performance: "openai/gpt-4.1-mini",
-        confidence: "anthropic/claude-opus-4"
+        confidence: "anthropic/claude-opus-4",
+        general: "openai/gpt-4.1"
     )
 }

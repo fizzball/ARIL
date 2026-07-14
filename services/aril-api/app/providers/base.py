@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from app.core.config import settings
@@ -22,6 +23,17 @@ class ProviderResult:
     cached: bool = False
 
 
+@dataclass
+class StreamChunk:
+    content: str = ""
+    model: str | None = None
+    finish_reason: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    done: bool = False
+
+
 class LLMProvider(ABC):
     name: str
 
@@ -34,6 +46,25 @@ class LLMProvider(ABC):
         temperature: float,
     ) -> ProviderResult:
         raise NotImplementedError
+
+    async def stream(
+        self,
+        messages: list[ProviderMessage],
+        *,
+        model: str,
+        temperature: float,
+    ) -> AsyncIterator[StreamChunk]:
+        """Default: emit the full completion as a single chunk."""
+        result = await self.complete(messages, model=model, temperature=temperature)
+        if result.content:
+            yield StreamChunk(content=result.content, model=result.model)
+        yield StreamChunk(
+            model=result.model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cost_usd=result.cost_usd,
+            done=True,
+        )
 
 
 class StubProvider(LLMProvider):

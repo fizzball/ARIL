@@ -4,12 +4,14 @@ enum ARILAPIError: LocalizedError {
     case invalidURL
     case badStatus(Int, String)
     case decoding(Error)
+    case stream(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid gateway URL"
         case .badStatus(let code, let body): return "Gateway error \(code): \(body)"
         case .decoding(let err): return "Decode error: \(err.localizedDescription)"
+        case .stream(let msg): return msg
         }
     }
 }
@@ -38,6 +40,89 @@ final class ARILAPIClient {
 
     func chat(baseURL: String, request: ChatRequest) async throws -> ChatResponseDTO {
         try await post(baseURL, path: "/v1/chat", body: request)
+    }
+
+    func listSessions(baseURL: String) async throws -> [SessionSummaryDTO] {
+        let url = try url(baseURL, path: "/v1/sessions")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func getSession(baseURL: String, id: String) async throws -> SessionDetailDTO {
+        let url = try url(baseURL, path: "/v1/sessions/\(id)")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func upsertSession(baseURL: String, session: SessionUpsertDTO) async throws -> SessionDetailDTO {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/sessions"))
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try encoder.encode(session)
+        let (data, response) = try await self.session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    /// Consume SSE from `/v1/chat/stream`.
+    func chatStream(
+        baseURL: String,
+        request: ChatRequest,
+        onToken: @escaping @Sendable (String) -> Void
+    ) async throws -> StreamDoneEvent {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/chat/stream"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.httpBody = try encoder.encode(request)
+
+        let (bytes, response) = try await session.bytes(for: req)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw ARILAPIError.badStatus(http.statusCode, "stream failed")
+        }
+
+        var eventName = "message"
+        var dataLines: [String] = []
+        var done: StreamDoneEvent?
+
+        for try await line in bytes.lines {
+            if line.hasPrefix("event:") {
+                eventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            if line.hasPrefix("data:") {
+                dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+                continue
+            }
+            if line.isEmpty {
+                let payload = dataLines.joined(separator: "\n")
+                dataLines.removeAll()
+                let name = eventName
+                eventName = "message"
+                guard !payload.isEmpty else { continue }
+
+                if name == "token" {
+                    if let token = try? decoder.decode(StreamTokenEvent.self, from: Data(payload.utf8)) {
+                        onToken(token.content)
+                    }
+                } else if name == "done" {
+                    done = try decoder.decode(StreamDoneEvent.self, from: Data(payload.utf8))
+                } else if name == "error" {
+                    if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+                       let err = obj["error"] as? String {
+                        throw ARILAPIError.stream(err)
+                    }
+                    throw ARILAPIError.stream(payload)
+                }
+            }
+        }
+
+        guard let done else {
+            throw ARILAPIError.stream("Stream ended without done event")
+        }
+        return done
     }
 
     private func post<Body: Encodable, Response: Decodable>(

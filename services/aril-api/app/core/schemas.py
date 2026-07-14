@@ -21,6 +21,27 @@ class RouteMode(str, Enum):
     compare = "compare"
 
 
+class RoutingProfile(BaseModel):
+    """Category → preferred OpenRouter model id."""
+
+    coding: str = "openai/gpt-4.1"
+    security: str = "anthropic/claude-sonnet-4"
+    cost: str = "openai/gpt-4.1-mini"
+    performance: str = "openai/gpt-4.1-mini"
+    confidence: str = "anthropic/claude-opus-4"
+    general: str = "openai/gpt-4.1"
+
+    def as_map(self) -> dict[RouteCategory, str]:
+        return {
+            RouteCategory.coding: self.coding,
+            RouteCategory.security: self.security,
+            RouteCategory.cost: self.cost,
+            RouteCategory.performance: self.performance,
+            RouteCategory.confidence: self.confidence,
+            RouteCategory.general: self.general,
+        }
+
+
 class PromptGrade(BaseModel):
     overall: float = Field(ge=0, le=1, description="0=weak, 1=excellent")
     clarity: float = Field(ge=0, le=1)
@@ -68,6 +89,7 @@ class PreviewRequest(BaseModel):
     route_mode: RouteMode = RouteMode.auto
     preferred_model: str | None = None
     session_id: str | None = None
+    routing_profile: RoutingProfile | None = None
 
 
 class PreviewResponse(BaseModel):
@@ -94,6 +116,8 @@ class ChatRequest(BaseModel):
     use_cache: bool = True
     session_id: str | None = None
     preview_id: str | None = None
+    routing_profile: RoutingProfile | None = None
+    stream: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -105,3 +129,23 @@ class ChatResponse(BaseModel):
     cost_usd: float
     cached: bool
     route_category: RouteCategory
+
+
+class SessionSummary(BaseModel):
+    id: str
+    title: str
+    updated_at: str
+    message_count: int
+
+
+class SessionDetail(BaseModel):
+    id: str
+    title: str
+    updated_at: str
+    messages: list[ChatMessage]
+
+
+class SessionUpsert(BaseModel):
+    id: str | None = None
+    title: str = "New session"
+    messages: list[ChatMessage] = Field(default_factory=list)

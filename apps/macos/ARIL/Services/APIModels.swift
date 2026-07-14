@@ -6,6 +6,32 @@ struct HealthResponse: Codable {
     let version: String?
     let env: String?
     let gateway: String?
+    let chatProvider: String?
+    let openrouterConfigured: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case status, service, version, env, gateway
+        case chatProvider = "chat_provider"
+        case openrouterConfigured = "openrouter_configured"
+    }
+}
+
+struct APIRoutingProfile: Codable, Equatable {
+    var coding: String
+    var security: String
+    var cost: String
+    var performance: String
+    var confidence: String
+    var general: String
+
+    init(_ profile: RoutingProfile) {
+        coding = profile.coding
+        security = profile.security
+        cost = profile.cost
+        performance = profile.performance
+        confidence = profile.confidence
+        general = profile.general
+    }
 }
 
 struct PreviewRequest: Encodable {
@@ -14,12 +40,14 @@ struct PreviewRequest: Encodable {
     let routeMode: RouteMode
     let preferredModel: String?
     let sessionId: String?
+    let routingProfile: APIRoutingProfile?
 
     enum CodingKeys: String, CodingKey {
         case prompt, temperature
         case routeMode = "route_mode"
         case preferredModel = "preferred_model"
         case sessionId = "session_id"
+        case routingProfile = "routing_profile"
     }
 }
 
@@ -122,6 +150,7 @@ struct ChatRequest: Encodable {
     let useCache: Bool
     let sessionId: String?
     let previewId: String?
+    let routingProfile: APIRoutingProfile?
 
     enum CodingKeys: String, CodingKey {
         case messages, model, temperature
@@ -129,6 +158,7 @@ struct ChatRequest: Encodable {
         case useCache = "use_cache"
         case sessionId = "session_id"
         case previewId = "preview_id"
+        case routingProfile = "routing_profile"
     }
 }
 
@@ -150,4 +180,59 @@ struct ChatResponseDTO: Codable {
         case costUsd = "cost_usd"
         case routeCategory = "route_category"
     }
+}
+
+struct SessionSummaryDTO: Codable, Identifiable {
+    let id: String
+    let title: String
+    let updatedAt: String
+    let messageCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case updatedAt = "updated_at"
+        case messageCount = "message_count"
+    }
+}
+
+struct SessionDetailDTO: Codable {
+    let id: String
+    let title: String
+    let updatedAt: String
+    let messages: [APIChatMessage]
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages
+        case updatedAt = "updated_at"
+    }
+}
+
+struct SessionUpsertDTO: Encodable {
+    let id: String?
+    let title: String
+    let messages: [APIChatMessage]
+}
+
+struct StreamDoneEvent: Codable {
+    let sessionId: String
+    let model: String
+    let routeCategory: String?
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let costUsd: Double?
+    let cached: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case model, cached
+        case sessionId = "session_id"
+        case routeCategory = "route_category"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case costUsd = "cost_usd"
+    }
+}
+
+struct StreamTokenEvent: Codable {
+    let content: String
+    let model: String?
 }

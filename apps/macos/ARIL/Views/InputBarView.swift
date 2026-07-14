@@ -20,7 +20,7 @@ struct InputBarView: View {
                 }
 
             Menu {
-                ForEach(["openai/gpt-4.1", "openai/gpt-4.1-mini", "anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "ollama/llama3.2"], id: \.self) { model in
+                ForEach(["openai/gpt-4.1", "openai/gpt-4.1-mini", "anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct"], id: \.self) { model in
                     Button(model) {
                         state.selectedModel = model
                         state.routeMode = .manual

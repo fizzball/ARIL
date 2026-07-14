@@ -3,12 +3,26 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
 
+    private let models = [
+        "openai/gpt-4.1",
+        "openai/gpt-4.1-mini",
+        "anthropic/claude-sonnet-4",
+        "anthropic/claude-opus-4",
+        "google/gemini-2.5-flash",
+        "meta-llama/llama-3.3-70b-instruct",
+    ]
+
     var body: some View {
         TabView {
             Form {
                 TextField("Gateway URL", text: $state.gatewayURL)
+                    .onSubmit {
+                        state.saveGatewayURL()
+                        Task { await state.refreshHealth() }
+                    }
                 HStack {
                     Button("Check connection") {
+                        state.saveGatewayURL()
                         Task { await state.refreshHealth() }
                     }
                     Text(state.gatewayStatus)
@@ -28,30 +42,28 @@ struct SettingsView: View {
                 modelPicker("Cost", selection: $state.routingProfile.cost)
                 modelPicker("Performance", selection: $state.routingProfile.performance)
                 modelPicker("Confidence", selection: $state.routingProfile.confidence)
-                Text("These mappings drive Auto route recommendations.")
+                modelPicker("General", selection: $state.routingProfile.general)
+                Text("These mappings drive Auto route recommendations via OpenRouter.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Save routing profile") {
+                    state.saveRoutingProfile()
+                }
             }
             .padding()
             .tabItem { Label("Routing", systemImage: "arrow.triangle.branch") }
         }
-        .frame(width: 520, height: 320)
+        .frame(width: 560, height: 360)
     }
 
     private func modelPicker(_ title: String, selection: Binding<String>) -> some View {
         Picker(title, selection: selection) {
-            ForEach(
-                [
-                    "openai/gpt-4.1",
-                    "openai/gpt-4.1-mini",
-                    "anthropic/claude-sonnet-4",
-                    "anthropic/claude-opus-4",
-                    "ollama/llama3.2",
-                ],
-                id: \.self
-            ) { model in
+            ForEach(models, id: \.self) { model in
                 Text(model).tag(model)
             }
+        }
+        .onChange(of: selection.wrappedValue) { _, _ in
+            state.saveRoutingProfile()
         }
     }
 }
