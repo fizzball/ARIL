@@ -206,6 +206,8 @@ def score_routes(
     primary: RouteCategory,
     profile: dict[RouteCategory, str] | None = None,
 ) -> list[ModelEstimate]:
+    from app.core.schemas import ScoreBreakdown
+
     mapping = profile or DEFAULT_PROFILE
     in_tok = estimate_tokens(prompt)
     out_tok = min(2048, max(128, in_tok // 2))
@@ -221,12 +223,24 @@ def score_routes(
         provider = model_id.split("/", 1)[0]
         rate = COST_PER_1K.get(model_id, 0.01)
         cost = round((in_tok + out_tok) / 1000 * rate, 6)
-        fit_bonus = 0.45 if category == primary else 0.12
-        cost_score = 1.0 - min(1.0, cost * 50)
+        fit_raw = 0.45 if category == primary else 0.12
+        cost_raw = 1.0 - min(1.0, cost * 50)
+        base_raw = 0.1
         from app.core.preferences import confidence_boost
 
         learn = confidence_boost(prompt, primary.value, model_id)
-        score = round(fit_bonus + 0.35 * cost_score + 0.1 + learn, 3)
+        # Weighted combine → confidence index (0..1)
+        confidence_index = round(
+            min(
+                1.0,
+                (fit_raw / 0.45) * 0.40  # normalized category fit weight
+                + cost_raw * 0.25
+                + (base_raw / 0.1) * 0.10
+                + min(1.0, learn / 0.4) * 0.25,
+            ),
+            3,
+        )
+        score = round(fit_raw + 0.35 * cost_raw + base_raw + learn, 3)
         reasons: list[str] = []
         if category == primary:
             reasons.append(f"Best fit for classification '{primary.value}'.")
@@ -237,6 +251,10 @@ def score_routes(
             reasons.append("Lower cost / faster path.")
         if "opus" in model_id:
             reasons.append("Higher reasoning / confidence prior.")
+        reasons.append(
+            f"Confidence index {confidence_index:.0%} "
+            f"(fit {fit_raw:.2f}, cost {cost_raw:.2f}, base {base_raw:.2f}, learn {learn:.2f})."
+        )
         rows.append(
             ModelEstimate(
                 model_id=model_id,
@@ -247,6 +265,13 @@ def score_routes(
                 estimated_cost_usd=cost,
                 score=score,
                 reasons=reasons,
+                breakdown=ScoreBreakdown(
+                    category_fit=round(fit_raw / 0.45, 3),
+                    cost=round(cost_raw, 3),
+                    base=1.0,
+                    learning=round(min(1.0, learn / 0.4), 3),
+                    confidence_index=confidence_index,
+                ),
             )
         )
     rows.sort(key=lambda r: r.score, reverse=True)
@@ -259,7 +284,32 @@ def build_preview(
     alternatives: list[PromptAlternative] | None = None,
     alternatives_source: str = "heuristic",
 ) -> PreviewResponse:
+    from app.core import preferences as pref_store
+    from app.core.schemas import UserOverrideInsight
+
     classification = classify(req.prompt)
+    user_override = None
+    override = pref_store.lookup_classification(req.prompt)
+    if override:
+        try:
+            override_cat = RouteCategory(override["category"])
+            user_override = UserOverrideInsight(
+                classification_id=override["id"],
+                category=override_cat,
+                model=override.get("model"),
+                accuracy=override.get("accuracy"),
+                category_overridden=bool(override.get("category_overridden")),
+                prompt_snippet=override.get("prompt_snippet"),
+            )
+            if override.get("category_overridden"):
+                classification = ClassificationResult(
+                    primary=override_cat,
+                    secondary=[c for c in classification.secondary if c != override_cat],
+                    confidence=max(classification.confidence, 0.9),
+                )
+        except ValueError:
+            user_override = None
+
     grade = grade_prompt(req.prompt)
     alts = alternatives if alternatives is not None else alternatives_for(req.prompt, grade)
     profile = resolve_profile(req.routing_profile)
@@ -271,6 +321,8 @@ def build_preview(
 
     if req.preferred_model and req.route_mode.value == "manual":
         recommended = req.preferred_model
+    elif user_override and user_override.model and user_override.category_overridden:
+        recommended = user_override.model
     else:
         recommended = profile_pick
 
@@ -314,4 +366,5 @@ def build_preview(
         temperature=temp,
         route_mode=req.route_mode,
         alternatives_source=src,  # type: ignore[arg-type]
+        user_override=user_override,
     )

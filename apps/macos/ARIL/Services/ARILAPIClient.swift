@@ -73,6 +73,78 @@ final class ARILAPIClient {
         try validate(response, data: data)
     }
 
+    func deleteAllSessions(baseURL: String) async throws {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/sessions"))
+        req.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+    }
+
+    func preferences(baseURL: String) async throws -> PreferencesSnapshotDTO {
+        let url = try url(baseURL, path: "/v1/preferences")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func updateClassification(
+        baseURL: String,
+        id: String,
+        update: ClassificationUpdateDTO
+    ) async throws -> ClassificationRecordDTO {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/preferences/classifications/\(id)"))
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try encoder.encode(update)
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func deleteClassification(baseURL: String, id: String) async throws {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/preferences/classifications/\(id)"))
+        req.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+    }
+
+    func openRouterKeyStatus(baseURL: String) async throws -> OpenRouterKeyStatusDTO {
+        let url = try url(baseURL, path: "/v1/settings/openrouter-key")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func setOpenRouterKey(baseURL: String, apiKey: String) async throws -> OpenRouterKeyStatusDTO {
+        try await put(
+            baseURL,
+            path: "/v1/settings/openrouter-key",
+            body: OpenRouterKeyUpdateDTO(apiKey: apiKey)
+        )
+    }
+
+    func clearOpenRouterKey(baseURL: String) async throws -> OpenRouterKeyStatusDTO {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/settings/openrouter-key"))
+        req.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    private func put<Body: Encodable, Response: Decodable>(
+        _ baseURL: String,
+        path: String,
+        body: Body
+    ) async throws -> Response {
+        var req = URLRequest(url: try url(baseURL, path: path))
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try encoder.encode(body)
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
     /// Consume SSE from `/v1/chat/stream`.
     func chatStream(
         baseURL: String,
@@ -96,40 +168,68 @@ final class ARILAPIClient {
         var receivedTokens = false
         var lastModel: String?
 
-        for try await line in bytes.lines {
-            try Task.checkCancellation()
-            if line.hasPrefix("event:") {
-                eventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-                continue
-            }
-            if line.hasPrefix("data:") {
-                dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-                continue
-            }
-            if line.isEmpty {
-                let payload = dataLines.joined(separator: "\n")
-                dataLines.removeAll()
-                let name = eventName
-                eventName = "message"
-                guard !payload.isEmpty else { continue }
+        func flushEvent() throws {
+            let payload = dataLines.joined(separator: "\n")
+            dataLines.removeAll()
+            let name = eventName
+            eventName = "message"
+            guard !payload.isEmpty else { return }
 
-                if name == "token" {
-                    if let token = try? decoder.decode(StreamTokenEvent.self, from: Data(payload.utf8)) {
+            if name == "token" {
+                if let token = try? decoder.decode(StreamTokenEvent.self, from: Data(payload.utf8)) {
+                    if !token.content.isEmpty {
                         receivedTokens = true
                         if let model = token.model { lastModel = model }
                         onToken(token.content)
                     }
-                } else if name == "done" {
-                    done = try decoder.decode(StreamDoneEvent.self, from: Data(payload.utf8))
-                } else if name == "error" {
-                    if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
-                       let err = obj["error"] as? String {
-                        throw ARILAPIError.stream(err)
-                    }
-                    throw ARILAPIError.stream(payload)
+                } else if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+                          let content = obj["content"] as? String,
+                          !content.isEmpty {
+                    receivedTokens = true
+                    onToken(content)
                 }
+            } else if name == "done" {
+                // Soft-decode so a trailing schema quirk doesn't kill a successful stream.
+                if let parsed = try? decoder.decode(StreamDoneEvent.self, from: Data(payload.utf8)) {
+                    done = parsed
+                } else if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] {
+                    done = StreamDoneEvent(
+                        sessionId: obj["session_id"] as? String ?? request.sessionId ?? "",
+                        model: obj["model"] as? String ?? lastModel ?? request.model ?? "unknown",
+                        routeCategory: obj["route_category"] as? String,
+                        inputTokens: obj["input_tokens"] as? Int,
+                        outputTokens: obj["output_tokens"] as? Int,
+                        costUsd: obj["cost_usd"] as? Double,
+                        cached: obj["cached"] as? Bool,
+                        latencyMs: obj["latency_ms"] as? Int
+                    )
+                }
+            } else if name == "error" {
+                if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+                   let err = obj["error"] as? String {
+                    throw ARILAPIError.stream(err)
+                }
+                throw ARILAPIError.stream(payload)
             }
         }
+
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            if trimmed.hasPrefix("event:") {
+                eventName = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            if trimmed.hasPrefix("data:") {
+                dataLines.append(String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+                continue
+            }
+            if trimmed.isEmpty {
+                try flushEvent()
+            }
+        }
+        // Final event may arrive without a trailing blank line.
+        try flushEvent()
 
         if let done { return done }
 

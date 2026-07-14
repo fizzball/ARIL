@@ -74,17 +74,6 @@ private struct MessageBubble: View {
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.accent)
                     Spacer()
-                    if message.role == .user, hoveringUser {
-                        Button {
-                            state.reusePrompt(message.content)
-                        } label: {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(theme.palette.accent)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Reuse this prompt in the entry field")
-                    }
                     if message.role == .assistant, !message.content.isEmpty {
                         Button {
                             NSPasteboard.general.clearContents()
@@ -103,28 +92,41 @@ private struct MessageBubble: View {
                     }
                 }
 
-                Group {
-                    if message.role == .user {
+                if message.role == .user {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(message.content)
                             .font(ARILTheme.bodyFont)
                             .foregroundStyle(theme.palette.text)
                             .textSelection(.enabled)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                state.reusePrompt(message.content)
-                            }
-                            .help("Click or use ↓ to reuse this prompt")
-                    } else {
-                        Text(message.content.isEmpty && isStreamingAssistant ? "…" : message.content)
-                            .font(ARILTheme.bodyFont)
-                            .foregroundStyle(theme.palette.text)
-                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button {
+                            state.reusePrompt(message.content)
+                        } label: {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(theme.palette.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(hoveringUser ? 1 : 0)
+                        .allowsHitTesting(hoveringUser)
+                        .help("Reuse this prompt in the entry field")
+                        .accessibilityLabel("Reuse prompt")
+
+                        Spacer(minLength: 0)
                     }
-                }
-            }
-            .onHover { hovering in
-                if message.role == .user {
-                    hoveringUser = hovering
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        state.reusePrompt(message.content)
+                    }
+                    .onHover { hoveringUser = $0 }
+                    .help("Click or use ↓ to reuse this prompt")
+                } else {
+                    Text(message.content.isEmpty && isStreamingAssistant ? "…" : message.content)
+                        .font(ARILTheme.bodyFont)
+                        .foregroundStyle(theme.palette.text)
+                        .textSelection(.enabled)
                 }
             }
         }

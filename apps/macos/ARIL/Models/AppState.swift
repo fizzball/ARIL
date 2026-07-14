@@ -67,6 +67,16 @@ final class AppState: ObservableObject {
     @Published var pendingAttachments: [PendingAttachment] = []
     @Published var webSearchEnabled: Bool = false
     @Published var userDisplayName: String
+    @Published var showRoutingAnalysis: Bool = false
+    @Published var classifications: [ClassificationRecordDTO] = []
+    @Published var compareCategoryDraft: [String: RouteCategory] = [:]
+    @Published var compareAccuracyDraft: [String: Double] = [:]
+    @Published var openRouterConfigured: Bool = false
+    @Published var openRouterMaskedKey: String = ""
+    @Published var openRouterKeyRequired: Bool = true
+    @Published var openRouterKeyDraft: String = ""
+    @Published var isEditingOpenRouterKey: Bool = false
+    @Published var openRouterKeyMessage: String?
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
@@ -74,6 +84,8 @@ final class AppState: ObservableObject {
     private var sendTask: Task<Void, Never>?
     private var generationTimerTask: Task<Void, Never>?
     private var lastUserPromptForPrefer: String = ""
+    /// Local tombstone so reload can't resurrect until gateway agrees.
+    private var deletedSessionIDs: Set<UUID> = []
 
     var selectedSession: ChatSession? {
         sessions.first { $0.id == selectedSessionID }
@@ -104,6 +116,7 @@ final class AppState: ObservableObject {
         gatewayURL = defaults.string(forKey: "aril.gatewayURL") ?? "http://127.0.0.1:8741"
         soloMode = defaults.object(forKey: "aril.soloMode") as? Bool ?? true
         userDisplayName = defaults.string(forKey: "aril.userDisplayName") ?? ""
+        loadDeletedSessionIDs()
         Task { await bootstrap() }
     }
 
@@ -134,6 +147,9 @@ final class AppState: ObservableObject {
     }
 
     func deleteSession(_ id: UUID) async {
+        let sid = id.uuidString.lowercased()
+        deletedSessionIDs.insert(id)
+        persistDeletedSessionIDs()
         sessions.removeAll { $0.id == id }
         if selectedSessionID == id {
             selectedSessionID = sessions.first?.id
@@ -149,15 +165,16 @@ final class AppState: ObservableObject {
             createSession()
         }
         do {
-            try await client.deleteSession(baseURL: gatewayURL, id: id.uuidString)
+            try await client.deleteSession(baseURL: gatewayURL, id: sid)
         } catch {
-            // Local removal already applied; gateway may be offline.
             lastError = error.localizedDescription
         }
     }
 
     func deleteAllSessions() async {
         let ids = sessions.map(\.id)
+        for id in ids { deletedSessionIDs.insert(id) }
+        persistDeletedSessionIDs()
         sessions = []
         selectedSessionID = nil
         draft = ""
@@ -167,10 +184,24 @@ final class AppState: ObservableObject {
         compareResults = []
         preferredCompareModel = nil
         pendingAttachments = []
-        for id in ids {
-            try? await client.deleteSession(baseURL: gatewayURL, id: id.uuidString)
+        do {
+            try await client.deleteAllSessions(baseURL: gatewayURL)
+        } catch {
+            for id in ids {
+                try? await client.deleteSession(baseURL: gatewayURL, id: id.uuidString.lowercased())
+            }
         }
         createSession()
+    }
+
+    private func persistDeletedSessionIDs() {
+        let values = deletedSessionIDs.map { $0.uuidString.lowercased() }
+        UserDefaults.standard.set(values, forKey: "aril.deletedSessionIDs")
+    }
+
+    private func loadDeletedSessionIDs() {
+        let values = UserDefaults.standard.stringArray(forKey: "aril.deletedSessionIDs") ?? []
+        deletedSessionIDs = Set(values.compactMap { UUID(uuidString: $0) })
     }
 
     func refreshHealth() async {
@@ -178,19 +209,83 @@ final class AppState: ObservableObject {
             let health = try await client.health(baseURL: gatewayURL)
             gatewayReady = health.status == "ok"
             chatProvider = health.chatProvider ?? "unknown"
+            openRouterConfigured = health.openrouterConfigured == true
             if health.gateway == "ready" {
                 let solo = soloMode ? " · Solo" : ""
-                gatewayStatus = health.openrouterConfigured == true
-                    ? "Gateway ready · OpenRouter\(solo)"
-                    : "Gateway ready · stub\(solo)"
+                if openRouterConfigured {
+                    gatewayStatus = "Gateway ready · OpenRouter\(solo)"
+                } else {
+                    gatewayStatus = "OpenRouter API key required\(solo)"
+                }
             } else {
                 gatewayStatus = health.status
             }
+            await refreshOpenRouterKeyStatus()
         } catch {
             gatewayReady = false
             gatewayStatus = soloMode ? "Starting solo gateway…" : "Gateway offline"
             chatProvider = "offline"
+            openRouterConfigured = false
         }
+    }
+
+    func refreshOpenRouterKeyStatus() async {
+        do {
+            let status = try await client.openRouterKeyStatus(baseURL: gatewayURL)
+            openRouterConfigured = status.configured
+            openRouterMaskedKey = status.maskedKey
+            openRouterKeyRequired = status.required
+            if status.configured {
+                isEditingOpenRouterKey = false
+                openRouterKeyDraft = ""
+            } else {
+                isEditingOpenRouterKey = true
+            }
+        } catch {
+            // Keep last known status if gateway briefly unavailable
+        }
+    }
+
+    func saveOpenRouterKey() async {
+        let key = openRouterKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            openRouterKeyMessage = "Enter an OpenRouter API key first."
+            return
+        }
+        do {
+            let status = try await client.setOpenRouterKey(baseURL: gatewayURL, apiKey: key)
+            openRouterConfigured = status.configured
+            openRouterMaskedKey = status.maskedKey
+            openRouterKeyRequired = status.required
+            openRouterKeyDraft = ""
+            isEditingOpenRouterKey = false
+            openRouterKeyMessage = "API key saved."
+            UserDefaults.standard.set(key, forKey: "aril.openRouterAPIKey")
+            await refreshHealth()
+        } catch {
+            openRouterKeyMessage = error.localizedDescription
+        }
+    }
+
+    func clearOpenRouterKey() async {
+        do {
+            let status = try await client.clearOpenRouterKey(baseURL: gatewayURL)
+            openRouterConfigured = status.configured
+            openRouterMaskedKey = status.maskedKey
+            openRouterKeyDraft = ""
+            isEditingOpenRouterKey = true
+            openRouterKeyMessage = "API key cleared. Add a key to use live models."
+            UserDefaults.standard.removeObject(forKey: "aril.openRouterAPIKey")
+            await refreshHealth()
+        } catch {
+            openRouterKeyMessage = error.localizedDescription
+        }
+    }
+
+    func beginEditingOpenRouterKey() {
+        isEditingOpenRouterKey = true
+        openRouterKeyDraft = ""
+        openRouterKeyMessage = nil
     }
 
     func loadSessions() async {
@@ -215,8 +310,12 @@ final class AppState: ObservableObject {
                 }
             }
             if !loaded.isEmpty {
-                sessions = loaded
-                selectedSessionID = loaded.first?.id
+                sessions = loaded.filter { !deletedSessionIDs.contains($0.id) }
+                if sessions.isEmpty {
+                    createSession()
+                } else {
+                    selectedSessionID = sessions.first?.id
+                }
             }
         } catch {
             // Keep local sessions if gateway history is unavailable
@@ -314,7 +413,7 @@ final class AppState: ObservableObject {
                     temperature: temperature,
                     routeMode: routeMode,
                     preferredModel: selectedModel,
-                    sessionId: selectedSessionID?.uuidString,
+                    sessionId: selectedSessionID?.uuidString.lowercased(),
                     routingProfile: APIRoutingProfile(routingProfile),
                     enhanceAlternatives: true
                 )
@@ -426,13 +525,26 @@ final class AppState: ObservableObject {
         pendingAttachments = []
         let lockedManualModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
         let compareModels: [String] = {
-            if let routes = preview?.routes, routes.count >= 2 {
-                return Array(routes.prefix(2).map(\.modelId))
+            var picks: [String] = []
+            if let routes = preview?.routes {
+                for route in routes where !picks.contains(route.modelId) {
+                    picks.append(route.modelId)
+                    if picks.count >= 3 { break }
+                }
             }
-            // Distinct fallback pair so Compare always has two models
-            let a = routeMode == .manual ? lockedManualModel : selectedModel
-            let b = (a == routingProfile.cost) ? routingProfile.confidence : routingProfile.cost
-            return a == b ? [a, defaultModel] : [a, b]
+            let fallbacks = [
+                routeMode == .manual ? lockedManualModel : selectedModel,
+                routingProfile.coding,
+                routingProfile.cost,
+                routingProfile.reasoning,
+                routingProfile.confidence,
+                defaultModel,
+            ]
+            for mid in fallbacks where !picks.contains(mid) {
+                picks.append(mid)
+                if picks.count >= 3 { break }
+            }
+            return Array(picks.prefix(3))
         }()
         let cacheEligible = preview?.cache.eligible ?? false
         preview = nil
@@ -474,7 +586,7 @@ final class AppState: ObservableObject {
             temperature: temperature,
             routeMode: routeMode,
             useCache: true,
-            sessionId: sid.uuidString,
+            sessionId: sid.uuidString.lowercased(),
             previewId: nil,
             routingProfile: APIRoutingProfile(routingProfile),
             attachments: attachmentDTOs,
@@ -495,6 +607,7 @@ final class AppState: ObservableObject {
                 }
             }
             if Task.isCancelled { return }
+            lastError = nil
             lastCacheLabel = (done.cached ?? false) ? "cached" : "not cached"
             if let ms = done.latencyMs {
                 lastLatencyMs = ms
@@ -505,14 +618,26 @@ final class AppState: ObservableObject {
             sessions[idx].messages.removeAll { $0.id == assistantID && $0.content.isEmpty }
         } catch {
             if Task.isCancelled { return }
-            lastError = error.localizedDescription
+            // If tokens already landed in the bubble, treat as success and don't scream.
+            let alreadyHasContent: Bool = {
+                guard let m = sessions[idx].messages.firstIndex(where: { $0.id == assistantID }) else { return false }
+                return !sessions[idx].messages[m].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }()
+            if alreadyHasContent {
+                lastError = nil
+                sessions[idx].updatedAt = .now
+                await refreshHealth()
+                return
+            }
             do {
                 let response = try await client.chat(baseURL: gatewayURL, request: request)
                 if let m = sessions[idx].messages.firstIndex(where: { $0.id == assistantID }) {
                     sessions[idx].messages[m].content = response.message.content
                 }
+                lastError = nil
                 lastCacheLabel = response.cached ? "cached" : "not cached"
                 generationPhase = .streaming
+                sessions[idx].updatedAt = .now
             } catch {
                 lastError = error.localizedDescription
                 sessions[idx].messages.removeAll { $0.id == assistantID }
@@ -530,7 +655,7 @@ final class AppState: ObservableObject {
                     models: models,
                     temperature: temperature,
                     routingProfile: APIRoutingProfile(routingProfile),
-                    sessionId: sessionID.uuidString,
+                    sessionId: sessionID.uuidString.lowercased(),
                     useCache: true,
                     runProbe: true
                 )
@@ -538,6 +663,14 @@ final class AppState: ObservableObject {
             if Task.isCancelled { return }
             generationPhase = .streaming
             compareResults = response.results
+            compareCategoryDraft = [:]
+            compareAccuracyDraft = [:]
+            for result in response.results {
+                if let cat = result.suggestedCategory {
+                    compareCategoryDraft[result.model] = cat
+                }
+                compareAccuracyDraft[result.model] = 0.8
+            }
             lastCacheLabel = response.results.contains(where: \.cached) ? "cached" : "not cached"
             if let fastest = response.results.map(\.latencyMs).min() {
                 lastLatencyMs = fastest
@@ -554,13 +687,19 @@ final class AppState: ObservableObject {
     func preferCompareResult(_ result: CompareResultDTO) async {
         preferredCompareModel = result.model
         selectModel(result.model)
+        let suggested = result.suggestedCategory
+        let chosenCategory = compareCategoryDraft[result.model] ?? suggested
+        let accuracy = compareAccuracyDraft[result.model]
+        let overridden = chosenCategory != nil && chosenCategory != suggested
         do {
             _ = try await client.prefer(
                 baseURL: gatewayURL,
                 request: PreferRequestDTO(
                     prompt: lastUserPromptForPrefer,
                     model: result.model,
-                    category: nil,
+                    category: chosenCategory,
+                    accuracy: accuracy,
+                    categoryOverridden: overridden,
                     sessionId: selectedSessionID?.uuidString
                 )
             )
@@ -569,6 +708,79 @@ final class AppState: ObservableObject {
                     ChatMessage(role: .assistant, content: result.content)
                 )
             }
+            await loadClassifications()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func loadClassifications() async {
+        do {
+            let snap = try await client.preferences(baseURL: gatewayURL)
+            classifications = snap.classifications
+        } catch {
+            // Gateway may be offline
+        }
+    }
+
+    func updateClassification(
+        _ id: String,
+        category: RouteCategory?,
+        accuracy: Double?,
+        removeAccuracy: Bool = false
+    ) async {
+        do {
+            let updated = try await client.updateClassification(
+                baseURL: gatewayURL,
+                id: id,
+                update: ClassificationUpdateDTO(
+                    category: category,
+                    accuracy: accuracy,
+                    model: nil,
+                    removeAccuracy: removeAccuracy
+                )
+            )
+            if let idx = classifications.firstIndex(where: { $0.id == id }) {
+                classifications[idx] = updated
+            }
+            if analysisStatus == .ready {
+                await runPreview()
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func deleteClassification(_ id: String) async {
+        do {
+            try await client.deleteClassification(baseURL: gatewayURL, id: id)
+            classifications.removeAll { $0.id == id }
+            if analysisStatus == .ready {
+                await runPreview()
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Save category/accuracy override from the Analysis sheet for the current draft.
+    func saveAnalysisOverride(category: RouteCategory, accuracy: Double?, overridden: Bool) async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        do {
+            _ = try await client.prefer(
+                baseURL: gatewayURL,
+                request: PreferRequestDTO(
+                    prompt: text,
+                    model: selectedModel,
+                    category: category,
+                    accuracy: accuracy,
+                    categoryOverridden: overridden,
+                    sessionId: selectedSessionID?.uuidString
+                )
+            )
+            await loadClassifications()
+            await runPreview()
         } catch {
             lastError = error.localizedDescription
         }
@@ -671,8 +883,10 @@ final class AppState: ObservableObject {
 
     private func persistSelectedSession() async {
         guard let session = selectedSession else { return }
+        // Never re-upsert a locally deleted session id.
+        if deletedSessionIDs.contains(session.id) { return }
         let payload = SessionUpsertDTO(
-            id: session.id.uuidString,
+            id: session.id.uuidString.lowercased(),
             title: session.title,
             messages: session.messages.map { APIChatMessage(role: $0.role.rawValue, content: $0.content) }
         )

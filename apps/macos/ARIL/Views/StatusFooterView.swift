@@ -11,7 +11,11 @@ struct StatusFooterView: View {
                 .frame(width: 6, height: 6)
             Text(state.gatewayStatus)
                 .font(ARILTheme.captionFont)
-                .foregroundStyle(theme.palette.textMuted)
+                .foregroundStyle(
+                    state.gatewayReady && !state.openRouterConfigured
+                        ? theme.palette.danger
+                        : theme.palette.textMuted
+                )
 
             Text(state.chatProvider)
                 .font(ARILTheme.captionFont)

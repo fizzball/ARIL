@@ -67,12 +67,30 @@ struct PreviewResponse: Codable, Equatable {
     let temperature: Double
     let routeMode: RouteMode
     let alternativesSource: String?
+    let userOverride: UserOverrideInsight?
 
     enum CodingKeys: String, CodingKey {
         case classification, grade, alternatives, routes, cache, temperature
         case recommendedModel = "recommended_model"
         case routeMode = "route_mode"
         case alternativesSource = "alternatives_source"
+        case userOverride = "user_override"
+    }
+}
+
+struct UserOverrideInsight: Codable, Equatable {
+    let classificationId: String
+    let category: RouteCategory
+    let model: String?
+    let accuracy: Double?
+    let categoryOverridden: Bool
+    let promptSnippet: String?
+
+    enum CodingKeys: String, CodingKey {
+        case category, model, accuracy
+        case classificationId = "classification_id"
+        case categoryOverridden = "category_overridden"
+        case promptSnippet = "prompt_snippet"
     }
 }
 
@@ -109,6 +127,20 @@ struct PromptAlternative: Codable, Equatable, Identifiable {
     }
 }
 
+struct ScoreBreakdown: Codable, Equatable {
+    let categoryFit: Double
+    let cost: Double
+    let base: Double
+    let learning: Double
+    let confidenceIndex: Double
+
+    enum CodingKeys: String, CodingKey {
+        case cost, base, learning
+        case categoryFit = "category_fit"
+        case confidenceIndex = "confidence_index"
+    }
+}
+
 struct ModelEstimate: Codable, Equatable, Identifiable {
     var id: String { modelId }
     let modelId: String
@@ -119,9 +151,10 @@ struct ModelEstimate: Codable, Equatable, Identifiable {
     let estimatedCostUsd: Double
     let score: Double
     let reasons: [String]
+    let breakdown: ScoreBreakdown?
 
     enum CodingKeys: String, CodingKey {
-        case provider, score, reasons
+        case provider, score, reasons, breakdown
         case modelId = "model_id"
         case categoryFit = "category_fit"
         case estimatedInputTokens = "estimated_input_tokens"
@@ -310,6 +343,8 @@ struct CompareResultDTO: Codable, Identifiable {
     let probeLatencyMs: Int?
     let cached: Bool
     let error: String?
+    let suggestedCategory: RouteCategory?
+    let categoryConfidence: Double?
 
     enum CodingKeys: String, CodingKey {
         case model, content, cached, error
@@ -318,6 +353,8 @@ struct CompareResultDTO: Codable, Identifiable {
         case costUsd = "cost_usd"
         case latencyMs = "latency_ms"
         case probeLatencyMs = "probe_latency_ms"
+        case suggestedCategory = "suggested_category"
+        case categoryConfidence = "category_confidence"
     }
 }
 
@@ -337,10 +374,13 @@ struct PreferRequestDTO: Encodable {
     let prompt: String
     let model: String
     let category: RouteCategory?
+    let accuracy: Double?
+    let categoryOverridden: Bool
     let sessionId: String?
 
     enum CodingKeys: String, CodingKey {
-        case prompt, model, category
+        case prompt, model, category, accuracy
+        case categoryOverridden = "category_overridden"
         case sessionId = "session_id"
     }
 }
@@ -350,12 +390,73 @@ struct PreferResponseDTO: Codable {
     let category: String
     let fingerprint: String
     let model: String
-    let categoryWins: Int
-    let fingerprintWins: Int
+    let categoryWins: Int?
+    let fingerprintWins: Int?
+    let classificationId: String?
+    let accuracy: Double?
+    let categoryOverridden: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case ok, category, fingerprint, model
+        case ok, category, fingerprint, model, accuracy
         case categoryWins = "category_wins"
         case fingerprintWins = "fingerprint_wins"
+        case classificationId = "classification_id"
+        case categoryOverridden = "category_overridden"
+    }
+}
+
+struct ClassificationRecordDTO: Codable, Identifiable, Equatable {
+    let id: String
+    let prompt: String
+    let promptSnippet: String
+    let fingerprint: String
+    let category: String
+    let model: String
+    let accuracy: Double?
+    let categoryOverridden: Bool
+    let createdAt: String?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, prompt, fingerprint, category, model, accuracy
+        case promptSnippet = "prompt_snippet"
+        case categoryOverridden = "category_overridden"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct PreferencesSnapshotDTO: Codable {
+    let classifications: [ClassificationRecordDTO]
+}
+
+struct ClassificationUpdateDTO: Encodable {
+    let category: RouteCategory?
+    let accuracy: Double?
+    let model: String?
+    let removeAccuracy: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case category, accuracy, model
+        case removeAccuracy = "remove_accuracy"
+    }
+}
+
+struct OpenRouterKeyStatusDTO: Codable {
+    let configured: Bool
+    let maskedKey: String
+    let required: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case configured, required
+        case maskedKey = "masked_key"
+    }
+}
+
+struct OpenRouterKeyUpdateDTO: Encodable {
+    let apiKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case apiKey = "api_key"
     }
 }

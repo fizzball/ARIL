@@ -27,6 +27,11 @@ struct IntelligencePanelView: View {
                 Spacer()
 
                 if let preview = state.preview, state.analysisStatus == .ready {
+                    if preview.userOverride?.categoryOverridden == true {
+                        Text("OVERRIDE")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(theme.palette.danger)
+                    }
                     Text(preview.classification.primary.label.uppercased())
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.textMuted)
@@ -34,6 +39,12 @@ struct IntelligencePanelView: View {
                         title: String(format: "%.0f%% fit", preview.classification.confidence * 100),
                         help: "How well the prompt matches the detected category. Higher means routing is more confident."
                     )
+                    Button("Analysis") {
+                        state.showRoutingAnalysis = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Show how the model was selected (confidence index)")
                 }
             }
 
@@ -79,6 +90,13 @@ struct IntelligencePanelView: View {
                     "Latency",
                     "\(latency)ms",
                     help: "Round-trip probe latency for the recommended model, or last completed request time."
+                )
+            }
+            if let top = preview.routes.first, let idx = top.breakdown?.confidenceIndex {
+                metric(
+                    "Conf. index",
+                    String(format: "%.0f%%", idx * 100),
+                    help: "Combined confidence index from category fit, cost, base prior, and learned preferences."
                 )
             }
             metric("Category", preview.classification.primary.label)
@@ -137,7 +155,7 @@ struct IntelligencePanelView: View {
             Text("Temperature")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted)
-            Slider(value: $state.temperature, in: 0...2, step: 0.1)
+            Slider(value: $state.temperature, in: 0...1, step: 0.1)
             Text(String(format: "%.1f", state.temperature))
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.text)

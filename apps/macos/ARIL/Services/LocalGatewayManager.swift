@@ -65,9 +65,13 @@ final class LocalGatewayManager: ObservableObject {
             "--port", "\(port)",
         ]
         proc.currentDirectoryURL = apiRoot
-        proc.environment = ProcessInfo.processInfo.environment.merging([
-            "PYTHONUNBUFFERED": "1",
-        ]) { _, new in new }
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        if let key = UserDefaults.standard.string(forKey: "aril.openRouterAPIKey"),
+           !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            env["OPENROUTER_API_KEY"] = key
+        }
+        proc.environment = env
 
         do {
             try proc.run()

@@ -12,15 +12,21 @@ from app.core import cache as prompt_cache
 from app.core import preferences as pref_store
 from app.core import sessions as session_store
 from app.core.config import settings
+from app.core import secrets as key_store
 from app.core.schemas import (
     ChatRequest,
     ChatResponse,
     ChatMessage,
+    ClassificationRecord,
+    ClassificationUpdateRequest,
     CompareRequest,
     CompareResponse,
     CompareResult,
+    OpenRouterKeyStatus,
+    OpenRouterKeyUpdate,
     PreferRequest,
     PreferResponse,
+    PreferencesSnapshot,
     PreviewRequest,
     PreviewResponse,
     ProbeRequest,
@@ -302,17 +308,17 @@ async def compare(req: CompareRequest) -> CompareResponse:
     )
     profile = resolve_profile(req.routing_profile)
     routes = score_routes(last_user or " ", classification.primary, profile)
-    models = req.models or [r.model_id for r in routes[: settings.aril_compare_model_count]]
+    target_count = max(3, settings.aril_compare_model_count)
+    models = req.models or [r.model_id for r in routes[:target_count]]
     # Deduplicate while preserving order
     seen: set[str] = set()
     models = [m for m in models if not (m in seen or seen.add(m))]
-    if len(models) < 2:
-        # Ensure at least two candidates
+    if len(models) < target_count:
         for mid in profile.values():
             if mid not in seen:
                 models.append(mid)
                 seen.add(mid)
-            if len(models) >= 2:
+            if len(models) >= target_count:
                 break
 
     session_id = req.session_id or str(uuid.uuid4())
@@ -335,6 +341,8 @@ async def compare(req: CompareRequest) -> CompareResponse:
                 use_cache=req.use_cache,
             )
             ms = int((time.perf_counter() - started) * 1000)
+            # Classify the *response* to suggest which category the answer best fits.
+            resp_class = classify(result.content or last_user or " ")
             return CompareResult(
                 model=result.model,
                 content=result.content,
@@ -344,6 +352,8 @@ async def compare(req: CompareRequest) -> CompareResponse:
                 latency_ms=ms,
                 probe_latency_ms=probe_map.get(model),
                 cached=cached,
+                suggested_category=resp_class.primary,
+                category_confidence=resp_class.confidence,
             )
         except Exception as exc:  # noqa: BLE001
             ms = int((time.perf_counter() - started) * 1000)
@@ -359,14 +369,17 @@ async def compare(req: CompareRequest) -> CompareResponse:
             )
 
     results = await asyncio.gather(*[run_one(m) for m in models])
-    # Persist a summary note into the session
+    # Persist a summary note into the session (skip if session was deleted)
     summary_bits = []
     for r in results:
         if r.error:
             summary_bits.append(f"### {r.model}\nError: {r.error}")
         else:
+            cat = r.suggested_category.value if r.suggested_category else "?"
             probe_bit = f" · probe {r.probe_latency_ms}ms" if r.probe_latency_ms is not None else ""
-            summary_bits.append(f"### {r.model} ({r.latency_ms}ms{probe_bit})\n{r.content}")
+            summary_bits.append(
+                f"### {r.model} ({r.latency_ms}ms{probe_bit} · {cat})\n{r.content}"
+            )
     assistant = ChatMessage(role="assistant", content="\n\n".join(summary_bits))
     session_store.upsert_session(
         SessionUpsert(
@@ -390,13 +403,46 @@ async def probe(req: ProbeRequest) -> ProbeResponse:
 
 @router.post("/feedback/prefer", response_model=PreferResponse)
 async def prefer(req: PreferRequest) -> PreferResponse:
-    category = req.category
-    if category is None:
-        category = classify(req.prompt).primary
+    auto_category = classify(req.prompt).primary
+    category = req.category or auto_category
+    overridden = bool(req.category_overridden or (req.category is not None and req.category != auto_category))
     info = pref_store.record_preference(
-        prompt=req.prompt, category=category.value, model=req.model
+        prompt=req.prompt,
+        category=category.value,
+        model=req.model,
+        accuracy=req.accuracy,
+        category_overridden=overridden,
     )
     return PreferResponse(ok=True, **info)
+
+
+@router.get("/preferences", response_model=PreferencesSnapshot)
+async def preferences_get() -> PreferencesSnapshot:
+    snap = pref_store.snapshot()
+    return PreferencesSnapshot(**snap)
+
+
+@router.patch("/preferences/classifications/{classification_id}", response_model=ClassificationRecord)
+async def preferences_update_classification(
+    classification_id: str, req: ClassificationUpdateRequest
+) -> ClassificationRecord:
+    updated = pref_store.update_classification(
+        classification_id,
+        category=req.category.value if req.category else None,
+        accuracy=req.accuracy,
+        model=req.model,
+        remove_accuracy=req.remove_accuracy,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    return ClassificationRecord(**updated)
+
+
+@router.delete("/preferences/classifications/{classification_id}")
+async def preferences_delete_classification(classification_id: str) -> dict:
+    if not pref_store.delete_classification(classification_id):
+        raise HTTPException(status_code=404, detail="Classification not found")
+    return {"ok": True}
 
 
 @router.get("/sessions", response_model=list[SessionSummary])
@@ -414,14 +460,40 @@ async def sessions_get(session_id: str) -> SessionDetail:
 
 @router.put("/sessions", response_model=SessionDetail)
 async def sessions_put(payload: SessionUpsert) -> SessionDetail:
-    return session_store.upsert_session(payload)
+    detail = session_store.upsert_session(payload)
+    if detail is None:
+        raise HTTPException(status_code=410, detail="Session was deleted")
+    return detail
 
 
 @router.delete("/sessions/{session_id}")
 async def sessions_delete(session_id: str) -> dict:
-    if not session_store.delete_session(session_id):
-        raise HTTPException(status_code=404, detail="Session not found")
+    session_store.delete_session(session_id)
     return {"ok": True}
+
+
+@router.delete("/sessions")
+async def sessions_delete_all() -> dict:
+    count = session_store.delete_all_sessions()
+    return {"ok": True, "deleted": count}
+
+
+@router.get("/settings/openrouter-key", response_model=OpenRouterKeyStatus)
+async def openrouter_key_status() -> OpenRouterKeyStatus:
+    return OpenRouterKeyStatus(**key_store.status())
+
+
+@router.put("/settings/openrouter-key", response_model=OpenRouterKeyStatus)
+async def openrouter_key_put(req: OpenRouterKeyUpdate) -> OpenRouterKeyStatus:
+    try:
+        return OpenRouterKeyStatus(**key_store.set_api_key(req.api_key))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/settings/openrouter-key", response_model=OpenRouterKeyStatus)
+async def openrouter_key_delete() -> OpenRouterKeyStatus:
+    return OpenRouterKeyStatus(**key_store.clear_api_key())
 
 
 @router.get("/models")

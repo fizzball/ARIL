@@ -10,43 +10,127 @@ struct SettingsView: View {
                 .tabItem { Label("Gateway", systemImage: "network") }
             routingTab
                 .tabItem { Label("Models", systemImage: "cpu") }
+            learningTab
+                .tabItem { Label("Learning", systemImage: "brain") }
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
         .frame(width: 640, height: 520)
+        .task {
+            await state.loadClassifications()
+        }
     }
 
     private var gatewayTab: some View {
         Form {
-            Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
-                .onChange(of: state.soloMode) { _, _ in
-                    state.saveSoloMode()
-                }
-            Text(state.gatewayStatusDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Section("OpenRouter API key") {
+                Text("Required for live multi-model chat. Create a key at openrouter.ai/keys")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            TextField("Gateway URL", text: $state.gatewayURL)
-                .onSubmit {
-                    state.saveGatewayURL()
-                    Task { await state.refreshHealth() }
+                if state.openRouterConfigured, !state.isEditingOpenRouterKey {
+                    HStack {
+                        Text(state.openRouterMaskedKey)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Text("Configured")
+                            .foregroundStyle(Color.green)
+                    }
+                    HStack {
+                        Button("Update key") {
+                            state.beginEditingOpenRouterKey()
+                        }
+                        Button("Clear key", role: .destructive) {
+                            Task { await state.clearOpenRouterKey() }
+                        }
+                    }
+                    // Spacer row to separate key actions from the next section
+                    Color.clear.frame(height: 12)
+                } else {
+                    if !state.openRouterConfigured {
+                        Text("No API key configured — enter one to enable OpenRouter.")
+                            .foregroundStyle(Color.red)
+                    }
+                    SecureField("sk-or-v1-…", text: $state.openRouterKeyDraft)
+                    HStack {
+                        Button("Save key") {
+                            Task { await state.saveOpenRouterKey() }
+                        }
+                        .disabled(state.openRouterKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if state.openRouterConfigured {
+                            Button("Cancel") {
+                                state.isEditingOpenRouterKey = false
+                                state.openRouterKeyDraft = ""
+                            }
+                        }
+                    }
+                    Color.clear.frame(height: 12)
                 }
-            TextField("API root path (optional)", text: Binding(
-                get: { UserDefaults.standard.string(forKey: "aril.apiRoot") ?? "" },
-                set: { UserDefaults.standard.set($0, forKey: "aril.apiRoot") }
-            ))
-            HStack {
-                Button("Check connection") {
-                    state.saveGatewayURL()
-                    Task { await state.refreshHealth() }
+
+                if let msg = state.openRouterKeyMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text(state.gatewayReady ? "Gateway ready" : "Gateway not ready")
-                    .foregroundStyle(state.gatewayReady ? Color.green : Color.red)
             }
-            Slider(value: $state.temperature, in: 0...2, step: 0.1) {
-                Text("Default temperature")
+
+            Section("Gateway") {
+                Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
+                    .onChange(of: state.soloMode) { _, _ in
+                        state.saveSoloMode()
+                    }
+                Text(state.gatewayStatusDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextField("Gateway URL", text: $state.gatewayURL)
+                    .onSubmit {
+                        state.saveGatewayURL()
+                        Task { await state.refreshHealth() }
+                    }
+                TextField("API root path (optional)", text: Binding(
+                    get: { UserDefaults.standard.string(forKey: "aril.apiRoot") ?? "" },
+                    set: { UserDefaults.standard.set($0, forKey: "aril.apiRoot") }
+                ))
+                HStack {
+                    Button("Check connection") {
+                        state.saveGatewayURL()
+                        Task { await state.refreshHealth() }
+                    }
+                    Text(state.gatewayReady ? "Gateway ready" : "Gateway not ready")
+                        .foregroundStyle(state.gatewayReady ? Color.green : Color.red)
+                }
             }
-            Text(String(format: "%.1f", state.temperature))
+
+            Section("Default temperature") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Temperature")
+                        Spacer(minLength: 0)
+                        Text(String(format: "%.1f", state.temperature))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+
+                    // Native Form Slider ignores maxWidth on macOS — draw a full-width track.
+                    FullWidthTemperatureSlider(value: $state.temperature)
+
+                    HStack(spacing: 0) {
+                        Text("0 · Accuracy")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Text("1 · Creativity")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            }
 
             Section("Sessions") {
                 Text("Removes all chat history from this Mac and the local gateway.")
@@ -59,6 +143,13 @@ struct SettingsView: View {
             }
         }
         .padding()
+        .formStyle(.grouped)
+        .task {
+            await state.refreshOpenRouterKeyStatus()
+            if state.temperature > 1 {
+                state.temperature = 1
+            }
+        }
     }
 
     private var routingTab: some View {
@@ -110,6 +201,31 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
+    private var learningTab: some View {
+        Form {
+            Section("Prompt classifications") {
+                Text("Judgments from Compare Prefer and Analysis overrides. Adjust category or accuracy, or remove an entry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if state.classifications.isEmpty {
+                    Text("No classifications yet. Prefer a Compare result or save an Analysis override.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(state.classifications) { item in
+                        ClassificationRow(item: item)
+                    }
+                }
+
+                Button("Refresh list") {
+                    Task { await state.loadClassifications() }
+                }
+            }
+        }
+        .padding()
+        .formStyle(.grouped)
+    }
+
     private var appearanceTab: some View {
         Form {
             Section("Identity") {
@@ -151,5 +267,121 @@ struct SettingsView: View {
                 state.saveRoutingProfile()
             }
         )
+    }
+}
+
+private struct FullWidthTemperatureSlider: View {
+    @Binding var value: Double
+    private let range: ClosedRange<Double> = 0...1
+    private let step: Double = 0.1
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(geo.size.width, 1)
+            let thumbRadius: CGFloat = 9
+            let travel = max(width - thumbRadius * 2, 1)
+            let fraction = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
+            let thumbX = thumbRadius + fraction * travel
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(height: 4)
+                    .frame(maxWidth: .infinity)
+
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: max(thumbX, 4), height: 4)
+
+                // Tick marks at 0.1 steps
+                ForEach(0..<11, id: \.self) { i in
+                    Circle()
+                        .fill(Color.secondary.opacity(0.45))
+                        .frame(width: 3, height: 3)
+                        .position(
+                            x: thumbRadius + CGFloat(i) / 10 * travel,
+                            y: geo.size.height / 2 + 10
+                        )
+                }
+
+                Circle()
+                    .fill(Color.white)
+                    .overlay(Circle().stroke(Color.black.opacity(0.12), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.18), radius: 1.5, y: 0.5)
+                    .frame(width: thumbRadius * 2, height: thumbRadius * 2)
+                    .position(x: thumbX, y: geo.size.height / 2)
+            }
+            .frame(width: width, height: geo.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        let raw = (drag.location.x - thumbRadius) / travel
+                        let clamped = min(1, max(0, Double(raw)))
+                        let stepped = (clamped / step).rounded() * step
+                        value = min(range.upperBound, max(range.lowerBound, stepped))
+                    }
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 28)
+        .padding(.bottom, 6)
+    }
+}
+
+private struct ClassificationRow: View {
+    @EnvironmentObject private var state: AppState
+    let item: ClassificationRecordDTO
+    @State private var category: RouteCategory = .general
+    @State private var accuracy: Double = 0.8
+    @State private var hasAccuracy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.promptSnippet.isEmpty ? item.prompt : item.promptSnippet)
+                .lineLimit(2)
+            Text("\(item.model) · \(item.category)\(item.categoryOverridden ? " · override" : "")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Category", selection: $category) {
+                ForEach(RouteCategory.allCases) { cat in
+                    Text(cat.label).tag(cat)
+                }
+            }
+
+            Toggle("Accuracy set", isOn: $hasAccuracy)
+            if hasAccuracy {
+                HStack {
+                    Text("\(Int(accuracy * 100))%")
+                        .frame(width: 40)
+                    Slider(value: $accuracy, in: 0...1, step: 0.05)
+                }
+            }
+
+            HStack {
+                Button("Save") {
+                    Task {
+                        await state.updateClassification(
+                            item.id,
+                            category: category,
+                            accuracy: hasAccuracy ? accuracy : nil,
+                            removeAccuracy: !hasAccuracy && item.accuracy != nil
+                        )
+                    }
+                }
+                Button("Remove", role: .destructive) {
+                    Task { await state.deleteClassification(item.id) }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            category = RouteCategory(rawValue: item.category) ?? .general
+            if let acc = item.accuracy {
+                hasAccuracy = true
+                accuracy = acc
+            }
+        }
     }
 }

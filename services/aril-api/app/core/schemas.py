@@ -64,6 +64,16 @@ class PromptAlternative(BaseModel):
     estimated_grade: float = Field(ge=0, le=1)
 
 
+class ScoreBreakdown(BaseModel):
+    """Per-metric scores that combine into the confidence index."""
+
+    category_fit: float = Field(ge=0, le=1)
+    cost: float = Field(ge=0, le=1)
+    base: float = Field(ge=0, le=1)
+    learning: float = Field(ge=0, le=1)
+    confidence_index: float = Field(ge=0, le=1)
+
+
 class ModelEstimate(BaseModel):
     model_id: str
     provider: str
@@ -73,12 +83,22 @@ class ModelEstimate(BaseModel):
     estimated_cost_usd: float
     score: float
     reasons: list[str] = Field(default_factory=list)
+    breakdown: ScoreBreakdown | None = None
 
 
 class ClassificationResult(BaseModel):
     primary: RouteCategory
     secondary: list[RouteCategory] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
+
+
+class UserOverrideInsight(BaseModel):
+    classification_id: str
+    category: RouteCategory
+    model: str | None = None
+    accuracy: float | None = Field(default=None, ge=0, le=1)
+    category_overridden: bool = False
+    prompt_snippet: str | None = None
 
 
 class CacheInsight(BaseModel):
@@ -109,6 +129,7 @@ class PreviewResponse(BaseModel):
     temperature: float
     route_mode: RouteMode
     alternatives_source: Literal["none", "heuristic", "llm"] = "heuristic"
+    user_override: UserOverrideInsight | None = None
 
 
 class ChatMessage(BaseModel):
@@ -167,6 +188,8 @@ class CompareResult(BaseModel):
     probe_latency_ms: int | None = None
     cached: bool = False
     error: str | None = None
+    suggested_category: RouteCategory | None = None
+    category_confidence: float | None = None
 
 
 class CompareResponse(BaseModel):
@@ -194,6 +217,8 @@ class PreferRequest(BaseModel):
     prompt: str
     model: str
     category: RouteCategory | None = None
+    accuracy: float | None = Field(default=None, ge=0, le=1)
+    category_overridden: bool = False
     session_id: str | None = None
 
 
@@ -204,6 +229,35 @@ class PreferResponse(BaseModel):
     model: str
     category_wins: int
     fingerprint_wins: int
+    classification_id: str | None = None
+    accuracy: float | None = None
+    category_overridden: bool = False
+
+
+class ClassificationUpdateRequest(BaseModel):
+    category: RouteCategory | None = None
+    accuracy: float | None = Field(default=None, ge=0, le=1)
+    model: str | None = None
+    remove_accuracy: bool = False
+
+
+class ClassificationRecord(BaseModel):
+    id: str
+    prompt: str = ""
+    prompt_snippet: str = ""
+    fingerprint: str
+    category: str
+    model: str
+    accuracy: float | None = None
+    category_overridden: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class PreferencesSnapshot(BaseModel):
+    category_wins: dict[str, dict[str, int]] = Field(default_factory=dict)
+    fingerprint_wins: dict[str, dict[str, int]] = Field(default_factory=dict)
+    classifications: list[ClassificationRecord] = Field(default_factory=list)
 
 
 class SessionSummary(BaseModel):
@@ -224,3 +278,13 @@ class SessionUpsert(BaseModel):
     id: str | None = None
     title: str = "New session"
     messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class OpenRouterKeyStatus(BaseModel):
+    configured: bool
+    masked_key: str = ""
+    required: bool = True
+
+
+class OpenRouterKeyUpdate(BaseModel):
+    api_key: str = Field(min_length=1)

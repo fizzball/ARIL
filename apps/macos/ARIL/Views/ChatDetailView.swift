@@ -48,6 +48,11 @@ struct ChatDetailView: View {
                 .environmentObject(state)
                 .environmentObject(theme)
         }
+        .sheet(isPresented: $state.showRoutingAnalysis) {
+            RoutingAnalysisView()
+                .environmentObject(state)
+                .environmentObject(theme)
+        }
     }
 }
 

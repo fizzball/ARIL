@@ -74,6 +74,12 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.3", changes: [
+            "Compare runs 3 models with category + accuracy feedback that teaches future routing",
+            "Preferences → Learning lists editable prompt classifications",
+            "Analysis button shows confidence-index breakdown and overrides",
+            "Deleted sessions stay deleted (tombstones + bulk delete API)",
+        ]),
         ChangelogEntry(version: "0.3.2", changes: [
             "Web search as a checkbox toggle; prompt analysis after 2s idle",
             "Manual mode grades prompts without swapping models (red lock)",
