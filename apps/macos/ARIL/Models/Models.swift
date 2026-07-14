@@ -162,3 +162,25 @@ struct ChatMessage: Identifiable, Hashable {
         self.content = content
     }
 }
+
+struct PendingAttachment: Identifiable, Hashable {
+    let id: UUID
+    let filename: String
+    let mimeType: String
+    let data: Data
+
+    init(id: UUID = UUID(), filename: String, mimeType: String, data: Data) {
+        self.id = id
+        self.filename = filename
+        self.mimeType = mimeType
+        self.data = data
+    }
+
+    var isImage: Bool { mimeType.hasPrefix("image/") }
+
+    var displaySize: String {
+        let kb = Double(data.count) / 1024.0
+        if kb < 1024 { return String(format: "%.0f KB", kb) }
+        return String(format: "%.1f MB", kb / 1024.0)
+    }
+}

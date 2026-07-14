@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MessageListView: View {
     @EnvironmentObject private var state: AppState
@@ -29,12 +30,32 @@ struct MessageListView: View {
 private struct MessageBubble: View {
     @EnvironmentObject private var theme: ThemeStore
     let message: ChatMessage
+    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(message.role == .user ? "You" : "ARIL")
-                .font(ARILTheme.captionFont)
-                .foregroundStyle(theme.palette.accent)
+            HStack {
+                Text(message.role == .user ? "You" : "ARIL")
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.accent)
+                Spacer()
+                if message.role == .assistant, !message.content.isEmpty {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(message.content, forType: .string)
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            copied = false
+                        }
+                    } label: {
+                        Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy response to clipboard")
+                }
+            }
             Text(message.content)
                 .font(ARILTheme.bodyFont)
                 .foregroundStyle(theme.palette.text)

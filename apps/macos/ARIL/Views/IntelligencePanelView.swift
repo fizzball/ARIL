@@ -61,7 +61,7 @@ struct IntelligencePanelView: View {
     private func readyContent(_ preview: PreviewResponse) -> some View {
         HStack(spacing: 16) {
             metric(
-                "Grade",
+                "Prompt Grade",
                 String(format: "%.0f%%", preview.grade.overall * 100),
                 help: "Prompt quality score (clarity, constraints, success criteria, token efficiency) — not model accuracy."
             )

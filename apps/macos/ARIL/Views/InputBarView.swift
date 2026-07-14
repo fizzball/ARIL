@@ -23,10 +23,55 @@ struct InputBarView: View {
                         .help("Detected prompt category")
                 }
 
+                Toggle(isOn: $state.webSearchEnabled) {
+                    Label("Web", systemImage: "globe")
+                        .font(ARILTheme.captionFont)
+                }
+                .toggleStyle(.button)
+                .help("Enable OpenRouter live web search for this send")
+                .foregroundStyle(state.webSearchEnabled ? theme.palette.accent : theme.palette.textMuted)
+
                 Spacer()
             }
 
+            if !state.pendingAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(state.pendingAttachments) { att in
+                            HStack(spacing: 6) {
+                                Image(systemName: att.isImage ? "photo" : "doc")
+                                Text(att.filename)
+                                    .lineLimit(1)
+                                Text(att.displaySize)
+                                    .foregroundStyle(theme.palette.textMuted)
+                                Button {
+                                    state.removeAttachment(att.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.text)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(theme.palette.backgroundElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+                }
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    state.attachFiles()
+                } label: {
+                    Image(systemName: "paperclip")
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                .buttonStyle(.plain)
+                .help("Attach images or files")
+
                 TextField("Describe what you need.", text: $state.draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(ARILTheme.bodyFont)
@@ -95,8 +140,13 @@ struct InputBarView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .disabled(state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .opacity(state.draft.isEmpty ? 0.5 : 1)
+                    .disabled(
+                        state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && state.pendingAttachments.isEmpty
+                    )
+                    .opacity(
+                        state.draft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
+                    )
                 }
             }
         }

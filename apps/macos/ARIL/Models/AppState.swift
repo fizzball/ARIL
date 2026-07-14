@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import AppKit
+import UniformTypeIdentifiers
 
 enum AnalysisStatus: Equatable {
     case idle
@@ -40,6 +42,8 @@ final class AppState: ObservableObject {
     @Published var compareResults: [CompareResultDTO] = []
     @Published var lastCacheLabel: String = "—"
     @Published var preferredCompareModel: String?
+    @Published var pendingAttachments: [PendingAttachment] = []
+    @Published var webSearchEnabled: Bool = false
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
@@ -88,6 +92,7 @@ final class AppState: ObservableObject {
         analysisStatus = .idle
         compareResults = []
         preferredCompareModel = nil
+        pendingAttachments = []
         Task { await persistSelectedSession() }
     }
 
@@ -230,13 +235,13 @@ final class AppState: ObservableObject {
 
     private func performSend(promptOverride: String?) async {
         let text = (promptOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
 
         if promptOverride != nil {
             draft = text
         }
 
-        if preview == nil || analysisStatus != .ready {
+        if !text.isEmpty, (preview == nil || analysisStatus != .ready) {
             await runPreview()
         }
 
@@ -248,12 +253,21 @@ final class AppState: ObservableObject {
         guard let sid = selectedSessionID,
               let idx = sessions.firstIndex(where: { $0.id == sid }) else { return }
 
-        lastUserPromptForPrefer = text
-        sessions[idx].messages.append(ChatMessage(role: .user, content: text))
+        let attachmentNote: String = {
+            guard !pendingAttachments.isEmpty else { return "" }
+            let names = pendingAttachments.map(\.filename).joined(separator: ", ")
+            return text.isEmpty ? "[Attached: \(names)]" : "\n\n[Attached: \(names)]"
+        }()
+        let displayText = text.isEmpty ? attachmentNote : text + attachmentNote
+
+        lastUserPromptForPrefer = text.isEmpty ? displayText : text
+        sessions[idx].messages.append(ChatMessage(role: .user, content: displayText))
         if sessions[idx].title == "New session" {
-            sessions[idx].title = String(text.prefix(42))
+            sessions[idx].title = String((text.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : text).prefix(42))
         }
         draft = ""
+        let attachmentsForSend = pendingAttachments
+        pendingAttachments = []
         let compareModels: [String] = {
             if let routes = preview?.routes, routes.count >= 2 {
                 return Array(routes.prefix(2).map(\.modelId))
@@ -279,13 +293,20 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Manual: always last selected; Auto: recommended already applied
         if routeMode == .manual {
             selectedModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
         }
 
         let assistantID = UUID()
         sessions[idx].messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
+
+        let attachmentDTOs = attachmentsForSend.map {
+            AttachmentDTO(
+                filename: $0.filename,
+                mimeType: $0.mimeType,
+                dataBase64: $0.data.base64EncodedString()
+            )
+        }
 
         let request = ChatRequest(
             messages: historyForAPI,
@@ -295,7 +316,9 @@ final class AppState: ObservableObject {
             useCache: true,
             sessionId: sid.uuidString,
             previewId: nil,
-            routingProfile: APIRoutingProfile(routingProfile)
+            routingProfile: APIRoutingProfile(routingProfile),
+            attachments: attachmentDTOs,
+            webSearch: webSearchEnabled
         )
 
         do {
@@ -386,6 +409,40 @@ final class AppState: ObservableObject {
 
     func submitAlternative(_ alt: PromptAlternative) {
         send(promptOverride: alt.text)
+    }
+
+    func attachFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [
+            .jpeg, .png, .gif, .webP, .pdf, .plainText, .utf8PlainText, .json,
+        ]
+        panel.title = "Attach images or files"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            // Cap individual attachments at ~8MB
+            guard data.count <= 8_000_000 else {
+                lastError = "Skipped \(url.lastPathComponent) (over 8MB)"
+                continue
+            }
+            let mime = mimeType(for: url) ?? "application/octet-stream"
+            pendingAttachments.append(
+                PendingAttachment(filename: url.lastPathComponent, mimeType: mime, data: data)
+            )
+        }
+    }
+
+    func removeAttachment(_ id: UUID) {
+        pendingAttachments.removeAll { $0.id == id }
+    }
+
+    private func mimeType(for url: URL) -> String? {
+        if let type = UTType(filenameExtension: url.pathExtension) {
+            return type.preferredMIMEType
+        }
+        return nil
     }
 
     func saveGatewayURL() {

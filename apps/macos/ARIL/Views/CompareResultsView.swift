@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct CompareResultsView: View {
     @EnvironmentObject private var state: AppState
@@ -56,6 +57,16 @@ struct CompareResultsView: View {
                                     : theme.palette.accentStrong
                             )
                             .disabled(result.error != nil)
+
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(result.content, forType: .string)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(result.error != nil || result.content.isEmpty)
                         }
                         .padding(12)
                         .frame(width: 320, alignment: .topLeading)

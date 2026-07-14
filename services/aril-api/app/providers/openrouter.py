@@ -1,4 +1,4 @@
-"""OpenRouter provider — single API for multi-model routing + SSE streaming."""
+"""OpenRouter provider — multi-model routing, multimodal, web plugin, SSE."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from app.providers.base import LLMProvider, ProviderMessage, ProviderResult, Str
 
 
 class OpenRouterProvider(LLMProvider):
-    """OpenAI-compatible client against https://openrouter.ai/api/v1."""
-
     name = "openrouter"
 
     def __init__(
@@ -44,21 +42,51 @@ class OpenRouterProvider(LLMProvider):
                 "(https://openrouter.ai/keys)."
             )
 
+    def _serialize_messages(self, messages: list[ProviderMessage]) -> list[dict]:
+        out: list[dict] = []
+        for m in messages:
+            if m.parts:
+                out.append({"role": m.role, "content": m.parts})
+            else:
+                out.append({"role": m.role, "content": m.content})
+        return out
+
+    def _build_payload(
+        self,
+        messages: list[ProviderMessage],
+        *,
+        model: str,
+        temperature: float,
+        stream: bool,
+        web_search: bool,
+    ) -> dict:
+        payload: dict = {
+            "model": model,
+            "messages": self._serialize_messages(messages),
+            "temperature": temperature,
+        }
+        if stream:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
+        if web_search:
+            # OpenRouter web plugin — live search grounded answers
+            payload["plugins"] = [{"id": "web"}]
+        return payload
+
     async def complete(
         self,
         messages: list[ProviderMessage],
         *,
         model: str,
         temperature: float,
+        web_search: bool = False,
     ) -> ProviderResult:
         self._require_key()
-        payload = {
-            "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "temperature": temperature,
-        }
+        payload = self._build_payload(
+            messages, model=model, temperature=temperature, stream=False, web_search=web_search
+        )
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=self._headers(),
@@ -95,15 +123,12 @@ class OpenRouterProvider(LLMProvider):
         *,
         model: str,
         temperature: float,
+        web_search: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         self._require_key()
-        payload = {
-            "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "temperature": temperature,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
+        payload = self._build_payload(
+            messages, model=model, temperature=temperature, stream=True, web_search=web_search
+        )
 
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(

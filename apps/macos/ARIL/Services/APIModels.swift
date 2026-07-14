@@ -159,14 +159,29 @@ struct ChatRequest: Encodable {
     let sessionId: String?
     let previewId: String?
     let routingProfile: APIRoutingProfile?
+    let attachments: [AttachmentDTO]
+    let webSearch: Bool
 
     enum CodingKeys: String, CodingKey {
-        case messages, model, temperature
+        case messages, model, temperature, attachments
         case routeMode = "route_mode"
         case useCache = "use_cache"
         case sessionId = "session_id"
         case previewId = "preview_id"
         case routingProfile = "routing_profile"
+        case webSearch = "web_search"
+    }
+}
+
+struct AttachmentDTO: Encodable {
+    let filename: String
+    let mimeType: String
+    let dataBase64: String
+
+    enum CodingKeys: String, CodingKey {
+        case filename
+        case mimeType = "mime_type"
+        case dataBase64 = "data_base64"
     }
 }
 

@@ -11,6 +11,8 @@ from app.core.config import settings
 class ProviderMessage:
     role: str
     content: str
+    # OpenAI-style multimodal parts when set (overrides plain content for API payload)
+    parts: list[dict] | None = None
 
 
 @dataclass
@@ -44,6 +46,7 @@ class LLMProvider(ABC):
         *,
         model: str,
         temperature: float,
+        web_search: bool = False,
     ) -> ProviderResult:
         raise NotImplementedError
 
@@ -53,9 +56,12 @@ class LLMProvider(ABC):
         *,
         model: str,
         temperature: float,
+        web_search: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """Default: emit the full completion as a single chunk."""
-        result = await self.complete(messages, model=model, temperature=temperature)
+        result = await self.complete(
+            messages, model=model, temperature=temperature, web_search=web_search
+        )
         if result.content:
             yield StreamChunk(content=result.content, model=result.model)
         yield StreamChunk(
@@ -78,10 +84,12 @@ class StubProvider(LLMProvider):
         *,
         model: str,
         temperature: float,
+        web_search: bool = False,
     ) -> ProviderResult:
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        web = " · web" if web_search else ""
         reply = (
-            f"[ARIL stub · {model} · temp={temperature:.2f}]\n\n"
+            f"[ARIL stub · {model} · temp={temperature:.2f}{web}]\n\n"
             f"Received your prompt ({len(last_user)} chars). "
             "Set OPENROUTER_API_KEY to enable live multi-model routing."
         )

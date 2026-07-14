@@ -31,6 +31,7 @@ from app.core.schemas import (
     SessionUpsert,
 )
 from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
+from app.providers.messages import attachments_to_provider_messages
 from app.routing.pipeline import (
     CATEGORY_RECOMMENDATIONS,
     DEFAULT_PROFILE,
@@ -64,13 +65,22 @@ async def _complete_cached(
     model: str,
     temperature: float,
     use_cache: bool,
+    attachments: list | None = None,
+    web_search: bool = False,
 ) -> tuple[ProviderResult, bool]:
     provider = get_chat_provider()
+    provider_messages = attachments_to_provider_messages(messages, attachments or [])
     msg_dicts = _msg_dicts(messages)
+    # Don't cache web search or multimodal turns (dynamic / large)
+    cacheable = use_cache and not web_search and not attachments
     est = estimate_tokens(" ".join(m.content for m in messages))
-    key = prompt_cache.make_key(messages=msg_dicts, model=model, temperature=temperature)
+    key = prompt_cache.make_key(
+        messages=msg_dicts,
+        model=model,
+        temperature=temperature,
+    )
 
-    if use_cache and prompt_cache.eligible(est):
+    if cacheable and prompt_cache.eligible(est):
         hit = prompt_cache.peek(key)
         if hit:
             return (
@@ -86,11 +96,12 @@ async def _complete_cached(
             )
 
     result = await provider.complete(
-        [ProviderMessage(role=m.role, content=m.content) for m in messages],
+        provider_messages,
         model=model,
         temperature=temperature,
+        web_search=web_search,
     )
-    if use_cache and prompt_cache.eligible(result.input_tokens or est):
+    if cacheable and prompt_cache.eligible(result.input_tokens or est):
         prompt_cache.put(
             key,
             {
@@ -134,6 +145,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
             model=model,
             temperature=temperature,
             use_cache=req.use_cache,
+            attachments=req.attachments,
+            web_search=req.web_search,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -174,8 +187,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     key = prompt_cache.make_key(messages=msg_dicts, model=model, temperature=temperature)
 
     async def event_generator():
-        # Cache short-circuit for large prompts
-        if req.use_cache and prompt_cache.eligible(est):
+        # Cache short-circuit for large prompts (skip when web/attachments)
+        if req.use_cache and not req.web_search and not req.attachments and prompt_cache.eligible(est):
             hit = prompt_cache.peek(key)
             if hit:
                 content = hit["content"]
@@ -202,7 +215,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 return
 
         provider = get_chat_provider()
-        provider_messages = [ProviderMessage(role=m.role, content=m.content) for m in req.messages]
+        provider_messages = attachments_to_provider_messages(req.messages, req.attachments)
         parts: list[str] = []
         meta = {
             "session_id": session_id,
@@ -212,10 +225,14 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             "output_tokens": 0,
             "cost_usd": 0.0,
             "cached": False,
+            "web_search": req.web_search,
         }
         try:
             async for chunk in provider.stream(
-                provider_messages, model=model, temperature=temperature
+                provider_messages,
+                model=model,
+                temperature=temperature,
+                web_search=req.web_search,
             ):
                 if chunk.content:
                     parts.append(chunk.content)
@@ -235,7 +252,12 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             return
 
         full = "".join(parts)
-        if req.use_cache and prompt_cache.eligible(int(meta["input_tokens"] or est)):
+        if (
+            req.use_cache
+            and not req.web_search
+            and not req.attachments
+            and prompt_cache.eligible(int(meta["input_tokens"] or est))
+        ):
             prompt_cache.put(
                 key,
                 {

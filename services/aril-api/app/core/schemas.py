@@ -116,6 +116,12 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class Attachment(BaseModel):
+    filename: str
+    mime_type: str
+    data_base64: str
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     model: str | None = None
@@ -126,6 +132,8 @@ class ChatRequest(BaseModel):
     preview_id: str | None = None
     routing_profile: RoutingProfile | None = None
     stream: bool = False
+    attachments: list[Attachment] = Field(default_factory=list)
+    web_search: bool = False
 
 
 class ChatResponse(BaseModel):
