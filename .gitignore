@@ -15,7 +15,7 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 .swiftpm/
-Packages/
+# SPM checkouts live under .build / DerivedData; avoid ignoring ./packages (shared schemas)
 Package.resolved
 !.xcode.env
 apps/macos/*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
