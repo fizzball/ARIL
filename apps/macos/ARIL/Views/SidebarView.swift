@@ -3,6 +3,7 @@ import SwiftUI
 struct SidebarView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(\.openSettings) private var openSettings
     @State private var query = ""
 
     private var filtered: [ChatSession] {
@@ -16,8 +17,10 @@ struct SidebarView: View {
                 sidebarButton("New session", systemImage: "square.and.pencil", shortcut: "⌘N") {
                     state.createSession()
                 }
+                sidebarButton("Preferences", systemImage: "gearshape", shortcut: "⌘,") {
+                    openSettings()
+                }
                 sidebarButton("Capabilities", systemImage: "sparkles") {}
-                sidebarButton("Artifacts", systemImage: "doc.richtext") {}
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)

@@ -16,13 +16,12 @@ struct InputBarView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
 
-                Text(state.lastCacheLabel.uppercased())
-                    .font(ARILTheme.captionFont)
-                    .foregroundStyle(
-                        state.lastCacheLabel == "cached"
-                            ? theme.palette.accent
-                            : theme.palette.textMuted
-                    )
+                if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
+                    Text(cat.label.uppercased())
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.accent)
+                        .help("Detected prompt category")
+                }
 
                 Spacer()
             }
@@ -65,7 +64,7 @@ struct InputBarView: View {
                         )
                 }
                 .menuStyle(.borderlessButton)
-                .help(state.selectedModel == state.defaultModel ? "Default model" : "Selected model")
+                .help(modelHelp)
 
                 if state.isSending {
                     Button {
@@ -112,9 +111,19 @@ struct InputBarView: View {
         .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.35 : 0.08), radius: 12, y: 4)
     }
 
+    private var modelHelp: String {
+        if state.routeMode == .auto {
+            return "Auto-selected for detected category"
+        }
+        return state.selectedModel == state.defaultModel ? "Default model" : "Selected model"
+    }
+
     private func shortModel(_ id: String) -> String {
         let leaf = id.split(separator: "/").last.map(String.init) ?? id
         let mark = id == state.defaultModel ? " ★" : ""
+        if state.routeMode == .auto, let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
+            return "\(leaf)\(mark) · \(cat.label)"
+        }
         return "\(leaf)\(mark) · \(state.routeMode.label)"
     }
 }

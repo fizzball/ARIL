@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core import cache as prompt_cache
+from app.core import preferences as pref_store
 from app.core import sessions as session_store
 from app.core.config import settings
 from app.core.schemas import (
@@ -24,13 +25,14 @@ from app.core.schemas import (
     PreviewResponse,
     ProbeRequest,
     ProbeResponse,
+    RouteCategory,
     SessionDetail,
     SessionSummary,
     SessionUpsert,
 )
-from app.core import preferences as pref_store
 from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
 from app.routing.pipeline import (
+    CATEGORY_RECOMMENDATIONS,
     DEFAULT_PROFILE,
     build_preview,
     classify,
@@ -407,7 +409,7 @@ async def list_models() -> dict:
                 "id": "openai/gpt-4.1",
                 "provider": "openrouter",
                 "upstream": "openai",
-                "categories": ["coding", "general"],
+                "categories": ["coding", "general", "reasoning"],
             },
             {
                 "id": "openai/gpt-4.1-mini",
@@ -419,27 +421,35 @@ async def list_models() -> dict:
                 "id": "anthropic/claude-sonnet-4",
                 "provider": "openrouter",
                 "upstream": "anthropic",
-                "categories": ["security"],
+                "categories": ["security", "coding"],
             },
             {
                 "id": "anthropic/claude-opus-4",
                 "provider": "openrouter",
                 "upstream": "anthropic",
-                "categories": ["confidence"],
+                "categories": ["confidence", "reasoning"],
             },
             {
                 "id": "google/gemini-2.5-flash",
                 "provider": "openrouter",
                 "upstream": "google",
-                "categories": ["performance", "cost"],
+                "categories": ["vision", "performance", "cost"],
             },
             {
                 "id": "meta-llama/llama-3.3-70b-instruct",
                 "provider": "openrouter",
                 "upstream": "meta",
-                "categories": ["cost"],
+                "categories": ["general", "cost"],
             },
         ],
+        "categories": {
+            cat.value: {
+                "label": cat.value.replace("_", " ").title(),
+                "recommended_models": CATEGORY_RECOMMENDATIONS.get(cat, []),
+                "default_model": DEFAULT_PROFILE.get(cat),
+            }
+            for cat in RouteCategory
+        },
     }
 
 

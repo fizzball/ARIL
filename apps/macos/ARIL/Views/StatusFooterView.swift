@@ -17,13 +17,15 @@ struct StatusFooterView: View {
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted.opacity(0.7))
 
-            Text(state.lastCacheLabel)
-                .font(ARILTheme.captionFont)
-                .foregroundStyle(
-                    state.lastCacheLabel == "cached"
-                        ? theme.palette.accent
-                        : theme.palette.textMuted
-                )
+            if state.lastCacheLabel == "cached" || state.lastCacheLabel == "not cached" {
+                Text(state.lastCacheLabel)
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(
+                        state.lastCacheLabel == "cached"
+                            ? theme.palette.accent
+                            : theme.palette.textMuted
+                    )
+            }
 
             if let err = state.lastError {
                 Text(err)
@@ -37,7 +39,7 @@ struct StatusFooterView: View {
             Text(state.routeMode.label)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted)
-            Text("# v0.3.0-solo")
+            Text("# v0.3.1")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted.opacity(0.7))
         }

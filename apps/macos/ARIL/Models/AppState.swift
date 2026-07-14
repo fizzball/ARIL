@@ -205,10 +205,9 @@ final class AppState: ObservableObject {
             updateCacheLabel(from: result)
             if routeMode == .auto {
                 selectedModel = result.recommendedModel
-            } else if routeMode == .manual {
-                // Keep last selected / default path
-                selectedModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
+                objectWillChange.send()
             }
+            // Manual keeps the user's explicit last selection
         } catch {
             lastError = error.localizedDescription
             analysisStatus = .idle
@@ -402,6 +401,14 @@ final class AppState: ObservableObject {
             }
             await refreshHealth()
         }
+    }
+
+    func shutdown() {
+        gatewayManager.stop()
+    }
+
+    var gatewayStatusDetail: String {
+        gatewayManager.lastMessage
     }
 
     func saveRoutingProfile() {

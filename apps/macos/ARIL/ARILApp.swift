@@ -13,7 +13,7 @@ struct ARILApp: App {
                 .environmentObject(theme)
                 .frame(minWidth: 980, minHeight: 640)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                    appState.gatewayManager.stop()
+                    appState.shutdown()
                 }
         }
         .windowStyle(.titleBar)

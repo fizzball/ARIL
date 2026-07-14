@@ -19,6 +19,8 @@ struct HealthResponse: Codable {
 struct APIRoutingProfile: Codable, Equatable {
     var coding: String
     var security: String
+    var reasoning: String
+    var vision: String
     var cost: String
     var performance: String
     var confidence: String
@@ -27,6 +29,8 @@ struct APIRoutingProfile: Codable, Equatable {
     init(_ profile: RoutingProfile) {
         coding = profile.coding
         security = profile.security
+        reasoning = profile.reasoning
+        vision = profile.vision
         cost = profile.cost
         performance = profile.performance
         confidence = profile.confidence

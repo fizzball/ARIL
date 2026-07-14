@@ -6,42 +6,55 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            Form {
-                Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
-                    .onChange(of: state.soloMode) { _, _ in
-                        state.saveSoloMode()
-                    }
-                Text(state.gatewayManager.lastMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            gatewayTab
+                .tabItem { Label("Gateway", systemImage: "network") }
+            routingTab
+                .tabItem { Label("Models", systemImage: "cpu") }
+            appearanceTab
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+        }
+        .frame(width: 640, height: 520)
+    }
 
-                TextField("Gateway URL", text: $state.gatewayURL)
-                    .onSubmit {
-                        state.saveGatewayURL()
-                        Task { await state.refreshHealth() }
-                    }
-                TextField("API root path (optional)", text: Binding(
-                    get: { UserDefaults.standard.string(forKey: "aril.apiRoot") ?? "" },
-                    set: { UserDefaults.standard.set($0, forKey: "aril.apiRoot") }
-                ))
-                HStack {
-                    Button("Check connection") {
-                        state.saveGatewayURL()
-                        Task { await state.refreshHealth() }
-                    }
-                    Text(state.gatewayStatus)
-                        .foregroundStyle(state.gatewayReady ? Color.secondary : Color.red)
+    private var gatewayTab: some View {
+        Form {
+            Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
+                .onChange(of: state.soloMode) { _, _ in
+                    state.saveSoloMode()
                 }
-                Slider(value: $state.temperature, in: 0...2, step: 0.1) {
-                    Text("Default temperature")
+            Text(state.gatewayStatusDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Gateway URL", text: $state.gatewayURL)
+                .onSubmit {
+                    state.saveGatewayURL()
+                    Task { await state.refreshHealth() }
                 }
-                Text(String(format: "%.1f", state.temperature))
+            TextField("API root path (optional)", text: Binding(
+                get: { UserDefaults.standard.string(forKey: "aril.apiRoot") ?? "" },
+                set: { UserDefaults.standard.set($0, forKey: "aril.apiRoot") }
+            ))
+            HStack {
+                Button("Check connection") {
+                    state.saveGatewayURL()
+                    Task { await state.refreshHealth() }
+                }
+                Text(state.gatewayStatus)
+                    .foregroundStyle(state.gatewayReady ? Color.secondary : Color.red)
             }
-            .padding()
-            .tabItem { Label("Gateway", systemImage: "network") }
+            Slider(value: $state.temperature, in: 0...2, step: 0.1) {
+                Text("Default temperature")
+            }
+            Text(String(format: "%.1f", state.temperature))
+        }
+        .padding()
+    }
 
-            Form {
-                Picker("Default model", selection: Binding(
+    private var routingTab: some View {
+        Form {
+            Section("Default model") {
+                Picker("App default", selection: Binding(
                     get: { state.defaultModel },
                     set: { state.setDefaultModel($0) }
                 )) {
@@ -49,47 +62,70 @@ struct SettingsView: View {
                         Text(model).tag(model)
                     }
                 }
-                Text("Manual mode uses the last selected model. Default is highlighted in the model menu.")
+                Text("Manual mode uses the last model you picked. Default is highlighted ★ in the model menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Category → recommended model") {
+                Text("Auto mode picks the model mapped to the detected prompt category.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                modelPicker("Coding", selection: $state.routingProfile.coding)
-                modelPicker("Security", selection: $state.routingProfile.security)
-                modelPicker("Cost", selection: $state.routingProfile.cost)
-                modelPicker("Performance", selection: $state.routingProfile.performance)
-                modelPicker("Confidence", selection: $state.routingProfile.confidence)
-                modelPicker("General", selection: $state.routingProfile.general)
-                Button("Save routing profile") {
-                    state.saveRoutingProfile()
-                }
-            }
-            .padding()
-            .tabItem { Label("Routing", systemImage: "arrow.triangle.branch") }
-
-            Form {
-                Picker("Theme", selection: $theme.option) {
-                    ForEach(AppThemeOption.allCases) { opt in
-                        Text(opt.label).tag(opt)
+                ForEach(RouteCategory.allCases) { category in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(category.label)
+                            .font(.headline)
+                        Text(category.blurb)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("Model for \(category.label)", selection: binding(for: category)) {
+                            ForEach(recommended(for: category), id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                            Divider()
+                            ForEach(AppState.modelCatalog, id: \.self) { model in
+                                if !(recommended(for: category).contains(model)) {
+                                    Text(model).tag(model)
+                                }
+                            }
+                        }
+                        .labelsHidden()
                     }
+                    .padding(.vertical, 4)
                 }
-                Text("Noir, Slate, Light, and Forest palettes. Affects the whole client.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            .padding()
-            .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 580, height: 400)
+        .padding()
+        .formStyle(.grouped)
     }
 
-    private func modelPicker(_ title: String, selection: Binding<String>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(AppState.modelCatalog, id: \.self) { model in
-                Text(model).tag(model)
+    private var appearanceTab: some View {
+        Form {
+            Picker("Theme", selection: $theme.option) {
+                ForEach(AppThemeOption.allCases) { opt in
+                    Text(opt.label).tag(opt)
+                }
             }
+            .pickerStyle(.radioGroup)
+            Text("Noir, Slate, Light, and Forest. Applies across the whole client.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .onChange(of: selection.wrappedValue) { _, _ in
-            state.saveRoutingProfile()
-        }
+        .padding()
+    }
+
+    private func recommended(for category: RouteCategory) -> [String] {
+        RoutingProfile.recommendations[category] ?? AppState.modelCatalog
+    }
+
+    private func binding(for category: RouteCategory) -> Binding<String> {
+        Binding(
+            get: { state.routingProfile.model(for: category) },
+            set: { newValue in
+                state.routingProfile.setModel(newValue, for: category)
+                state.saveRoutingProfile()
+            }
+        )
     }
 }

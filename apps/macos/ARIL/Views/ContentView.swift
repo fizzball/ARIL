@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
@@ -19,6 +20,13 @@ struct ContentView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh gateway status")
+
+                Button {
+                    openSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help("Preferences (default model, categories, themes)")
             }
         }
         .preferredColorScheme(theme.palette.colorScheme)

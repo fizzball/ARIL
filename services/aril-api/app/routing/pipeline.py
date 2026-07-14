@@ -28,12 +28,64 @@ COST_PER_1K: dict[str, float] = {
     "meta-llama/llama-3.3-70b-instruct": 0.0008,
 }
 
+# Suggested catalog per category (client Settings uses the same idea)
+CATEGORY_RECOMMENDATIONS: dict[RouteCategory, list[str]] = {
+    RouteCategory.coding: [
+        "openai/gpt-4.1",
+        "anthropic/claude-sonnet-4",
+        "google/gemini-2.5-flash",
+    ],
+    RouteCategory.security: [
+        "anthropic/claude-sonnet-4",
+        "anthropic/claude-opus-4",
+        "openai/gpt-4.1",
+    ],
+    RouteCategory.reasoning: [
+        "anthropic/claude-opus-4",
+        "openai/gpt-4.1",
+        "anthropic/claude-sonnet-4",
+    ],
+    RouteCategory.vision: [
+        "google/gemini-2.5-flash",
+        "openai/gpt-4.1",
+        "anthropic/claude-sonnet-4",
+    ],
+    RouteCategory.cost: [
+        "openai/gpt-4.1-mini",
+        "meta-llama/llama-3.3-70b-instruct",
+        "google/gemini-2.5-flash",
+    ],
+    RouteCategory.performance: [
+        "google/gemini-2.5-flash",
+        "openai/gpt-4.1-mini",
+        "meta-llama/llama-3.3-70b-instruct",
+    ],
+    RouteCategory.confidence: [
+        "anthropic/claude-opus-4",
+        "anthropic/claude-sonnet-4",
+        "openai/gpt-4.1",
+    ],
+    RouteCategory.general: [
+        "meta-llama/llama-3.3-70b-instruct",
+        "openai/gpt-4.1-mini",
+        "openai/gpt-4.1",
+    ],
+}
+
 CODING_HINTS = re.compile(
-    r"\b(code|function|bug|refactor|typescript|python|swift|api|compile|unittest|pr|diff)\b",
+    r"\b(code|function|bug|refactor|typescript|python|swift|api|compile|unittest|pr|diff|implement|programming)\b",
     re.I,
 )
 SECURITY_HINTS = re.compile(
-    r"\b(security|vuln|cve|owasp|auth|xss|injection|threat|pentest|encrypt)\b",
+    r"\b(security|vuln|cve|owasp|auth|xss|injection|threat|pentest|encrypt|malware)\b",
+    re.I,
+)
+REASONING_HINTS = re.compile(
+    r"\b(reason|reasoning|think step|step by step|prove|proof|logic|math|analyse|analyze deeply|chain of thought|deduc|inference)\b",
+    re.I,
+)
+VISION_HINTS = re.compile(
+    r"\b(image|screenshot|photo|picture|diagram|chart|visual|ocr|describe what you see|looking at)\b",
     re.I,
 )
 
@@ -51,18 +103,39 @@ def resolve_profile(profile: RoutingProfile | None) -> dict[RouteCategory, str]:
 
 def classify(prompt: str) -> ClassificationResult:
     secondary: list[RouteCategory] = []
+    if VISION_HINTS.search(prompt):
+        return ClassificationResult(
+            primary=RouteCategory.vision,
+            secondary=[RouteCategory.general],
+            confidence=0.74,
+        )
     if SECURITY_HINTS.search(prompt):
-        return ClassificationResult(primary=RouteCategory.security, secondary=[RouteCategory.coding], confidence=0.72)
+        return ClassificationResult(
+            primary=RouteCategory.security,
+            secondary=[RouteCategory.coding],
+            confidence=0.72,
+        )
+    if REASONING_HINTS.search(prompt):
+        return ClassificationResult(
+            primary=RouteCategory.reasoning,
+            secondary=[RouteCategory.confidence],
+            confidence=0.7,
+        )
     if CODING_HINTS.search(prompt):
         if len(prompt) > 2000:
             secondary.append(RouteCategory.confidence)
-        return ClassificationResult(primary=RouteCategory.coding, secondary=secondary, confidence=0.68)
+        return ClassificationResult(
+            primary=RouteCategory.coding,
+            secondary=secondary,
+            confidence=0.68,
+        )
     if len(prompt) < 80:
         return ClassificationResult(primary=RouteCategory.cost, confidence=0.55)
     return ClassificationResult(primary=RouteCategory.general, confidence=0.5)
 
 
 def grade_prompt(prompt: str) -> PromptGrade:
+    """Score prompt quality (not model quality): clarity, constraints, success criteria, efficiency."""
     length = len(prompt.strip())
     has_question = "?" in prompt
     has_bullets = bool(re.search(r"(^|\n)\s*[-*•\d]", prompt))
@@ -136,29 +209,34 @@ def score_routes(
     mapping = profile or DEFAULT_PROFILE
     in_tok = estimate_tokens(prompt)
     out_tok = min(2048, max(128, in_tok // 2))
+    # Always score primary + cost/performance/confidence peers
+    include = {primary, RouteCategory.cost, RouteCategory.performance, RouteCategory.confidence}
+    if primary != RouteCategory.general:
+        include.add(RouteCategory.general)
+
     rows: list[ModelEstimate] = []
     for category, model_id in mapping.items():
-        if category == RouteCategory.general and primary != RouteCategory.general:
+        if category not in include:
             continue
         provider = model_id.split("/", 1)[0]
         rate = COST_PER_1K.get(model_id, 0.01)
         cost = round((in_tok + out_tok) / 1000 * rate, 6)
-        fit_bonus = 0.35 if category == primary else 0.1
+        fit_bonus = 0.45 if category == primary else 0.12
         cost_score = 1.0 - min(1.0, cost * 50)
         from app.core.preferences import confidence_boost
 
         learn = confidence_boost(prompt, primary.value, model_id)
-        score = round(fit_bonus + 0.4 * cost_score + 0.15 + learn, 3)
-        reasons = []
+        score = round(fit_bonus + 0.35 * cost_score + 0.1 + learn, 3)
+        reasons: list[str] = []
         if category == primary:
             reasons.append(f"Best fit for classification '{primary.value}'.")
-            reasons.append(f"Mapped from Settings profile → {model_id}.")
+            reasons.append(f"Category preferred model → {model_id}.")
         if learn > 0:
             reasons.append(f"Learned preference boost +{learn:.2f}.")
         if "mini" in model_id or "flash" in model_id:
             reasons.append("Lower cost / faster path.")
-        if "opus" in model_id or "claude-sonnet" in model_id:
-            reasons.append("Higher capability prior.")
+        if "opus" in model_id:
+            reasons.append("Higher reasoning / confidence prior.")
         rows.append(
             ModelEstimate(
                 model_id=model_id,
@@ -188,10 +266,18 @@ def build_preview(
     routes = score_routes(req.prompt, classification.primary, profile)
     temp = req.temperature if req.temperature is not None else settings.aril_default_temperature
 
+    # Prefer explicit profile mapping for the classified category (clearest Auto behavior)
+    profile_pick = profile.get(classification.primary) or profile[RouteCategory.general]
+
     if req.preferred_model and req.route_mode.value == "manual":
         recommended = req.preferred_model
     else:
-        recommended = routes[0].model_id if routes else profile[classification.primary]
+        recommended = profile_pick
+
+    # Ensure recommended appears first in routes for UI
+    routes.sort(
+        key=lambda r: (0 if r.model_id == recommended else 1, -r.score),
+    )
 
     in_tok = estimate_tokens(req.prompt)
     eligible = in_tok > settings.aril_cache_token_threshold

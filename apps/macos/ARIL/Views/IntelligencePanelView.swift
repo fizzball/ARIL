@@ -60,18 +60,20 @@ struct IntelligencePanelView: View {
     @ViewBuilder
     private func readyContent(_ preview: PreviewResponse) -> some View {
         HStack(spacing: 16) {
-            metric("Grade", String(format: "%.0f%%", preview.grade.overall * 100))
+            metric(
+                "Grade",
+                String(format: "%.0f%%", preview.grade.overall * 100),
+                help: "Prompt quality score (clarity, constraints, success criteria, token efficiency) — not model accuracy."
+            )
             metric("Est. tokens", "\(preview.cache.estimatedInputTokens)")
             if let top = preview.routes.first {
                 metric("Est. cost", String(format: "$%.4f", top.estimatedCostUsd))
             }
+            metric("Category", preview.classification.primary.label)
             metric("Model", short(preview.recommendedModel))
-            metric(
-                "Cache",
-                preview.cache.eligible
-                    ? (preview.cache.wouldHit ? "cached" : "not cached")
-                    : "not eligible"
-            )
+            if preview.cache.eligible {
+                metric("Cache", preview.cache.wouldHit ? "cached" : "not cached")
+            }
         }
 
         if !preview.grade.notes.isEmpty {
@@ -124,7 +126,7 @@ struct IntelligencePanelView: View {
         }
     }
 
-    private func metric(_ title: String, _ value: String) -> some View {
+    private func metric(_ title: String, _ value: String, help: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title.uppercased())
                 .font(.system(size: 9, weight: .semibold))
@@ -134,6 +136,7 @@ struct IntelligencePanelView: View {
                 .foregroundStyle(theme.palette.text)
                 .lineLimit(1)
         }
+        .help(help ?? "")
     }
 
     private func short(_ id: String) -> String {
