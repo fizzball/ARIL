@@ -130,7 +130,7 @@ class PreviewResponse(BaseModel):
     cache: CacheInsight
     temperature: float
     route_mode: RouteMode
-    alternatives_source: Literal["none", "heuristic", "llm"] = "heuristic"
+    alternatives_source: Literal["none", "heuristic", "llm", "cache"] = "heuristic"
     user_override: UserOverrideInsight | None = None
 
 
@@ -260,6 +260,52 @@ class PreferencesSnapshot(BaseModel):
     category_wins: dict[str, dict[str, int]] = Field(default_factory=dict)
     fingerprint_wins: dict[str, dict[str, int]] = Field(default_factory=dict)
     classifications: list[ClassificationRecord] = Field(default_factory=list)
+
+
+class StoreRecord(BaseModel):
+    id: str
+    kind: str  # judgement | analysis_cache | chat_transaction
+    prompt_snippet: str = ""
+    fingerprint: str = ""
+    category: str | None = None
+    model: str | None = None
+    accuracy: float | None = None
+    category_overridden: bool | None = None
+    cached: bool | None = None
+    cost_usd: float | None = None
+    session_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class StoreStats(BaseModel):
+    retention: int
+    counts: dict[str, int] = Field(default_factory=dict)
+    total: int = 0
+
+
+class StoreStatus(BaseModel):
+    ready: bool
+    engine: str = "sqlite"
+    path: str
+    absolute_path: str
+    exists: bool = False
+    writable: bool = False
+    size_bytes: int = 0
+    retention: int = 100
+    counts: dict[str, int] = Field(default_factory=dict)
+    total: int = 0
+    message: str = ""
+    checked_at: str | None = None
+
+
+class StoreRetentionUpdate(BaseModel):
+    retention: int = Field(ge=1, le=10000)
+
+
+class StoreDeleteAllResponse(BaseModel):
+    ok: bool = True
+    deleted: dict[str, int] = Field(default_factory=dict)
 
 
 class SessionSummary(BaseModel):

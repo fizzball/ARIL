@@ -432,6 +432,85 @@ struct PreferencesSnapshotDTO: Codable {
     let classifications: [ClassificationRecordDTO]
 }
 
+struct StoreRecordDTO: Codable, Identifiable, Equatable {
+    let id: String
+    let kind: String
+    let promptSnippet: String
+    let fingerprint: String
+    let category: String?
+    let model: String?
+    let accuracy: Double?
+    let categoryOverridden: Bool?
+    let cached: Bool?
+    let costUsd: Double?
+    let sessionId: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, fingerprint, category, model, accuracy, cached
+        case promptSnippet = "prompt_snippet"
+        case categoryOverridden = "category_overridden"
+        case costUsd = "cost_usd"
+        case sessionId = "session_id"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    var kindLabel: String {
+        switch kind {
+        case "judgement": return "Judgement"
+        case "analysis_cache": return "Analysis cache"
+        case "chat_transaction": return "Chat transaction"
+        default: return kind
+        }
+    }
+}
+
+struct StoreStatsDTO: Codable, Equatable {
+    let retention: Int
+    let counts: [String: Int]
+    let total: Int
+}
+
+struct StoreStatusDTO: Codable, Equatable {
+    let ready: Bool
+    let engine: String
+    let path: String
+    let absolutePath: String
+    let exists: Bool
+    let writable: Bool
+    let sizeBytes: Int
+    let retention: Int
+    let counts: [String: Int]
+    let total: Int
+    let message: String
+    let checkedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ready, engine, path, exists, writable, retention, counts, total, message
+        case absolutePath = "absolute_path"
+        case sizeBytes = "size_bytes"
+        case checkedAt = "checked_at"
+    }
+
+    var sizeLabel: String {
+        if sizeBytes < 1024 { return "\(sizeBytes) B" }
+        let kb = Double(sizeBytes) / 1024.0
+        if kb < 1024 { return String(format: "%.1f KB", kb) }
+        return String(format: "%.2f MB", kb / 1024.0)
+    }
+}
+
+struct StoreRetentionUpdateDTO: Encodable {
+    let retention: Int
+}
+
+struct StoreDeleteAllResponseDTO: Codable {
+    let ok: Bool
+    let deleted: [String: Int]
+}
+
 struct ClassificationUpdateDTO: Encodable {
     let category: RouteCategory?
     let accuracy: Double?

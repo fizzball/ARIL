@@ -7,6 +7,9 @@ struct LogAnalysisView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var copiedAll = false
 
+    /// When true, fit Preferences tab chrome (no fixed sheet size / dismiss control).
+    var embeddedInPreferences: Bool = false
+
     private static let timestampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .short
@@ -18,7 +21,7 @@ struct LogAnalysisView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Label("Log analysis", systemImage: "doc.text.magnifyingglass")
-                    .font(ARILTheme.wordmarkFont)
+                    .font(embeddedInPreferences ? ARILTheme.bodyFont.weight(.semibold) : ARILTheme.wordmarkFont)
                     .foregroundStyle(theme.palette.text)
                 Spacer()
                 if !state.exchangeLog.isEmpty {
@@ -37,13 +40,15 @@ struct LogAnalysisView: View {
                     }
                     .help("Clear the in-memory exchange log")
                 }
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(theme.palette.textMuted)
+                if !embeddedInPreferences {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(theme.palette.textMuted)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
-            .padding(20)
+            .padding(embeddedInPreferences ? 16 : 20)
 
             Text("Last \(AppState.maxExchangeLogCapacity) message sends and agent responses (newest first). Stored in memory for this session only.")
                 .font(ARILTheme.captionFont)
@@ -77,7 +82,14 @@ struct LogAnalysisView: View {
                 }
             }
         }
-        .frame(width: 640, height: 560)
+        .frame(
+            minWidth: embeddedInPreferences ? nil : 640,
+            idealWidth: embeddedInPreferences ? nil : 640,
+            maxWidth: .infinity,
+            minHeight: embeddedInPreferences ? nil : 560,
+            idealHeight: embeddedInPreferences ? nil : 560,
+            maxHeight: .infinity
+        )
         .background(theme.palette.backgroundElevated)
     }
 

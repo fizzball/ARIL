@@ -126,6 +126,7 @@ struct IntelligencePanelView: View {
                 )
             }
             metric("Category", preview.classification.primary.label)
+            judgementIndicator(exists: preview.userOverride != nil)
             metric(
                 "Model",
                 short(state.routeMode == .manual ? state.selectedModel : preview.recommendedModel),
@@ -188,6 +189,25 @@ struct IntelligencePanelView: View {
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.text)
                 .frame(width: 28, alignment: .trailing)
+        }
+    }
+
+    private func judgementIndicator(exists: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HelpMetricTitle(
+                title: "Judgement",
+                help: "Checked when this prompt (or a matching fingerprint) has a Learning judgement — created automatically on first send, or manually via Compare Prefer / Analysis save."
+            )
+            Toggle("", isOn: .constant(exists))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .disabled(true)
+                .accessibilityLabel(exists ? "Judgement exists" : "No judgement")
+                .help(
+                    exists
+                        ? "A judgment for this query is on the Learning list."
+                        : "No judgment saved yet for this query."
+                )
         }
     }
 

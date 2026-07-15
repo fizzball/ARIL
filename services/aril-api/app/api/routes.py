@@ -8,7 +8,9 @@ import uuid
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.core import analysis_cache as analysis_store
 from app.core import cache as prompt_cache
+from app.core import db as local_db
 from app.core import preferences as pref_store
 from app.core import sessions as session_store
 from app.core.config import settings
@@ -33,10 +35,16 @@ from app.core.schemas import (
     PreviewResponse,
     ProbeRequest,
     ProbeResponse,
+    PromptAlternative,
     RouteCategory,
     SessionDetail,
     SessionSummary,
     SessionUpsert,
+    StoreDeleteAllResponse,
+    StoreRecord,
+    StoreRetentionUpdate,
+    StoreStats,
+    StoreStatus,
 )
 from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
 from app.providers.messages import attachments_to_provider_messages, sanitize_content_for_context
@@ -72,6 +80,23 @@ def _resolve_model(req_model: str | None, last_user: str, profile) -> tuple[str,
 
 def _msg_dicts(messages: list[ChatMessage]) -> list[dict[str, str]]:
     return [{"role": m.role, "content": m.content} for m in messages]
+
+
+def _auto_judgement_after_send(
+    *,
+    prompt: str,
+    category: str,
+    model: str,
+) -> None:
+    """First successful Auto/Manual send seeds Learning like Prefer would."""
+    try:
+        pref_store.ensure_auto_judgement(
+            prompt=prompt,
+            category=category,
+            model=model,
+        )
+    except Exception:  # noqa: BLE001 — never fail the chat turn on learning write
+        pass
 
 
 async def _complete_cached(
@@ -135,6 +160,25 @@ async def _complete_cached(
 @router.post("/preview", response_model=PreviewResponse)
 async def preview(req: PreviewRequest) -> PreviewResponse:
     """Classify, grade, optionally LLM-rewrite alternatives, rank routes."""
+    profile_dict = req.routing_profile.model_dump() if req.routing_profile else None
+    cached = analysis_store.get(
+        req.prompt,
+        routing_profile=profile_dict,
+        system_prompt=req.system_prompt,
+        enhance_alternatives=req.enhance_alternatives,
+    )
+    if cached and isinstance(cached.get("payload"), dict):
+        payload = cached["payload"]
+        alts_raw = payload.get("alternatives") or []
+        alts = [PromptAlternative(**a) for a in alts_raw if isinstance(a, dict)]
+        source = "cache"
+        resp = build_preview(req, alternatives=alts, alternatives_source=source)
+        # Restore recommended model from cache when present (same context).
+        recommended = payload.get("recommended_model")
+        if recommended and isinstance(recommended, str):
+            resp = resp.model_copy(update={"recommended_model": recommended})
+        return resp
+
     grade = grade_prompt(req.prompt)
     alts = None
     source = "heuristic"
@@ -144,7 +188,22 @@ async def preview(req: PreviewRequest) -> PreviewResponse:
             a.id.startswith("llm-") for a in alts
         ):
             source = "llm"
-    return build_preview(req, alternatives=alts, alternatives_source=source)
+    resp = build_preview(req, alternatives=alts, alternatives_source=source)
+    # Persist analysis snapshot for Learning browser + like-prompt reuse.
+    analysis_store.put(
+        req.prompt,
+        {
+            "alternatives": [a.model_dump() for a in resp.alternatives],
+            "recommended_model": resp.recommended_model,
+            "category": resp.classification.primary.value,
+            "alternatives_source": resp.alternatives_source,
+            "grade": resp.grade.model_dump(),
+        },
+        routing_profile=profile_dict,
+        system_prompt=req.system_prompt,
+        enhance_alternatives=req.enhance_alternatives,
+    )
+    return resp
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -187,13 +246,33 @@ async def chat(req: ChatRequest) -> ChatResponse:
         output_tokens=result.output_tokens,
         web_search=req.web_search,
     )
+    final_cost = resolved_cost * (0.45 if cached else 1.0)
+    analysis_store.record_chat_transaction(
+        session_id=session_id,
+        prompt=last_user,
+        model=result.model,
+        category=classification.primary.value,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=final_cost,
+        cached=cached,
+        analysis={
+            "route_category": classification.primary.value,
+            "temperature": temperature,
+        },
+    )
+    _auto_judgement_after_send(
+        prompt=last_user,
+        category=classification.primary.value,
+        model=result.model,
+    )
     return ChatResponse(
         session_id=session_id,
         message=assistant,
         model=result.model,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        cost_usd=resolved_cost * (0.45 if cached else 1.0),
+        cost_usd=final_cost,
         cached=cached,
         route_category=classification.primary,
     )
@@ -244,6 +323,22 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     title=last_user[:42] if last_user else "New session",
                     user_content=last_user,
                     assistant_content=content,
+                )
+                analysis_store.record_chat_transaction(
+                    session_id=session_id,
+                    prompt=last_user,
+                    model=str(meta["model"]),
+                    category=classification.primary.value,
+                    input_tokens=int(meta["input_tokens"]),
+                    output_tokens=int(meta["output_tokens"]),
+                    cost_usd=float(meta["cost_usd"]),
+                    cached=True,
+                    analysis={"route_category": classification.primary.value, "stream": True},
+                )
+                _auto_judgement_after_send(
+                    prompt=last_user,
+                    category=classification.primary.value,
+                    model=str(meta["model"]),
                 )
                 yield f"event: done\ndata: {json.dumps(meta)}\n\n"
                 return
@@ -321,6 +416,22 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             web_search=bool(req.web_search),
         )
         meta["latency_ms"] = int((time.perf_counter() - stream_started) * 1000)
+        analysis_store.record_chat_transaction(
+            session_id=session_id,
+            prompt=last_user,
+            model=str(meta.get("model") or model),
+            category=classification.primary.value,
+            input_tokens=int(meta.get("input_tokens") or 0),
+            output_tokens=int(meta.get("output_tokens") or 0),
+            cost_usd=float(meta.get("cost_usd") or 0.0),
+            cached=False,
+            analysis={"route_category": classification.primary.value, "stream": True},
+        )
+        _auto_judgement_after_send(
+            prompt=last_user,
+            category=classification.primary.value,
+            model=str(meta.get("model") or model),
+        )
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
 
     return StreamingResponse(
@@ -468,6 +579,58 @@ async def preferences_delete_classification(classification_id: str) -> dict:
     if not pref_store.delete_classification(classification_id):
         raise HTTPException(status_code=404, detail="Classification not found")
     return {"ok": True}
+
+
+@router.get("/store/status", response_model=StoreStatus)
+async def store_status(check: bool = True) -> StoreStatus:
+    """SQLite readiness, file path, and optional integrity probe."""
+    return StoreStatus(**local_db.status(probe=check))
+
+
+@router.post("/store/check", response_model=StoreStatus)
+async def store_check() -> StoreStatus:
+    """Force a SQLite connectivity / schema probe (Preferences → Database)."""
+    return StoreStatus(**local_db.status(probe=True))
+
+
+@router.get("/store/stats", response_model=StoreStats)
+async def store_stats() -> StoreStats:
+    counts = local_db.counts()
+    return StoreStats(
+        retention=local_db.get_retention(),
+        counts=counts,
+        total=sum(counts.values()),
+    )
+
+
+@router.patch("/store/retention", response_model=StoreStats)
+async def store_retention_update(req: StoreRetentionUpdate) -> StoreStats:
+    local_db.set_retention(req.retention)
+    counts = local_db.counts()
+    return StoreStats(
+        retention=local_db.get_retention(),
+        counts=counts,
+        total=sum(counts.values()),
+    )
+
+
+@router.get("/store/records", response_model=list[StoreRecord])
+async def store_records_list() -> list[StoreRecord]:
+    return [StoreRecord(**row) for row in local_db.list_store_records()]
+
+
+@router.delete("/store/records/{record_id}")
+async def store_records_delete(record_id: str) -> dict:
+    kind = local_db.delete_store_record(record_id)
+    if not kind:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return {"ok": True, "kind": kind}
+
+
+@router.delete("/store/records", response_model=StoreDeleteAllResponse)
+async def store_records_delete_all() -> StoreDeleteAllResponse:
+    deleted = local_db.delete_all_store_records()
+    return StoreDeleteAllResponse(ok=True, deleted=deleted)
 
 
 @router.get("/sessions", response_model=list[SessionSummary])

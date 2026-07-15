@@ -22,19 +22,20 @@ struct SettingsView: View {
                 .tabItem { Label("Models", systemImage: "cpu") }
             mcpTab
                 .tabItem { Label("MCP", systemImage: "server.rack") }
-            learningTab
-                .tabItem { Label("Learning", systemImage: "brain") }
+            logAnalysisTab
+                .tabItem { Label("Log Analysis", systemImage: "doc.text.magnifyingglass") }
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 700, height: 640)
+        .frame(width: 720, height: 700)
         .navigationTitle("Preferences")
         .task {
-            await state.loadClassifications()
             Self.renameSettingsWindow()
+            await state.refreshDatabaseStatus()
         }
         .onAppear {
             Self.renameSettingsWindow()
+            Task { await state.refreshDatabaseStatus() }
         }
     }
 
@@ -131,6 +132,45 @@ struct SettingsView: View {
                     }
                     Text(state.gatewayReady ? "Gateway ready" : "Gateway not ready")
                         .foregroundStyle(state.gatewayReady ? Color.green : Color.red)
+                }
+            }
+
+            Section("Database") {
+                Text("Local SQLite store for judgements, analysis cache, and chat transactions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Engine") {
+                    Text(state.databaseEngine.uppercased())
+                        .font(.system(.body, design: .monospaced))
+                }
+                LabeledContent("Database URL") {
+                    Text(state.databasePath.isEmpty ? "—" : state.databasePath)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(3)
+                }
+                if !state.databaseDetail.isEmpty {
+                    Text(state.databaseDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Size") {
+                    Text(state.databaseSizeLabel)
+                        .monospacedDigit()
+                }
+
+                HStack {
+                    Button("Check database") {
+                        Task { await state.checkDatabase() }
+                    }
+                    Text(state.databaseReady ? "Database ready" : "Database not ready")
+                        .foregroundStyle(state.databaseReady ? Color.green : Color.red)
+                }
+                if let msg = state.databaseCheckMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -436,29 +476,10 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    private var learningTab: some View {
-        Form {
-            Section("Prompt classifications") {
-                Text("Judgments from Compare Prefer and Analysis overrides. Adjust category or accuracy, or remove an entry.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if state.classifications.isEmpty {
-                    Text("No classifications yet. Prefer a Compare result or save an Analysis override.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(state.classifications) { item in
-                        ClassificationRow(item: item)
-                    }
-                }
-
-                Button("Refresh list") {
-                    Task { await state.loadClassifications() }
-                }
-            }
-        }
-        .padding()
-        .formStyle(.grouped)
+    private var logAnalysisTab: some View {
+        LogAnalysisView(embeddedInPreferences: true)
+            .environmentObject(state)
+            .environmentObject(theme)
     }
 
     private var appearanceTab: some View {
@@ -567,63 +588,6 @@ private struct FullWidthTemperatureSlider: View {
         .frame(maxWidth: .infinity)
         .frame(height: 28)
         .padding(.bottom, 6)
-    }
-}
-
-private struct ClassificationRow: View {
-    @EnvironmentObject private var state: AppState
-    let item: ClassificationRecordDTO
-    @State private var category: RouteCategory = .general
-    @State private var accuracy: Double = 0.8
-    @State private var hasAccuracy = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(item.promptSnippet.isEmpty ? item.prompt : item.promptSnippet)
-                .lineLimit(2)
-            Text("\(item.model) · \(item.category)\(item.categoryOverridden ? " · override" : "")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Picker("Category", selection: $category) {
-                ForEach(RouteCategory.allCases) { cat in
-                    Text(cat.label).tag(cat)
-                }
-            }
-
-            Toggle("Accuracy set", isOn: $hasAccuracy)
-            if hasAccuracy {
-                HStack {
-                    Text("\(Int(accuracy * 100))%")
-                        .frame(width: 40)
-                    Slider(value: $accuracy, in: 0...1, step: 0.05)
-                }
-            }
-
-            HStack {
-                Button("Save") {
-                    Task {
-                        await state.updateClassification(
-                            item.id,
-                            category: category,
-                            accuracy: hasAccuracy ? accuracy : nil,
-                            removeAccuracy: !hasAccuracy && item.accuracy != nil
-                        )
-                    }
-                }
-                Button("Remove", role: .destructive) {
-                    Task { await state.deleteClassification(item.id) }
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .onAppear {
-            category = RouteCategory(rawValue: item.category) ?? .general
-            if let acc = item.accuracy {
-                hasAccuracy = true
-                accuracy = acc
-            }
-        }
     }
 }
 

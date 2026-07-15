@@ -17,6 +17,16 @@ struct StatusFooterView: View {
                         : theme.palette.textMuted
                 )
 
+            Circle()
+                .fill(state.databaseReady ? theme.palette.accent : theme.palette.danger)
+                .frame(width: 6, height: 6)
+            Text(state.databaseStatus)
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(
+                    state.databaseReady ? theme.palette.textMuted : theme.palette.danger
+                )
+                .help(state.databasePath.isEmpty ? state.databaseDetail : state.databasePath)
+
             if state.lastCacheLabel == "cached" || state.lastCacheLabel == "not cached" {
                 Text(state.lastCacheLabel)
                     .font(ARILTheme.captionFont)

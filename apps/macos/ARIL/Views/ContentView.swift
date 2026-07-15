@@ -39,11 +39,11 @@ struct ContentView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    state.showExchangeLog = true
+                    state.showLearning = true
                 } label: {
-                    Image(systemName: "doc.text.magnifyingglass")
+                    Image(systemName: "brain")
                 }
-                .help("Log analysis — last 20 sends and responses")
+                .help("Learning — stored judgements and classifications")
 
                 Button {
                     state.showModelCosts = true
@@ -75,8 +75,8 @@ struct ContentView: View {
                 .help("Quit ARIL")
             }
         }
-        .sheet(isPresented: $state.showExchangeLog) {
-            LogAnalysisView()
+        .sheet(isPresented: $state.showLearning) {
+            LearningView()
                 .environmentObject(state)
                 .environmentObject(theme)
         }

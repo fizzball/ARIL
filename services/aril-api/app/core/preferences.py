@@ -1,66 +1,38 @@
-"""Preference learning from compare winners and user classification overrides."""
+"""Preference learning from compare winners and user classification overrides (SQLite)."""
 
 from __future__ import annotations
 
-import json
 import re
-import threading
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-_LOCK = threading.Lock()
-_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-_PATH = _DATA_DIR / "preferences.json"
-# category -> model -> wins
-_WINS: dict[str, dict[str, int]] = {}
-# fingerprint -> model -> wins (finer grain)
-_FP: dict[str, dict[str, int]] = {}
-# User classifications / accuracy overrides for like queries
-_CLASSIFICATIONS: list[dict[str, Any]] = []
-_LOADED = False
+from app.core import db as store
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _ensure() -> None:
-    global _WINS, _FP, _CLASSIFICATIONS, _LOADED
-    if _LOADED:
-        return
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if _PATH.exists():
-        try:
-            raw = json.loads(_PATH.read_text(encoding="utf-8"))
-            _WINS = raw.get("category_wins") or {}
-            _FP = raw.get("fingerprint_wins") or {}
-            _CLASSIFICATIONS = list(raw.get("classifications") or [])
-        except (json.JSONDecodeError, OSError):
-            _WINS, _FP, _CLASSIFICATIONS = {}, {}, []
-    _LOADED = True
-
-
-def _persist() -> None:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _PATH.write_text(
-        json.dumps(
-            {
-                "category_wins": _WINS,
-                "fingerprint_wins": _FP,
-                "classifications": _CLASSIFICATIONS,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
 def fingerprint(prompt: str) -> str:
     tokens = re.findall(r"[a-z0-9]{3,}", prompt.lower())
     uniq = sorted(set(tokens))[:24]
     return "|".join(uniq) if uniq else "general"
+
+
+def _row_to_classification(row: Any) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "prompt": row["prompt"] or "",
+        "prompt_snippet": row["prompt_snippet"] or "",
+        "fingerprint": row["fingerprint"],
+        "category": row["category"],
+        "model": row["model"],
+        "accuracy": row["accuracy"],
+        "category_overridden": bool(row["category_overridden"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def record_preference(
@@ -71,80 +43,171 @@ def record_preference(
     accuracy: float | None = None,
     category_overridden: bool = False,
 ) -> dict:
-    with _LOCK:
-        _ensure()
-        cat = _WINS.setdefault(category, {})
-        cat[model] = int(cat.get(model, 0)) + 1
+    with store._LOCK:
+        conn = store.connect()
         fp = fingerprint(prompt)
-        bucket = _FP.setdefault(fp, {})
-        bucket[model] = int(bucket.get(model, 0)) + 1
-
-        # Upsert classification by fingerprint (latest user judgment wins)
-        existing = next((c for c in _CLASSIFICATIONS if c.get("fingerprint") == fp), None)
         snippet = (prompt or "").strip().replace("\n", " ")[:120]
-        if existing:
-            existing["category"] = category
-            existing["model"] = model
-            existing["prompt_snippet"] = snippet
-            existing["prompt"] = prompt
-            existing["category_overridden"] = bool(category_overridden or existing.get("category_overridden"))
-            if accuracy is not None:
-                existing["accuracy"] = float(accuracy)
-            existing["updated_at"] = _now()
-            classification = existing
-        else:
-            classification = {
-                "id": str(uuid.uuid4()),
-                "prompt": prompt,
-                "prompt_snippet": snippet,
-                "fingerprint": fp,
-                "category": category,
-                "model": model,
-                "accuracy": float(accuracy) if accuracy is not None else None,
-                "category_overridden": bool(category_overridden),
-                "created_at": _now(),
-                "updated_at": _now(),
-            }
-            _CLASSIFICATIONS.insert(0, classification)
+        now = _now()
 
-        _persist()
+        conn.execute(
+            """
+            INSERT INTO category_wins(category, model, wins) VALUES(?,?,1)
+            ON CONFLICT(category, model) DO UPDATE SET wins = wins + 1
+            """,
+            (category, model),
+        )
+        conn.execute(
+            """
+            INSERT INTO fingerprint_wins(fingerprint, model, wins) VALUES(?,?,1)
+            ON CONFLICT(fingerprint, model) DO UPDATE SET wins = wins + 1
+            """,
+            (fp, model),
+        )
+
+        existing = conn.execute(
+            "SELECT * FROM classifications WHERE fingerprint = ?", (fp,)
+        ).fetchone()
+        if existing:
+            new_overridden = bool(
+                category_overridden or existing["category_overridden"]
+            )
+            new_accuracy = (
+                float(accuracy) if accuracy is not None else existing["accuracy"]
+            )
+            conn.execute(
+                """
+                UPDATE classifications
+                SET prompt = ?, prompt_snippet = ?, category = ?, model = ?,
+                    accuracy = ?, category_overridden = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    prompt,
+                    snippet,
+                    category,
+                    model,
+                    new_accuracy,
+                    1 if new_overridden else 0,
+                    now,
+                    existing["id"],
+                ),
+            )
+            classification_id = existing["id"]
+            class_accuracy = new_accuracy
+            class_overridden = new_overridden
+        else:
+            classification_id = str(uuid.uuid4())
+            class_accuracy = float(accuracy) if accuracy is not None else None
+            class_overridden = bool(category_overridden)
+            conn.execute(
+                """
+                INSERT INTO classifications(
+                  id, prompt, prompt_snippet, fingerprint, category, model,
+                  accuracy, category_overridden, created_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    classification_id,
+                    prompt,
+                    snippet,
+                    fp,
+                    category,
+                    model,
+                    class_accuracy,
+                    1 if class_overridden else 0,
+                    now,
+                    now,
+                ),
+            )
+            store._fifo_trim(conn, "classifications", store.get_retention())
+
+        cat_wins = conn.execute(
+            "SELECT wins FROM category_wins WHERE category = ? AND model = ?",
+            (category, model),
+        ).fetchone()["wins"]
+        fp_wins = conn.execute(
+            "SELECT wins FROM fingerprint_wins WHERE fingerprint = ? AND model = ?",
+            (fp, model),
+        ).fetchone()["wins"]
+        conn.commit()
+
         return {
             "category": category,
             "fingerprint": fp,
             "model": model,
-            "category_wins": cat[model],
-            "fingerprint_wins": bucket[model],
-            "classification_id": classification["id"],
-            "accuracy": classification.get("accuracy"),
-            "category_overridden": classification.get("category_overridden", False),
+            "category_wins": int(cat_wins),
+            "fingerprint_wins": int(fp_wins),
+            "classification_id": classification_id,
+            "accuracy": class_accuracy,
+            "category_overridden": class_overridden,
         }
 
 
 def lookup_classification(prompt: str) -> dict | None:
-    with _LOCK:
-        _ensure()
+    with store._LOCK:
+        conn = store.connect()
         fp = fingerprint(prompt)
-        return next((c for c in _CLASSIFICATIONS if c.get("fingerprint") == fp), None)
+        row = conn.execute(
+            "SELECT * FROM classifications WHERE fingerprint = ?", (fp,)
+        ).fetchone()
+        return _row_to_classification(row) if row else None
+
+
+def ensure_auto_judgement(
+    *,
+    prompt: str,
+    category: str,
+    model: str,
+) -> dict | None:
+    """Create a Learning judgement on first successful send for this fingerprint.
+
+    Does not overwrite an existing Prefer / Analysis judgement. Returns the
+    created record summary, or None when a judgement already existed.
+    """
+    if not (prompt or "").strip():
+        return None
+    if lookup_classification(prompt):
+        return None
+    return record_preference(
+        prompt=prompt,
+        category=category,
+        model=model,
+        accuracy=None,
+        category_overridden=False,
+    )
 
 
 def confidence_boost(prompt: str, category: str, model: str) -> float:
     """0..0.40 boost applied to route score (wins + accuracy)."""
-    with _LOCK:
-        _ensure()
-        cat_wins = (_WINS.get(category) or {}).get(model, 0)
+    with store._LOCK:
+        conn = store.connect()
+        cat_row = conn.execute(
+            "SELECT wins FROM category_wins WHERE category = ? AND model = ?",
+            (category, model),
+        ).fetchone()
+        cat_wins = int(cat_row["wins"]) if cat_row else 0
         fp = fingerprint(prompt)
-        fp_wins = (_FP.get(fp) or {}).get(model, 0)
+        fp_row = conn.execute(
+            "SELECT wins FROM fingerprint_wins WHERE fingerprint = ? AND model = ?",
+            (fp, model),
+        ).fetchone()
+        fp_wins = int(fp_row["wins"]) if fp_row else 0
         boost = min(0.2, cat_wins * 0.04) + min(0.15, fp_wins * 0.05)
-        entry = next((c for c in _CLASSIFICATIONS if c.get("fingerprint") == fp), None)
-        if entry and entry.get("model") == model and entry.get("accuracy") is not None:
+        entry = conn.execute(
+            "SELECT * FROM classifications WHERE fingerprint = ?", (fp,)
+        ).fetchone()
+        if entry and entry["model"] == model and entry["accuracy"] is not None:
             boost += 0.05 * float(entry["accuracy"])
         return round(min(0.4, boost), 3)
 
 
 def list_classifications() -> list[dict]:
-    with _LOCK:
-        _ensure()
-        return list(_CLASSIFICATIONS)
+    with store._LOCK:
+        conn = store.connect()
+        rows = conn.execute(
+            "SELECT * FROM classifications ORDER BY updated_at DESC, created_at DESC"
+        ).fetchall()
+        return [_row_to_classification(r) for r in rows]
 
 
 def update_classification(
@@ -155,47 +218,103 @@ def update_classification(
     model: str | None = None,
     remove_accuracy: bool = False,
 ) -> dict | None:
-    with _LOCK:
-        _ensure()
-        for entry in _CLASSIFICATIONS:
-            if entry.get("id") != classification_id:
-                continue
-            if category is not None and category != entry.get("category"):
-                entry["category"] = category
-                entry["category_overridden"] = True
-                # Keep model wins in sync for the new category
-                mid = model or entry.get("model")
-                if mid:
-                    cat = _WINS.setdefault(category, {})
-                    cat[mid] = int(cat.get(mid, 0)) + 1
-            if model is not None:
-                entry["model"] = model
-            if remove_accuracy:
-                entry["accuracy"] = None
-            elif accuracy is not None:
-                entry["accuracy"] = float(accuracy)
-            entry["updated_at"] = _now()
-            _persist()
-            return dict(entry)
-        return None
+    with store._LOCK:
+        conn = store.connect()
+        entry = conn.execute(
+            "SELECT * FROM classifications WHERE id = ?", (classification_id,)
+        ).fetchone()
+        if not entry:
+            return None
+
+        new_category = entry["category"]
+        new_model = entry["model"]
+        new_accuracy = entry["accuracy"]
+        overridden = bool(entry["category_overridden"])
+
+        if category is not None and category != entry["category"]:
+            new_category = category
+            overridden = True
+            mid = model or entry["model"]
+            if mid:
+                conn.execute(
+                    """
+                    INSERT INTO category_wins(category, model, wins) VALUES(?,?,1)
+                    ON CONFLICT(category, model) DO UPDATE SET wins = wins + 1
+                    """,
+                    (category, mid),
+                )
+        if model is not None:
+            new_model = model
+        if remove_accuracy:
+            new_accuracy = None
+        elif accuracy is not None:
+            new_accuracy = float(accuracy)
+
+        now = _now()
+        conn.execute(
+            """
+            UPDATE classifications
+            SET category = ?, model = ?, accuracy = ?, category_overridden = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                new_category,
+                new_model,
+                new_accuracy,
+                1 if overridden else 0,
+                now,
+                classification_id,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM classifications WHERE id = ?", (classification_id,)
+        ).fetchone()
+        return _row_to_classification(row) if row else None
 
 
 def delete_classification(classification_id: str) -> bool:
-    with _LOCK:
-        _ensure()
-        before = len(_CLASSIFICATIONS)
-        _CLASSIFICATIONS[:] = [c for c in _CLASSIFICATIONS if c.get("id") != classification_id]
-        if len(_CLASSIFICATIONS) == before:
-            return False
-        _persist()
-        return True
+    with store._LOCK:
+        conn = store.connect()
+        cur = conn.execute(
+            "DELETE FROM classifications WHERE id = ?", (classification_id,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_all_classifications() -> int:
+    with store._LOCK:
+        conn = store.connect()
+        count = int(
+            conn.execute("SELECT COUNT(*) AS c FROM classifications").fetchone()["c"]
+        )
+        conn.execute("DELETE FROM classifications")
+        conn.commit()
+        return count
 
 
 def snapshot() -> dict:
-    with _LOCK:
-        _ensure()
+    with store._LOCK:
+        conn = store.connect()
+        classifications = [
+            _row_to_classification(r)
+            for r in conn.execute(
+                "SELECT * FROM classifications ORDER BY updated_at DESC"
+            ).fetchall()
+        ]
+        category_wins: dict[str, dict[str, int]] = {}
+        for row in conn.execute("SELECT category, model, wins FROM category_wins"):
+            category_wins.setdefault(row["category"], {})[row["model"]] = int(row["wins"])
+        fingerprint_wins: dict[str, dict[str, int]] = {}
+        for row in conn.execute(
+            "SELECT fingerprint, model, wins FROM fingerprint_wins"
+        ):
+            fingerprint_wins.setdefault(row["fingerprint"], {})[row["model"]] = int(
+                row["wins"]
+            )
         return {
-            "category_wins": _WINS,
-            "fingerprint_wins": _FP,
-            "classifications": list(_CLASSIFICATIONS),
+            "category_wins": category_wins,
+            "fingerprint_wins": fingerprint_wins,
+            "classifications": classifications,
         }

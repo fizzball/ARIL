@@ -32,6 +32,7 @@
 		DC94FE292CCBBB50127BA960 /* aril-mark.png in Resources */ = {isa = PBXBuildFile; fileRef = 06E463243CDA83DE4642027C /* aril-mark.png */; };
 		E5676938CCEC2F485B4CC994 /* CompareResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4471C3658442F237DC5C1C61 /* CompareResultsView.swift */; };
 		EF19B318BFD33393131FB656 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ECDA663B4CC8289E453914E /* Models.swift */; };
+		F379B2566042AEF3969B0C2D /* LearningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 		117873442667CB37A568D620 /* ARILGhostMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILGhostMark.swift; sourceTree = "<group>"; };
 		1416251B652DE7DE8C09313A /* MessageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListView.swift; sourceTree = "<group>"; };
 		275830288881563C30E79654 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningView.swift; sourceTree = "<group>"; };
 		4471C3658442F237DC5C1C61 /* CompareResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareResultsView.swift; sourceTree = "<group>"; };
 		464CC3D69B6588E73D3EF50F /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGatewayManager.swift; sourceTree = "<group>"; };
@@ -111,6 +113,7 @@
 				F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */,
 				F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */,
 				5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */,
+				32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */,
 				F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */,
 				1416251B652DE7DE8C09313A /* MessageListView.swift */,
 				D90B92597E00798BF7FB75B1 /* ModelCostsView.swift */,
@@ -235,6 +238,7 @@
 				9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */,
 				D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */,
 				43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */,
+				F379B2566042AEF3969B0C2D /* LearningView.swift in Sources */,
 				3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */,
 				7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */,
 				D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */,

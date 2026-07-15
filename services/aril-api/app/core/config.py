@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     aril_cache_token_threshold: int = 1024
     aril_rewrite_model: str = "openai/gpt-4.1-mini"
     aril_compare_model_count: int = 3
+    # Local SQLite data dir (empty = services/aril-api/data). FIFO cap for
+    # judgements / analysis_cache / chat_transactions (oldest overwritten).
+    aril_data_dir: str = ""
+    aril_sqlite_retention: int = 100
 
     # Primary: OpenRouter (one key → many models)
     openrouter_api_key: str = ""

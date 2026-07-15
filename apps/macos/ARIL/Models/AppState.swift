@@ -80,6 +80,13 @@ final class AppState: ObservableObject {
     @Published var soloMode: Bool
     @Published var gatewayReady: Bool = false
     @Published var gatewayStatus: String = "Gateway offline"
+    @Published var databaseReady: Bool = false
+    @Published var databaseStatus: String = "Database not ready"
+    @Published var databasePath: String = ""
+    @Published var databaseDetail: String = ""
+    @Published var databaseEngine: String = "sqlite"
+    @Published var databaseSizeLabel: String = "—"
+    @Published var databaseCheckMessage: String?
     @Published var chatProvider: String = "stub"
     @Published var preview: PreviewResponse?
     @Published var analysisStatus: AnalysisStatus = .idle
@@ -101,9 +108,12 @@ final class AppState: ObservableObject {
     @Published var userDisplayName: String
     @Published var showRoutingAnalysis: Bool = false
     @Published var showExchangeLog: Bool = false
+    @Published var showLearning: Bool = false
     @Published var showModelCosts: Bool = false
     @Published var exchangeLog: [ExchangeLogEntry] = []
     @Published var classifications: [ClassificationRecordDTO] = []
+    @Published var storeRecords: [StoreRecordDTO] = []
+    @Published var storeStats: StoreStatsDTO? = nil
     @Published var compareCategoryDraft: [String: RouteCategory] = [:]
     @Published var compareAccuracyDraft: [String: Double] = [:]
     @Published var openRouterConfigured: Bool = false
@@ -662,16 +672,16 @@ final class AppState: ObservableObject {
             chatProvider = health.chatProvider ?? "unknown"
             openRouterConfigured = health.openrouterConfigured == true
             if health.gateway == "ready" {
-                let solo = soloMode ? " · Solo" : ""
                 if openRouterConfigured {
-                    gatewayStatus = "Gateway ready\(solo)"
+                    gatewayStatus = "Gateway ready"
                 } else {
-                    gatewayStatus = "API key required\(solo)"
+                    gatewayStatus = "API key required"
                 }
             } else {
                 gatewayStatus = health.status
             }
             await refreshOpenRouterKeyStatus()
+            await refreshDatabaseStatus()
             // Reload history once the gateway becomes available after a cold start.
             // Skipped during bootstrap (which already loads sessions) to avoid races
             // that clear List selection and look like lost history.
@@ -682,10 +692,60 @@ final class AppState: ObservableObject {
             }
         } catch {
             gatewayReady = false
-            gatewayStatus = soloMode ? "Starting solo gateway…" : "Gateway offline"
+            gatewayStatus = soloMode ? "Starting gateway…" : "Gateway offline"
             chatProvider = "offline"
             openRouterConfigured = false
+            markDatabaseUnavailable(reason: "Gateway offline")
         }
+    }
+
+    func refreshDatabaseStatus() async {
+        do {
+            let status = try await client.storeStatus(baseURL: gatewayURL, check: true)
+            applyDatabaseStatus(status)
+        } catch {
+            markDatabaseUnavailable(reason: error.localizedDescription)
+        }
+    }
+
+    /// Preferences → Database "Check database" action.
+    func checkDatabase() async {
+        databaseCheckMessage = nil
+        do {
+            let status = try await client.storeCheck(baseURL: gatewayURL)
+            applyDatabaseStatus(status)
+            databaseCheckMessage = status.message
+        } catch {
+            markDatabaseUnavailable(reason: error.localizedDescription)
+            databaseCheckMessage = error.localizedDescription
+        }
+    }
+
+    private func applyDatabaseStatus(_ status: StoreStatusDTO) {
+        databaseReady = status.ready
+        databaseStatus = status.ready ? "Database ready" : "Database not ready"
+        databasePath = status.absolutePath.isEmpty ? status.path : status.absolutePath
+        databaseEngine = status.engine
+        databaseSizeLabel = status.sizeLabel
+        databaseDetail = [
+            status.message,
+            status.exists ? "File present" : "File missing",
+            status.writable ? "Writable" : "Not writable",
+            "\(status.total) records · retention \(status.retention)",
+        ].joined(separator: " · ")
+        if status.ready {
+            databaseCheckMessage = nil
+        }
+    }
+
+    private func markDatabaseUnavailable(reason: String) {
+        databaseReady = false
+        databaseStatus = "Database not ready"
+        databaseDetail = reason
+        if databasePath.isEmpty {
+            databasePath = "(unavailable)"
+        }
+        databaseSizeLabel = "—"
     }
 
     func refreshOpenRouterKeyStatus() async {
@@ -1525,7 +1585,7 @@ final class AppState: ObservableObject {
                 )
             )
             await persistSelectedSession()
-            await loadClassifications()
+            await loadStoreBrowser()
         } catch {
             lastError = error.localizedDescription
             await persistSelectedSession()
@@ -1538,6 +1598,63 @@ final class AppState: ObservableObject {
             classifications = snap.classifications
         } catch {
             // Gateway may be offline
+        }
+    }
+
+    func loadStoreBrowser() async {
+        do {
+            async let stats = client.storeStats(baseURL: gatewayURL)
+            async let records = client.storeRecords(baseURL: gatewayURL)
+            async let snap = client.preferences(baseURL: gatewayURL)
+            storeStats = try await stats
+            storeRecords = try await records
+            classifications = try await snap.classifications
+        } catch {
+            // Gateway may be offline
+        }
+    }
+
+    func updateStoreRetention(_ retention: Int) async {
+        do {
+            storeStats = try await client.updateStoreRetention(
+                baseURL: gatewayURL,
+                retention: retention
+            )
+            await loadStoreBrowser()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func deleteStoreRecord(_ id: String) async {
+        do {
+            try await client.deleteStoreRecord(baseURL: gatewayURL, id: id)
+            storeRecords.removeAll { $0.id == id }
+            classifications.removeAll { $0.id == id }
+            if let stats = try? await client.storeStats(baseURL: gatewayURL) {
+                storeStats = stats
+            }
+            if analysisStatus == .ready {
+                await runPreview()
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func deleteAllStoreRecords() async {
+        do {
+            _ = try await client.deleteAllStoreRecords(baseURL: gatewayURL)
+            storeRecords = []
+            classifications = []
+            if let stats = try? await client.storeStats(baseURL: gatewayURL) {
+                storeStats = stats
+            }
+            if analysisStatus == .ready {
+                await runPreview()
+            }
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 
@@ -1561,6 +1678,24 @@ final class AppState: ObservableObject {
             if let idx = classifications.firstIndex(where: { $0.id == id }) {
                 classifications[idx] = updated
             }
+            if let idx = storeRecords.firstIndex(where: { $0.id == id }) {
+                let previous = storeRecords[idx]
+                storeRecords[idx] = StoreRecordDTO(
+                    id: updated.id,
+                    kind: previous.kind,
+                    promptSnippet: updated.promptSnippet,
+                    fingerprint: updated.fingerprint,
+                    category: updated.category,
+                    model: updated.model,
+                    accuracy: updated.accuracy,
+                    categoryOverridden: updated.categoryOverridden,
+                    cached: previous.cached,
+                    costUsd: previous.costUsd,
+                    sessionId: previous.sessionId,
+                    createdAt: updated.createdAt,
+                    updatedAt: updated.updatedAt
+                )
+            }
             if analysisStatus == .ready {
                 await runPreview()
             }
@@ -1573,6 +1708,10 @@ final class AppState: ObservableObject {
         do {
             try await client.deleteClassification(baseURL: gatewayURL, id: id)
             classifications.removeAll { $0.id == id }
+            storeRecords.removeAll { $0.id == id }
+            if let stats = try? await client.storeStats(baseURL: gatewayURL) {
+                storeStats = stats
+            }
             if analysisStatus == .ready {
                 await runPreview()
             }
@@ -1597,7 +1736,7 @@ final class AppState: ObservableObject {
                     sessionId: selectedSessionID?.uuidString
                 )
             )
-            await loadClassifications()
+            await loadStoreBrowser()
             await runPreview()
         } catch {
             lastError = error.localizedDescription

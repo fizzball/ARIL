@@ -60,6 +60,15 @@ struct RoutingAnalysisView: View {
                     }
 
                     sectionTitle("Your overrides")
+                    Toggle(isOn: .constant(preview?.userOverride != nil)) {
+                        Text("Judgement exists")
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.text)
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(true)
+                    .help("Checked when this query has a Learning judgement (auto on first send, or Compare Prefer / Analysis save).")
+
                     if let override = preview?.userOverride {
                         Text(override.categoryOverridden
                               ? "Category manually overridden for like prompts."
@@ -72,7 +81,7 @@ struct RoutingAnalysisView: View {
                                 .foregroundStyle(theme.palette.textMuted)
                         }
                     } else {
-                        Text("No manual override for this prompt yet.")
+                        Text("No judgment on the Learning list for this prompt yet.")
                             .font(ARILTheme.captionFont)
                             .foregroundStyle(theme.palette.textMuted)
                     }

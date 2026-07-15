@@ -108,6 +108,66 @@ final class ARILAPIClient {
         try validate(response, data: data)
     }
 
+    func storeStats(baseURL: String) async throws -> StoreStatsDTO {
+        let url = try url(baseURL, path: "/v1/store/stats")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func storeStatus(baseURL: String, check: Bool = true) async throws -> StoreStatusDTO {
+        var components = URLComponents(
+            url: try url(baseURL, path: "/v1/store/status"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "check", value: check ? "true" : "false")]
+        guard let endpoint = components?.url else {
+            throw ARILAPIError.invalidURL
+        }
+        let (data, response) = try await session.data(from: endpoint)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func storeCheck(baseURL: String) async throws -> StoreStatusDTO {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/store/check"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func storeRecords(baseURL: String) async throws -> [StoreRecordDTO] {
+        let url = try url(baseURL, path: "/v1/store/records")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    func updateStoreRetention(baseURL: String, retention: Int) async throws -> StoreStatsDTO {
+        try await patch(
+            baseURL,
+            path: "/v1/store/retention",
+            body: StoreRetentionUpdateDTO(retention: retention)
+        )
+    }
+
+    func deleteStoreRecord(baseURL: String, id: String) async throws {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/store/records/\(id)"))
+        req.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+    }
+
+    func deleteAllStoreRecords(baseURL: String) async throws -> StoreDeleteAllResponseDTO {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/store/records"))
+        req.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
     func openRouterKeyStatus(baseURL: String) async throws -> OpenRouterKeyStatusDTO {
         let url = try url(baseURL, path: "/v1/settings/openrouter-key")
         let (data, response) = try await session.data(from: url)
@@ -180,6 +240,20 @@ final class ARILAPIClient {
     ) async throws -> Response {
         var req = URLRequest(url: try url(baseURL, path: path))
         req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try encoder.encode(body)
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
+    private func patch<Body: Encodable, Response: Decodable>(
+        _ baseURL: String,
+        path: String,
+        body: Body
+    ) async throws -> Response {
+        var req = URLRequest(url: try url(baseURL, path: path))
+        req.httpMethod = "PATCH"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try encoder.encode(body)
         let (data, response) = try await session.data(for: req)

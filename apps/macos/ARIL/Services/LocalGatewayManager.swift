@@ -16,13 +16,18 @@ final class LocalGatewayManager: ObservableObject {
 
     func ensureRunning() async {
         if await healthOK() {
-            lastMessage = "Local gateway already running"
-            return
+            if await storeAPIAvailable() {
+                lastMessage = "Local gateway already running"
+                return
+            }
+            // Stale process (pre-SQLite Learning store) — recycle so writes hit aril.db.
+            lastMessage = "Recycling outdated local gateway…"
+            await recyclePortListener()
         }
         start()
-        for _ in 0..<30 {
+        for _ in 0..<40 {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            if await healthOK() {
+            if await healthOK(), await storeAPIAvailable() {
                 lastMessage = "Solo gateway started on port \(port)"
                 return
             }
@@ -46,6 +51,27 @@ final class LocalGatewayManager: ObservableObject {
         }
     }
 
+    /// Learning browser / chat transaction persistence requires these routes.
+    private func storeAPIAvailable() async -> Bool {
+        guard let url = URL(string: "\(baseURL)/v1/store/stats") else { return false }
+        do {
+            let (_, response) = try await URLSession.shared.data(from: url)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
+    }
+
+    private func recyclePortListener() async {
+        stop()
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["bash", "-lc", "lsof -tiTCP:\(port) -sTCP:LISTEN | xargs kill 2>/dev/null || true"]
+        try? task.run()
+        task.waitUntilExit()
+        try? await Task.sleep(nanoseconds: 400_000_000)
+    }
+
     private func start() {
         guard let apiRoot = resolveAPIRoot() else {
             lastMessage = "ARIL API path not found"
@@ -58,9 +84,11 @@ final class LocalGatewayManager: ObservableObject {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: pythonBin)
+        // Reload picks up gateway code changes without requiring a full app relaunch.
         proc.arguments = [
             "-m", "uvicorn",
             "app.main:app",
+            "--reload",
             "--host", "127.0.0.1",
             "--port", "\(port)",
         ]

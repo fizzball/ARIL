@@ -80,7 +80,7 @@ struct AboutView: View {
         ]),
         ChangelogEntry(version: "0.3.3", changes: [
             "Compare runs 3 models with category + accuracy feedback that teaches future routing",
-            "Preferences → Learning lists editable prompt classifications",
+            "Toolbar Learning panel for judgements / classifications; Log Analysis lives in Preferences",
             "Analysis button shows confidence-index breakdown and overrides",
             "Deleted sessions stay deleted (tombstones + bulk delete API)",
             "Preferences → MCP to configure servers; Cost estimate highlights yellow when MCP is in use",
