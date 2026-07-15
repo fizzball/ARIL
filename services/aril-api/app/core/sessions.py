@@ -8,15 +8,21 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.core.paths import data_dir
 from app.core.schemas import ChatMessage, SessionDetail, SessionSummary, SessionUpsert
 
 _LOCK = threading.Lock()
-_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-_STORE_PATH = _DATA_DIR / "sessions.json"
-_TOMBSTONE_PATH = _DATA_DIR / "session_tombstones.json"
 _SESSIONS: dict[str, dict] = {}
 _TOMBSTONES: set[str] = set()
 _LOADED = False
+
+
+def _store_path() -> Path:
+    return data_dir() / "sessions.json"
+
+
+def _tombstone_path() -> Path:
+    return data_dir() / "session_tombstones.json"
 
 
 def _now() -> str:
@@ -58,10 +64,10 @@ def _ensure_loaded() -> None:
     global _SESSIONS, _TOMBSTONES, _LOADED
     if _LOADED:
         return
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if _STORE_PATH.exists():
+    data_dir().mkdir(parents=True, exist_ok=True)
+    if _store_path().exists():
         try:
-            raw = json.loads(_STORE_PATH.read_text(encoding="utf-8"))
+            raw = json.loads(_store_path().read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 if "sessions" in raw and isinstance(raw["sessions"], dict):
                     raw_sessions = raw["sessions"]
@@ -74,9 +80,9 @@ def _ensure_loaded() -> None:
                 _SESSIONS = normalized
         except (json.JSONDecodeError, OSError):
             _SESSIONS = {}
-    if _TOMBSTONE_PATH.exists():
+    if _tombstone_path().exists():
         try:
-            raw_t = json.loads(_TOMBSTONE_PATH.read_text(encoding="utf-8"))
+            raw_t = json.loads(_tombstone_path().read_text(encoding="utf-8"))
             if isinstance(raw_t, list):
                 _TOMBSTONES = {_norm_id(str(x)) for x in raw_t if str(x).strip()}
         except (json.JSONDecodeError, OSError):
@@ -97,9 +103,9 @@ def _ensure_loaded() -> None:
 
 
 def _persist() -> None:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _STORE_PATH.write_text(json.dumps(_SESSIONS, indent=2), encoding="utf-8")
-    _TOMBSTONE_PATH.write_text(
+    data_dir().mkdir(parents=True, exist_ok=True)
+    _store_path().write_text(json.dumps(_SESSIONS, indent=2), encoding="utf-8")
+    _tombstone_path().write_text(
         json.dumps(sorted(_TOMBSTONES), indent=2),
         encoding="utf-8",
     )

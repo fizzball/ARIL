@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      skip_gateway:
+        description: "Skip gateway rebuild (use cached artifact — not recommended)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build DMG (ad-hoc signed)
+        env:
+          SIGN_IDENTITY: "-"
+          NOTARIZE: "0"
+        run: |
+          chmod +x scripts/package-gateway.sh scripts/package-macos.sh
+          ./scripts/package-macos.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aril-macos
+          path: |
+            dist/ARIL-*.dmg
+            dist/ARIL.app
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/ARIL-*.dmg
+          body: |
+            ## Install (macOS 14+)
+
+            1. Download **ARIL-*.dmg**
+            2. Open the disk image and drag **ARIL** into **Applications**
+            3. Launch ARIL (Solo mode starts the bundled gateway)
+            4. Open **Preferences → Gateway** and paste your [OpenRouter](https://openrouter.ai/keys) API key
+
+            See [docs/INSTALL.md](https://github.com/fizzball/ARIL/blob/main/docs/INSTALL.md) for details.
+
+            > First launch may show a Gatekeeper prompt for unsigned/ad-hoc builds.
+            > Prefer a notarized build when Developer ID secrets are configured.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

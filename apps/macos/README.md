@@ -1,20 +1,24 @@
-# macOS client
+# ARIL macOS client
 
-Native SwiftUI shell for ARIL.
+Native SwiftUI app. End-user installs: see **[docs/INSTALL.md](../../docs/INSTALL.md)**.
 
-## Generate & open
+## Develop
 
 ```bash
+# From repo root — API (optional if Solo will start monorepo gateway)
+./scripts/dev-up.sh
+
 cd apps/macos
 xcodegen generate
 open ARIL.xcodeproj
 ```
 
-Select the **ARIL** scheme, run (⌘R). Ensure the API is up (`../../scripts/dev-up.sh`).
+Default gateway URL: `http://127.0.0.1:8741`. Solo mode embeds/starts the local API.
 
-## Phase 0 features
+## Package Release DMG
 
-- Hermes-inspired noir theme + ARIL empty hero
-- Sidebar sessions, composite input bar, status footer
-- Debounced Intelligence Panel via `POST /v1/preview`
-- Settings: gateway URL + category→model maps + temperature
+```bash
+./scripts/package-macos.sh
+```
+
+See **[docs/DEVELOPING.md](../../docs/DEVELOPING.md)**.

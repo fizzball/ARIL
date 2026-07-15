@@ -1,17 +1,26 @@
 # ARIL
 
-**Adaptive Routing Intelligent Layer** — a macOS AI chat client with a multi-client gateway that grades prompts, classifies intent, suggests rewrites, and routes requests to the best model for accuracy, cost, tokens, and latency.
+**Adaptive Routing Intelligent Layer** — a macOS AI chat client with a local Solo gateway that grades prompts, classifies intent, suggests rewrites, and routes requests to the best model for accuracy, cost, tokens, and latency.
 
-## Vision
+## Install (macOS 14+)
 
-ARIL looks and feels like a premium native chat client (Hermes-inspired noir aesthetic). Before send, an **Intelligence Panel** shows:
+End users: download the DMG from [Releases](https://github.com/fizzball/ARIL/releases) — no Python or Xcode required.
 
-- Prompt grade and alternative wordings
-- Recommended model route (by category: Coding, Security, Cost, Performance, Confidence)
-- Estimated tokens and cost
-- Cache eligibility (>1024 tokens)
+**→ Full steps: [docs/INSTALL.md](docs/INSTALL.md)**
 
-Users can accept the recommendation or override model, temperature, and route mode (Auto / Manual / Compare).
+1. Download `ARIL-<version>.dmg`
+2. Drag **ARIL** to Applications and open it
+3. Preferences → Gateway → paste your [OpenRouter](https://openrouter.ai/keys) API key
+
+## Develop
+
+Contributors and local packaging: **[docs/DEVELOPING.md](docs/DEVELOPING.md)**
+
+```bash
+./scripts/dev-up.sh          # FastAPI on :8741
+cd apps/macos && xcodegen generate && open ARIL.xcodeproj
+./scripts/package-macos.sh   # build ARIL.app + DMG with embedded gateway
+```
 
 ## Repository layout
 
@@ -19,55 +28,16 @@ Users can accept the recommendation or override model, temperature, and route mo
 ARIL/
 ├── apps/macos/           # SwiftUI native client
 ├── services/aril-api/    # FastAPI gateway + routing intelligence
+├── scripts/              # Dev + packaging (gateway freeze, DMG)
+├── docs/                 # Install / develop / ADRs
 ├── packages/schemas/     # Shared OpenAPI / JSON schemas
-├── docs/adr/             # Architecture Decision Records
-├── docs/references/      # UI inspiration artefacts
-├── evals/                # Routing & grading benchmarks
-└── scripts/              # Dev helpers
+└── evals/                # Routing & grading benchmarks
 ```
-
-## Locked decisions (Phase 0)
-
-| Concern | Choice |
-|---------|--------|
-| Client | Native **SwiftUI** (macOS 14+) |
-| Server | **Python FastAPI** |
-| Storage | Postgres (prod) / SQLite (local solo) |
-| Cache | Redis + provider-native prompt cache where available |
-| First providers | OpenAI, Anthropic, Ollama (adapters) |
-| Deploy mode | Local gateway first; same API for remote multi-client |
-
-See [docs/adr/](docs/adr/) for full ADRs and [docs/PHASE0.md](docs/PHASE0.md) for tickets.
-
-## Quick start
-
-### API (local)
-
-```bash
-cd services/aril-api
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --port 8741
-```
-
-Open http://127.0.0.1:8741/docs
-
-### macOS client
-
-```bash
-cd apps/macos
-xcodegen generate
-open ARIL.xcodeproj
-```
-
-Set the gateway URL to `http://127.0.0.1:8741` in Settings (default).
 
 ## Status
 
-Phase 0 scaffold — foundations only. Chat streaming, full Intelligence Panel, and production multi-tenant auth land in later phases.
+Active solo-first product: Intelligence panel, Judge mode, Learning store, OpenRouter pricing, and Release packaging.
 
 ## License
 
-Private — all rights reserved.
+[MIT](LICENSE)

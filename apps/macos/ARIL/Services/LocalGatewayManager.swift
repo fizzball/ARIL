@@ -1,6 +1,11 @@
 import Foundation
 
-/// Launches a local ARIL API for single-user (solo) mode.
+/// Launches the local ARIL API for Solo mode.
+///
+/// Resolution order:
+/// 1. `UserDefaults` key `aril.apiRoot` (dev override)
+/// 2. Bundled PyInstaller gateway at `Contents/Resources/aril-gateway/`
+/// 3. Monorepo `services/aril-api` + `.venv` (Debug / contributor checkouts)
 @MainActor
 final class LocalGatewayManager: ObservableObject {
     @Published private(set) var isManagingProcess = false
@@ -20,7 +25,6 @@ final class LocalGatewayManager: ObservableObject {
                 lastMessage = "Local gateway already running"
                 return
             }
-            // Stale process (pre-SQLite Learning store) — recycle so writes hit aril.db.
             lastMessage = "Recycling outdated local gateway…"
             await recyclePortListener()
         }
@@ -32,7 +36,7 @@ final class LocalGatewayManager: ObservableObject {
                 return
             }
         }
-        lastMessage = "Could not start local gateway — start ./scripts/dev-up.sh"
+        lastMessage = "Could not start local gateway — see docs/INSTALL.md or run ./scripts/dev-up.sh"
     }
 
     func stop() {
@@ -51,7 +55,6 @@ final class LocalGatewayManager: ObservableObject {
         }
     }
 
-    /// Learning browser / chat transaction persistence requires these routes.
     private func storeAPIAvailable() async -> Bool {
         guard let url = URL(string: "\(baseURL)/v1/store/stats") else { return false }
         do {
@@ -73,64 +76,134 @@ final class LocalGatewayManager: ObservableObject {
     }
 
     private func start() {
-        guard let apiRoot = resolveAPIRoot() else {
-            lastMessage = "ARIL API path not found"
+        guard let launch = resolveLaunch() else {
+            lastMessage = "ARIL gateway not found (bundle Resources or services/aril-api)"
             return
         }
-        let python = apiRoot.appendingPathComponent(".venv/bin/python").path
-        let pythonBin = FileManager.default.isExecutableFile(atPath: python)
-            ? python
-            : "/usr/bin/python3"
 
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: pythonBin)
-        // Reload picks up gateway code changes without requiring a full app relaunch.
-        proc.arguments = [
-            "-m", "uvicorn",
-            "app.main:app",
-            "--reload",
-            "--host", "127.0.0.1",
-            "--port", "\(port)",
-        ]
-        proc.currentDirectoryURL = apiRoot
-        var env = ProcessInfo.processInfo.environment
-        env["PYTHONUNBUFFERED"] = "1"
-        if let key = UserDefaults.standard.string(forKey: "aril.openRouterAPIKey"),
-           !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            env["OPENROUTER_API_KEY"] = key
-        }
-        proc.environment = env
+        proc.executableURL = launch.executable
+        proc.arguments = launch.arguments
+        proc.currentDirectoryURL = launch.workingDirectory
+        proc.environment = gatewayEnvironment()
 
         do {
             try proc.run()
             process = proc
             isManagingProcess = true
-            lastMessage = "Starting solo gateway…"
+            lastMessage = launch.isBundled
+                ? "Starting bundled Solo gateway…"
+                : "Starting solo gateway…"
         } catch {
             lastMessage = "Failed to launch gateway: \(error.localizedDescription)"
         }
     }
 
-    /// Prefer UserDefaults override, then monorepo relative to this source layout.
-    private func resolveAPIRoot() -> URL? {
+    private struct GatewayLaunch {
+        let executable: URL
+        let arguments: [String]
+        let workingDirectory: URL?
+        let isBundled: Bool
+    }
+
+    private func resolveLaunch() -> GatewayLaunch? {
         if let custom = UserDefaults.standard.string(forKey: "aril.apiRoot"),
            FileManager.default.fileExists(atPath: custom) {
-            return URL(fileURLWithPath: custom)
+            return pythonLaunch(apiRoot: URL(fileURLWithPath: custom), bundled: false)
         }
-        // Walk up from common locations looking for services/aril-api
+
+        if let bundled = bundledGatewayExecutable() {
+            return GatewayLaunch(
+                executable: bundled,
+                arguments: [],
+                workingDirectory: bundled.deletingLastPathComponent(),
+                isBundled: true
+            )
+        }
+
+        if let apiRoot = monorepoAPIRoot() {
+            return pythonLaunch(apiRoot: apiRoot, bundled: false)
+        }
+        return nil
+    }
+
+    /// Prefer `Resources/aril-gateway/aril-gateway` (onedir) or `Resources/aril-gateway` (onefile).
+    private func bundledGatewayExecutable() -> URL? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
         let candidates = [
-            URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent() // LocalGatewayManager.swift parent...
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("services/aril-api"),
+            resources.appendingPathComponent("aril-gateway/aril-gateway"),
+            resources.appendingPathComponent("aril-gateway"),
+        ]
+        return candidates.first {
+            FileManager.default.isExecutableFile(atPath: $0.path)
+        }
+    }
+
+    private func monorepoAPIRoot() -> URL? {
+        let fileWalk = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("services/aril-api")
+        let candidates = [
+            fileWalk,
             URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent("Documents/Claude/Projects/ARIL/services/aril-api"),
         ]
         return candidates.first {
             FileManager.default.fileExists(atPath: $0.appendingPathComponent("app/main.py").path)
         }
+    }
+
+    private func pythonLaunch(apiRoot: URL, bundled: Bool) -> GatewayLaunch {
+        let venvPython = apiRoot.appendingPathComponent(".venv/bin/python")
+        let pythonBin = FileManager.default.isExecutableFile(atPath: venvPython.path)
+            ? venvPython
+            : URL(fileURLWithPath: "/usr/bin/python3")
+
+        var args = [
+            "-m", "uvicorn",
+            "app.main:app",
+            "--host", "127.0.0.1",
+            "--port", "\(port)",
+        ]
+        #if DEBUG
+        // Hot reload only for local contributor checkouts.
+        if !bundled {
+            args.insert("--reload", at: 3)
+        }
+        #endif
+
+        return GatewayLaunch(
+            executable: pythonBin,
+            arguments: args,
+            workingDirectory: apiRoot,
+            isBundled: bundled
+        )
+    }
+
+    private func gatewayEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        env["ARIL_ENV"] = "production"
+        env["ARIL_HOST"] = "127.0.0.1"
+        env["ARIL_PORT"] = "\(port)"
+        env["ARIL_DATA_DIR"] = applicationSupportDataDir().path
+
+        if let key = UserDefaults.standard.string(forKey: "aril.openRouterAPIKey"),
+           !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            env["OPENROUTER_API_KEY"] = key
+        }
+        return env
+    }
+
+    private func applicationSupportDataDir() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        let dir = base.appendingPathComponent("ARIL", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 }

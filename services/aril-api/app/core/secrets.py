@@ -6,9 +6,16 @@ import re
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.paths import data_dir
 
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 _MASK_LEN = 20
+
+
+def _env_path() -> Path:
+    """Prefer Application Support / ARIL_DATA_DIR; fall back to package .env for dev."""
+    if (settings.aril_data_dir or "").strip():
+        return data_dir() / ".env"
+    return Path(__file__).resolve().parents[2] / ".env"
 
 
 def mask_api_key(key: str) -> str:
@@ -35,18 +42,19 @@ def status() -> dict:
 
 
 def _upsert_env_key(key: str) -> None:
-    _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    path = _env_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     line = f"OPENROUTER_API_KEY={key}"
-    if _ENV_PATH.exists():
-        text = _ENV_PATH.read_text(encoding="utf-8")
+    if path.exists():
+        text = path.read_text(encoding="utf-8")
         if re.search(r"(?m)^OPENROUTER_API_KEY=.*$", text):
             text = re.sub(r"(?m)^OPENROUTER_API_KEY=.*$", line, text)
         else:
             text = text.rstrip() + "\n" + line + "\n"
-        _ENV_PATH.write_text(text, encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
     else:
-        _ENV_PATH.write_text(
-            "# ARIL API — local development\n"
+        path.write_text(
+            "# ARIL API — local secrets (do not commit)\n"
             f"{line}\n",
             encoding="utf-8",
         )

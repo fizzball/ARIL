@@ -9,21 +9,25 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.core.paths import data_dir
 
 _LOCK = threading.Lock()
-_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-_CACHE_PATH = _DATA_DIR / "prompt_cache.json"
 _CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _cache_path() -> Path:
+    return data_dir() / "prompt_cache.json"
 
 
 def _ensure_loaded() -> None:
     global _CACHE
     if _CACHE:
         return
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if _CACHE_PATH.exists():
+    data_dir().mkdir(parents=True, exist_ok=True)
+    path = _cache_path()
+    if path.exists():
         try:
-            raw = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+            raw = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 _CACHE = raw
         except (json.JSONDecodeError, OSError):
@@ -31,14 +35,14 @@ def _ensure_loaded() -> None:
 
 
 def _persist() -> None:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir().mkdir(parents=True, exist_ok=True)
     # Cap store size
     if len(_CACHE) > 500:
         # drop oldest by inserted_at
         items = sorted(_CACHE.items(), key=lambda kv: kv[1].get("inserted_at", ""))
         for key, _ in items[: len(_CACHE) - 400]:
             _CACHE.pop(key, None)
-    _CACHE_PATH.write_text(json.dumps(_CACHE), encoding="utf-8")
+    _cache_path().write_text(json.dumps(_CACHE), encoding="utf-8")
 
 
 def make_key(

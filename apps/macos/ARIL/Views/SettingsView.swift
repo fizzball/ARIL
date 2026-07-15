@@ -109,6 +109,9 @@ struct SettingsView: View {
 
             Section("Gateway") {
                 Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
+                Text("Release builds embed the gateway inside ARIL.app. Developer checkouts use services/aril-api (see docs/DEVELOPING.md).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .onChange(of: state.soloMode) { _, _ in
                         state.saveSoloMode()
                     }

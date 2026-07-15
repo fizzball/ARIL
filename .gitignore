@@ -57,5 +57,11 @@ services/aril-api/data/
 .local/
 tmp/
 
+# Packaging outputs
+dist/
+build/
+*.dmg
+services/aril-api/packaging/build/
+
 # Node (schemas tooling)
 node_modules/

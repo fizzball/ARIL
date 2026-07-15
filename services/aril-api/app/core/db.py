@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from app.core.config import settings
+from app.core.paths import data_dir
 
 _LOCK = threading.RLock()
 _CONN: sqlite3.Connection | None = None
@@ -82,13 +83,6 @@ CREATE INDEX IF NOT EXISTS idx_chat_tx_created ON chat_transactions(created_at);
 
 # Tables subject to FIFO retention (oldest created_at first).
 _FIFO_TABLES = ("classifications", "analysis_cache", "chat_transactions")
-
-
-def data_dir() -> Path:
-    raw = (settings.aril_data_dir or "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return Path(__file__).resolve().parents[2] / "data"
 
 
 def db_path() -> Path:
