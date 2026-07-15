@@ -51,6 +51,33 @@ a = Analysis(
     optimize=0,
 )
 
+# Never ship developer SQLite / sessions / .env if they were collected via datas.
+_BLOCK = {
+    ".env",
+    "aril.db",
+    "aril.db-shm",
+    "aril.db-wal",
+    "sessions.json",
+    "sessions-cache.json",
+    "session_tombstones.json",
+    "preferences.json",
+    "prompt_cache.json",
+}
+
+
+def _is_blocked(entry) -> bool:
+    # TOC entry: (dest_name, src_path, typecode)
+    name = str(entry[0]).replace("\\", "/")
+    base = name.rsplit("/", 1)[-1]
+    if base in _BLOCK or base.startswith(".env"):
+        return True
+    if "/data/" in f"/{name}" and base.endswith((".json", ".db", "-wal", "-shm")):
+        return True
+    return False
+
+
+a.datas = [e for e in a.datas if not _is_blocked(e)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

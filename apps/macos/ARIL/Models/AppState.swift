@@ -163,7 +163,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.5"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.6"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "35"
         return "\(short) (\(build))"
     }
@@ -1266,8 +1266,12 @@ final class AppState: ObservableObject {
             webSearch: webSearchEnabled
         )
 
+        // Stream token UI updates are async; track receipt so we never fall back to
+        // /v1/chat after the gateway already wrote a chat_transaction.
+        let streamTokens = StreamTokenProbe()
         do {
             let done = try await client.chatStream(baseURL: gatewayURL, request: request) { [weak self] token in
+                streamTokens.mark()
                 Task { @MainActor in
                     guard let self,
                           let i = self.sessions.firstIndex(where: { $0.id == sid }),
@@ -1327,14 +1331,15 @@ final class AppState: ObservableObject {
             }
         } catch {
             if Task.isCancelled { return }
-            // If tokens already landed in the bubble, treat as success and don't scream.
+            // If tokens already landed (or the stream callback fired), treat as success.
+            // Falling back to /v1/chat here used to duplicate Learning chat_transaction rows.
             let alreadyHasContent: Bool = {
                 guard let session = sessions.first(where: { $0.id == sid }),
                       let msg = session.messages.first(where: { $0.id == assistantID })
                 else { return false }
                 return !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }()
-            if alreadyHasContent {
+            if alreadyHasContent || streamTokens.sawTokens {
                 lastError = nil
                 applyActualCost(
                     sessionID: sid,
@@ -1964,5 +1969,23 @@ final class AppState: ObservableObject {
 
     deinit {
         // Process cleanup on main from gateway manager when app quits via App delegate if needed
+    }
+}
+
+/// Tracks whether any stream token arrived (even before MainActor UI apply).
+private final class StreamTokenProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _saw = false
+
+    var sawTokens: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _saw
+    }
+
+    func mark() {
+        lock.lock()
+        _saw = true
+        lock.unlock()
     }
 }

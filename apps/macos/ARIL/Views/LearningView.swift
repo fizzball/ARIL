@@ -1,10 +1,52 @@
 import SwiftUI
 
+/// Learning panel filters for the unified SQLite browser.
+private enum StoreBrowserFilter: String, CaseIterable, Identifiable {
+    case activity
+    case judgements
+    case chat
+    case analysis
+    case all
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .activity: return "Activity"
+        case .judgements: return "Judgements"
+        case .chat: return "Chat"
+        case .analysis: return "Analysis"
+        case .all: return "All"
+        }
+    }
+
+    func includes(_ kind: String) -> Bool {
+        switch self {
+        case .activity:
+            // Judgement + chat for a send — hide intermediate analysis-cache drafts.
+            return kind == "judgement" || kind == "chat_transaction"
+        case .judgements:
+            return kind == "judgement"
+        case .chat:
+            return kind == "chat_transaction"
+        case .analysis:
+            return kind == "analysis_cache"
+        case .all:
+            return true
+        }
+    }
+}
+
 /// SQLite store browser + prompt classifications (toolbar Learning panel).
 struct LearningView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
     @Environment(\.dismiss) private var dismiss
+    @State private var storeFilter: StoreBrowserFilter = .activity
+
+    private var filteredRecords: [StoreRecordDTO] {
+        state.storeRecords.filter { storeFilter.includes($0.kind) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,7 +71,7 @@ struct LearningView: View {
 
             Form {
                 Section("Local SQLite store") {
-                    Text("Judgements, analysis-cache hits, and chat transactions are kept in a local SQLite database. When a table exceeds the retention limit, the oldest rows are overwritten (FIFO).")
+                    Text("A single send can create a judgement and a chat transaction. Analysis-cache rows appear while you type (preview) and are hidden under Activity.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -75,18 +117,27 @@ struct LearningView: View {
                 }
 
                 Section("Stored records") {
-                    if state.storeRecords.isEmpty {
-                        Text("No SQLite records yet. Prefer a Compare result, save an Analysis override, run preview with LLM rewrite, or send a chat turn.")
+                    Picker("Show", selection: $storeFilter) {
+                        ForEach(StoreBrowserFilter.allCases) { filter in
+                            Text(filter.label).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if filteredRecords.isEmpty {
+                        Text(state.storeRecords.isEmpty
+                              ? "No SQLite records yet. Prefer a Compare result, save an Analysis override, or send a chat turn."
+                              : "No records in this filter.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(state.storeRecords) { record in
+                        ForEach(filteredRecords) { record in
                             StoreRecordRow(record: record)
                         }
                     }
                 }
 
                 Section("Prompt classifications") {
-                    Text("Judgments from Compare Prefer and Analysis overrides. Adjust category or accuracy, or remove an entry.")
+                    Text("Judgments from Compare Prefer, Analysis overrides, and first Auto send. Adjust category or accuracy, or remove an entry.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 

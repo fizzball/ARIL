@@ -142,14 +142,57 @@ def record_chat_transaction(
     cached: bool = False,
     analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Persist one chat turn. Dedupes stream→fallback double-writes for the same turn."""
     fp = pref_store.fingerprint(prompt)
     snippet = (prompt or "").strip().replace("\n", " ")[:120]
     now = _now()
-    record_id = str(uuid.uuid4())
     analysis_json = json.dumps(analysis, ensure_ascii=False) if analysis else None
+    sid = (session_id or "").strip().lower() or None
 
     with store._LOCK:
         conn = store.connect()
+        # Same session + fingerprint within a short window = same user turn
+        # (stream success + non-stream fallback used to create duplicates).
+        if sid:
+            existing = conn.execute(
+                """
+                SELECT id, created_at FROM chat_transactions
+                WHERE session_id = ? AND fingerprint = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (sid, fp),
+            ).fetchone()
+            if existing and _within_seconds(existing["created_at"], now, seconds=30):
+                conn.execute(
+                    """
+                    UPDATE chat_transactions SET
+                      model = ?, category = ?,
+                      input_tokens = ?, output_tokens = ?,
+                      cost_usd = ?, cached = ?, analysis_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        model or "",
+                        category,
+                        input_tokens,
+                        output_tokens,
+                        cost_usd,
+                        1 if cached else 0,
+                        analysis_json,
+                        existing["id"],
+                    ),
+                )
+                conn.commit()
+                return {
+                    "id": existing["id"],
+                    "fingerprint": fp,
+                    "prompt_snippet": snippet,
+                    "created_at": existing["created_at"],
+                    "deduped": True,
+                }
+
+        record_id = str(uuid.uuid4())
         conn.execute(
             """
             INSERT INTO chat_transactions(
@@ -159,7 +202,7 @@ def record_chat_transaction(
             """,
             (
                 record_id,
-                session_id,
+                sid,
                 prompt or "",
                 snippet,
                 fp,
@@ -180,4 +223,16 @@ def record_chat_transaction(
             "fingerprint": fp,
             "prompt_snippet": snippet,
             "created_at": now,
+            "deduped": False,
         }
+
+
+def _within_seconds(earlier: str | None, later: str | None, *, seconds: int) -> bool:
+    if not earlier or not later:
+        return False
+    try:
+        a = datetime.fromisoformat(str(earlier).replace("Z", "+00:00"))
+        b = datetime.fromisoformat(str(later).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return abs((b - a).total_seconds()) <= seconds

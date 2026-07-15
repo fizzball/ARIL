@@ -104,18 +104,43 @@ def test_store_retention_patch(client: TestClient):
     assert body["retention"] == 10
 
 
-def test_chat_writes_transaction(client: TestClient):
-    r = client.post(
-        "/v1/chat",
-        json={
-            "messages": [{"role": "user", "content": "Hello SQLite store path"}],
-            "route_mode": "auto",
-            "model": "openai/gpt-4.1-mini",
-        },
+def test_chat_transaction_dedupes_same_turn(isolated_store: Path):
+    """Stream + fallback used to insert two chat_transaction rows for one send."""
+    from app.core import analysis_cache as analysis_store
+    from app.core import db as store
+
+    store.reset_connection()
+    sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    prompt = "Unique dedupe token moon distance query omega"
+    first = analysis_store.record_chat_transaction(
+        session_id=sid,
+        prompt=prompt,
+        model="openai/gpt-4.1-mini",
+        category="cost",
+        input_tokens=10,
+        output_tokens=5,
+        cost_usd=0.0001,
+        cached=False,
     )
-    assert r.status_code == 200
-    records = client.get("/v1/store/records").json()
-    assert any(row["kind"] == "chat_transaction" for row in records)
+    second = analysis_store.record_chat_transaction(
+        session_id=sid,
+        prompt=prompt,
+        model="openai/gpt-4.1-mini",
+        category="cost",
+        input_tokens=12,
+        output_tokens=8,
+        cost_usd=0.0002,
+        cached=False,
+    )
+    assert first["id"] == second["id"]
+    assert second.get("deduped") is True
+
+    conn = store.connect()
+    count = conn.execute(
+        "SELECT COUNT(*) AS c FROM chat_transactions WHERE fingerprint = ?",
+        (first["fingerprint"],),
+    ).fetchone()["c"]
+    assert count == 1
 
 
 def test_chat_auto_judgement_on_first_send(client: TestClient):

@@ -41,6 +41,10 @@ Notarized builds (when published) open without this step.
 2. Move **ARIL.app** from Applications to Trash  
 3. Optional: delete `~/Library/Application Support/ARIL/` to remove local history and Learning data  
 
+## Packaging (developers)
+
+`./scripts/package-macos.sh` builds a clean DMG: it never embeds sessions, judgements, or OpenRouter keys. By default it also **purges this Mac’s** `~/Library/Application Support/ARIL/` and the stored OpenRouter key so reinstalling the new build starts blank. Pass `--keep-local-data` to keep your local history while packaging.
+
 ## Troubleshooting
 
 | Symptom | What to try |

@@ -69,6 +69,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.6", changes: [
+            "Solo packaging: DMG embeds the gateway; public Install docs + GitHub Release workflow",
+            "Learning store: dedupe chat transactions; Activity filter hides analysis-cache noise",
+            "Judge Equivalence Score, capability-matched peers, Manual skips Learning writes",
+        ]),
         ChangelogEntry(version: "0.3.5", changes: [
             "Preferences → System Prompt tab (Claude.md-style instructions, token estimate, cost analysis)",
             "OpenRouter live $/1K model pricing in Preferences and prompt cost estimates",

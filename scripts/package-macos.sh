@@ -4,7 +4,13 @@
 # Usage:
 #   ./scripts/package-macos.sh
 #   ./scripts/package-macos.sh --skip-gateway   # reuse dist/aril-gateway
+#   ./scripts/package-macos.sh --keep-local-data  # do not wipe Application Support / key
 #   SIGN_IDENTITY="Developer ID Application: …" ./scripts/package-macos.sh
+#
+# By default, packaging:
+#   • never embeds sessions / judgements / .env / OpenRouter keys in the app or DMG
+#   • purges this Mac's Application Support/ARIL + stored OpenRouter key so a
+#     reinstall from the new package starts blank (override with --keep-local-data)
 #
 # Outputs:
 #   dist/ARIL.app
@@ -16,12 +22,18 @@ MACOS="$ROOT/apps/macos"
 DIST="$ROOT/dist"
 DERIVED="$ROOT/build/DerivedData"
 SKIP_GATEWAY=0
+KEEP_LOCAL_DATA=0
+
+# shellcheck source=package-cleanse.sh
+source "$ROOT/scripts/package-cleanse.sh"
+sanitize_build_env
 
 for arg in "$@"; do
   case "$arg" in
     --skip-gateway) SKIP_GATEWAY=1 ;;
+    --keep-local-data) KEEP_LOCAL_DATA=1 ;;
     -h|--help)
-      sed -n '2,14p' "$0"
+      sed -n '2,18p' "$0"
       exit 0
       ;;
   esac
@@ -42,6 +54,8 @@ else
     echo "error: dist/aril-gateway missing; run without --skip-gateway" >&2
     exit 1
   fi
+  cleanse_tree "$DIST/aril-gateway"
+  verify_clean_tree "$DIST/aril-gateway" "dist/aril-gateway"
 fi
 
 if command -v xcodegen >/dev/null 2>&1; then
@@ -76,12 +90,14 @@ mkdir -p "$RESOURCES/aril-gateway"
 ditto --norsrc --noextattr --noqtn "$DIST/aril-gateway" "$RESOURCES/aril-gateway"
 chmod +x "$RESOURCES/aril-gateway/aril-gateway"
 
+# Never ship developer runtime data / secrets inside the app bundle.
+cleanse_tree "$DIST/ARIL.app"
+verify_clean_tree "$DIST/ARIL.app" "dist/ARIL.app"
+
 # Strip remaining provenance / quarantine xattrs (macOS 15+).
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$DIST/ARIL.app" 2>/dev/null || true
-  find "$DIST/ARIL.app" -print0 | while IFS= read -r -d '' f; do
-    xattr -c "$f" 2>/dev/null || true
-  done
+  find "$DIST/ARIL.app" -print0 | xargs -0 xattr -c 2>/dev/null || true
 fi
 find "$DIST/ARIL.app" \( -name '._*' -o -name '.DS_Store' \) -delete 2>/dev/null || true
 
@@ -94,12 +110,17 @@ fi
 
 codesign --verify --verbose=2 "$DIST/ARIL.app" || true
 
+# Remove superseded local DMGs when version bumps.
+rm -f "$DIST"/ARIL-*.dmg 2>/dev/null || true
+
 DMG="$DIST/ARIL-${VERSION}.dmg"
 STAGE="$DIST/dmg-stage"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
 ditto --norsrc --noextattr --noqtn "$DIST/ARIL.app" "$STAGE/ARIL.app"
 ln -sf /Applications "$STAGE/Applications"
+cleanse_tree "$STAGE"
+verify_clean_tree "$STAGE" "dmg-stage"
 
 echo "-> Creating ${DMG}..."
 hdiutil create \
@@ -125,6 +146,12 @@ if [[ "$NOTARIZE" == "1" ]]; then
   xcrun stapler staple "$DIST/ARIL.app"
 fi
 
+if [[ "$KEEP_LOCAL_DATA" -eq 0 ]]; then
+  purge_local_install_data
+else
+  echo "-> Keeping local Application Support / OpenRouter key (--keep-local-data)"
+fi
+
 cat <<EOF
 
 Packaged:
@@ -132,4 +159,5 @@ Packaged:
   $DMG
 
 Install: open the DMG, drag ARIL to Applications, launch, add OpenRouter key.
+Local sessions / judgements / OpenRouter key were purged on this Mac unless you passed --keep-local-data.
 EOF
