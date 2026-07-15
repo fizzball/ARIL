@@ -18,7 +18,7 @@ struct InputBarView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
-                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge runs three models for side-by-side review.")
+                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge classifies the prompt and compares 3 models with the same capability.")
 
                 if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
                     Text(cat.label.uppercased())

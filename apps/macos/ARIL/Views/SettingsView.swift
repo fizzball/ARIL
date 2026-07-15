@@ -230,6 +230,17 @@ struct SettingsView: View {
                 Text("How long to wait after you stop typing before running prompt analysis. 0 runs immediately; up to 10 seconds in 0.5s steps.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Skip analysis when a judgement matches",
+                    isOn: Binding(
+                        get: { state.skipAnalysisOnJudgement },
+                        set: { state.setSkipAnalysisOnJudgement($0) }
+                    )
+                )
+                Text("When on, a matching Learning judgement greys the analysis metrics and reuses prior routing (token saver). Use Redo Analysis on the intelligence panel to recheck and update that judgement.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Sessions") {

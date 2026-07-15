@@ -20,6 +20,11 @@ struct IntelligencePanelView: View {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.7)
+                } else if state.preview?.analysisSkipped == true {
+                    Text("JUDGEMENT")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(theme.palette.accent.opacity(0.8))
+                        .help("Prompt analysis skipped — reused Learning judgement to save tokens.")
                 } else if let source = state.preview?.alternativesSource, source != "none" {
                     Text(source.uppercased())
                         .font(.system(size: 9, weight: .bold))
@@ -29,6 +34,7 @@ struct IntelligencePanelView: View {
                 Spacer()
 
                 if let preview = state.preview, state.analysisStatus == .ready {
+                    let skipped = preview.analysisSkipped == true
                     if preview.userOverride?.categoryOverridden == true {
                         Text("OVERRIDE")
                             .font(.system(size: 9, weight: .bold))
@@ -37,10 +43,14 @@ struct IntelligencePanelView: View {
                     Text(preview.classification.primary.label.uppercased())
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.textMuted)
+                        .opacity(skipped ? 0.55 : 1)
                     HelpMetricLabel(
                         title: String(format: "%.0f%% fit", preview.classification.confidence * 100),
-                        help: "How well the prompt matches the detected category. Higher means routing is more confident."
+                        help: skipped
+                            ? "Category fit from the reused Learning judgement (analysis not re-run)."
+                            : "How well the prompt matches the detected category. Higher means routing is more confident."
                     )
+                    .opacity(skipped ? 0.55 : 1)
                     Button("Analysis") {
                         state.showRoutingAnalysis = true
                     }
@@ -59,6 +69,20 @@ struct IntelligencePanelView: View {
             }
 
             if let preview = state.preview, state.analysisStatus == .ready {
+                if preview.analysisSkipped == true {
+                    HStack(alignment: .center, spacing: 10) {
+                        Text("Previously analysed — Learning judgement reused (assumed acceptable).")
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.textMuted)
+                        Spacer(minLength: 8)
+                        Button("Redo Analysis") {
+                            Task { await state.redoAnalysis() }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Re-run full prompt analysis and update the existing Learning judgement")
+                    }
+                }
                 readyContent(preview)
             }
         }
@@ -74,15 +98,21 @@ struct IntelligencePanelView: View {
 
     @ViewBuilder
     private func readyContent(_ preview: PreviewResponse) -> some View {
+        let skipped = preview.analysisSkipped == true
+        let muted = theme.palette.textMuted
+        let valueColor = skipped ? muted : theme.palette.text
+
         HStack(spacing: 16) {
             metric(
                 "Grade",
                 String(format: "%.0f%%", preview.grade.overall * 100),
+                valueColor: valueColor,
                 help: "Prompt quality score (clarity, constraints, success criteria, token efficiency) — not model accuracy."
             )
             metric(
                 "Tokens",
                 "\(preview.cache.estimatedInputTokens)",
+                valueColor: valueColor,
                 help: tokenHelp(for: preview)
             )
             if let top = preview.routes.first {
@@ -93,6 +123,7 @@ struct IntelligencePanelView: View {
                 let cacheHelp = "This prompt looks cacheable — expected to hit the prompt cache (shown in green)."
                 let systemHelp = "Includes the global system prompt when enabled."
                 let costColor: Color? = {
+                    if skipped { return muted }
                     if willCache { return Color(red: 0.35, green: 0.78, blue: 0.45) }
                     if costWarning { return Color(red: 0.95, green: 0.80, blue: 0.20) }
                     return nil
@@ -102,6 +133,7 @@ struct IntelligencePanelView: View {
                     if state.systemPromptEnabled { parts.append(systemHelp) }
                     if willCache { parts.append(cacheHelp) }
                     if costWarning { parts.append(warnHelp) }
+                    if skipped { parts.append("Greyed because analysis was skipped for a Learning judgement.") }
                     return parts.joined(separator: " ")
                 }()
                 metric(
@@ -115,6 +147,7 @@ struct IntelligencePanelView: View {
                 metric(
                     "Latency",
                     "\(latency)ms",
+                    valueColor: valueColor,
                     help: "Round-trip probe latency for the recommended model, or last completed request time."
                 )
             }
@@ -122,23 +155,27 @@ struct IntelligencePanelView: View {
                 metric(
                     "Conf. index",
                     String(format: "%.0f%%", idx * 100),
+                    valueColor: valueColor,
                     help: "Combined confidence index from category fit, cost, base prior, and learned preferences."
                 )
             }
-            metric("Category", preview.classification.primary.label)
+            metric("Category", preview.classification.primary.label, valueColor: valueColor)
             judgementIndicator(exists: preview.userOverride != nil)
             metric(
                 "Model",
                 short(state.routeMode == .manual ? state.selectedModel : preview.recommendedModel),
-                valueColor: state.routeMode == .manual ? theme.palette.danger : theme.palette.text,
+                valueColor: skipped
+                    ? muted
+                    : (state.routeMode == .manual ? theme.palette.danger : theme.palette.text),
                 help: state.routeMode == .manual
                     ? "Manual mode keeps this model (highlighted red) — ARIL will not swap it."
                     : "Recommended model for this prompt."
             )
             if preview.cache.eligible {
-                metric("Cache", preview.cache.wouldHit ? "cached" : "not cached")
+                metric("Cache", preview.cache.wouldHit ? "cached" : "not cached", valueColor: valueColor)
             }
         }
+        .opacity(skipped ? 0.55 : 1)
 
         if !preview.grade.notes.isEmpty {
             Text(preview.grade.notes.joined(separator: " "))
@@ -149,12 +186,12 @@ struct IntelligencePanelView: View {
         if !preview.alternatives.isEmpty {
             Text("Prompt alternatives")
                 .font(ARILTheme.captionFont)
-                .foregroundStyle(theme.palette.accent)
+                .foregroundStyle(skipped ? muted : theme.palette.accent)
             ForEach(preview.alternatives) { alt in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(alt.rationale)
                         .font(ARILTheme.captionFont)
-                        .foregroundStyle(theme.palette.text)
+                        .foregroundStyle(skipped ? muted : theme.palette.text)
                     Text(alt.text)
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.textMuted)
@@ -164,12 +201,14 @@ struct IntelligencePanelView: View {
                             state.applyAlternative(alt)
                         }
                         .buttonStyle(.bordered)
+                        .disabled(skipped)
                         .help("Copy this recommended prompt into the entry field")
                         Button("Submit") {
                             state.submitAlternative(alt)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(theme.palette.accentStrong)
+                        .disabled(skipped)
                         .help("Send this recommended prompt now")
                     }
                 }
@@ -177,6 +216,7 @@ struct IntelligencePanelView: View {
                 .padding(10)
                 .background(theme.palette.background)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .opacity(skipped ? 0.55 : 1)
             }
         }
 
@@ -196,7 +236,7 @@ struct IntelligencePanelView: View {
         VStack(alignment: .leading, spacing: 2) {
             HelpMetricTitle(
                 title: "Judgement",
-                help: "Checked when this prompt (or a matching fingerprint) has a Learning judgement — created automatically on first send, or manually via Compare Prefer / Analysis save."
+                help: "Checked when this prompt (or a matching fingerprint) has a Learning judgement — created automatically on first Auto send, or via Compare Prefer / Analysis save. Manual mode does not write judgements."
             )
             Toggle("", isOn: .constant(exists))
                 .toggleStyle(.checkbox)
@@ -245,47 +285,5 @@ struct IntelligencePanelView: View {
             help += " Prompts above the cache threshold may be cache-eligible."
         }
         return help
-    }
-}
-
-/// Compact label with hoverable info icon (cursor changes to indicate help is available).
-private struct HelpMetricTitle: View {
-    @EnvironmentObject private var theme: ThemeStore
-    let title: String
-    let help: String
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Text(title.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(theme.palette.textMuted)
-            Image(systemName: hovering ? "info.circle.fill" : "info.circle")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(hovering ? theme.palette.accent : theme.palette.textMuted.opacity(0.7))
-                .onHover { hovering = $0 }
-        }
-        .help(help)
-        .onHover { hovering = $0 }
-    }
-}
-
-private struct HelpMetricLabel: View {
-    @EnvironmentObject private var theme: ThemeStore
-    let title: String
-    let help: String
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Text(title)
-                .font(ARILTheme.captionFont)
-                .foregroundStyle(theme.palette.textMuted)
-            Image(systemName: hovering ? "info.circle.fill" : "info.circle")
-                .font(.system(size: 9))
-                .foregroundStyle(hovering ? theme.palette.accent : theme.palette.textMuted.opacity(0.7))
-        }
-        .help(help)
-        .onHover { hovering = $0 }
     }
 }

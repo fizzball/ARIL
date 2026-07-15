@@ -159,10 +159,11 @@ def ensure_auto_judgement(
     category: str,
     model: str,
 ) -> dict | None:
-    """Create a Learning judgement on first successful send for this fingerprint.
+    """Create a Learning judgement on first successful Auto send for this fingerprint.
 
     Does not overwrite an existing Prefer / Analysis judgement. Returns the
     created record summary, or None when a judgement already existed.
+    Callers must not invoke this for Manual mode.
     """
     if not (prompt or "").strip():
         return None

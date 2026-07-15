@@ -34,11 +34,32 @@ struct RoutingAnalysisView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if let grade = preview?.grade {
                         sectionTitle("Prompt grade metrics")
-                        metricRow("Clarity", grade.clarity)
-                        metricRow("Constraints", grade.constraints)
-                        metricRow("Success criteria", grade.successCriteria)
-                        metricRow("Token efficiency", grade.tokenEfficiency)
-                        metricRow("Overall grade", grade.overall, emphasize: true)
+                        metricRow(
+                            "Clarity",
+                            grade.clarity,
+                            help: "How clear and unambiguous the prompt is. Vague asks score lower."
+                        )
+                        metricRow(
+                            "Constraints",
+                            grade.constraints,
+                            help: "Whether the prompt states limits, format, or what to avoid."
+                        )
+                        metricRow(
+                            "Success criteria",
+                            grade.successCriteria,
+                            help: "Whether the prompt defines what a good answer looks like."
+                        )
+                        metricRow(
+                            "Token efficiency",
+                            grade.tokenEfficiency,
+                            help: "How concise the prompt is relative to the ask — padding lowers this score."
+                        )
+                        metricRow(
+                            "Overall grade",
+                            grade.overall,
+                            emphasize: true,
+                            help: "Combined prompt quality (not model accuracy). Used when suggesting rewrites."
+                        )
                     }
 
                     if let breakdown = topRoute?.breakdown {
@@ -46,11 +67,32 @@ struct RoutingAnalysisView: View {
                         Text(short(topRoute?.modelId ?? state.selectedModel))
                             .font(ARILTheme.bodyFont)
                             .foregroundStyle(theme.palette.accent)
-                        metricRow("Category fit", breakdown.categoryFit)
-                        metricRow("Cost efficiency", breakdown.cost)
-                        metricRow("Base prior", breakdown.base)
-                        metricRow("Learning boost", breakdown.learning)
-                        metricRow("Confidence index", breakdown.confidenceIndex, emphasize: true)
+                        metricRow(
+                            "Category fit",
+                            breakdown.categoryFit,
+                            help: "How well the prompt matches the recommended model’s routing category."
+                        )
+                        metricRow(
+                            "Cost efficiency",
+                            breakdown.cost,
+                            help: "Relative cost score for this route — cheaper routes score higher here."
+                        )
+                        metricRow(
+                            "Base prior",
+                            breakdown.base,
+                            help: "Built-in prior for the model before Learning adjustments."
+                        )
+                        metricRow(
+                            "Learning boost",
+                            breakdown.learning,
+                            help: "Lift from your saved judgements / Prefer history for like prompts."
+                        )
+                        metricRow(
+                            "Confidence index",
+                            breakdown.confidenceIndex,
+                            emphasize: true,
+                            help: "Combined index from category fit, cost, base prior, and Learning. Higher means ARIL is more sure of this pick."
+                        )
 
                         if let reasons = topRoute?.reasons, !reasons.isEmpty {
                             Text(reasons.joined(separator: " "))
@@ -60,16 +102,35 @@ struct RoutingAnalysisView: View {
                     }
 
                     sectionTitle("Your overrides")
-                    Toggle(isOn: .constant(preview?.userOverride != nil)) {
-                        Text("Judgement exists")
-                            .font(ARILTheme.captionFont)
-                            .foregroundStyle(theme.palette.text)
+                    HStack(spacing: 6) {
+                        Toggle(isOn: .constant(preview?.userOverride != nil)) {
+                            Text("Judgement exists")
+                                .font(ARILTheme.captionFont)
+                                .foregroundStyle(theme.palette.text)
+                        }
+                        .toggleStyle(.checkbox)
+                        .disabled(true)
+                        MetricHelpHint(
+                            text: "Checked when this query has a Learning judgement (auto on first Auto send, or Compare Prefer / Analysis save). Manual sends never write judgements."
+                        )
                     }
-                    .toggleStyle(.checkbox)
-                    .disabled(true)
-                    .help("Checked when this query has a Learning judgement (auto on first send, or Compare Prefer / Analysis save).")
 
                     if let override = preview?.userOverride {
+                        if preview?.analysisSkipped == true {
+                            HStack(alignment: .center, spacing: 10) {
+                                Text("Analysis skipped — reused this judgement (assumed acceptable).")
+                                    .font(ARILTheme.captionFont)
+                                    .foregroundStyle(theme.palette.textMuted)
+                                Spacer(minLength: 8)
+                                Button("Redo Analysis") {
+                                    state.showRoutingAnalysis = false
+                                    Task { await state.redoAnalysis() }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("Re-run full prompt analysis and update this Learning judgement")
+                            }
+                        }
                         Text(override.categoryOverridden
                               ? "Category manually overridden for like prompts."
                               : "Saved classification from a previous judgment.")
@@ -137,11 +198,19 @@ struct RoutingAnalysisView: View {
             .foregroundStyle(theme.palette.accent)
     }
 
-    private func metricRow(_ title: String, _ value: Double, emphasize: Bool = false) -> some View {
-        HStack {
-            Text(title)
-                .font(ARILTheme.captionFont)
-                .foregroundStyle(theme.palette.textMuted)
+    private func metricRow(
+        _ title: String,
+        _ value: Double,
+        emphasize: Bool = false,
+        help: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.textMuted)
+                MetricHelpHint(text: help, compact: true)
+            }
             Spacer()
             Text(String(format: "%.0f%%", value * 100))
                 .font(emphasize ? ARILTheme.bodyFont : ARILTheme.captionFont)

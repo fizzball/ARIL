@@ -163,3 +163,149 @@ def test_chat_auto_judgement_on_first_send(client: TestClient):
         r for r in client.get("/v1/store/records").json() if r["kind"] == "judgement"
     ]
     assert len(judgements_after) == count_before
+
+
+def test_chat_manual_does_not_write_judgement(client: TestClient):
+    prompt = "Explain unique token manualnojjudgmentbeta edge cases in concurrency"
+    before = client.post(
+        "/v1/preview",
+        json={"prompt": prompt, "enhance_alternatives": False},
+    ).json()
+    assert before.get("user_override") is None
+
+    send = client.post(
+        "/v1/chat",
+        json={
+            "messages": [{"role": "user", "content": prompt}],
+            "route_mode": "manual",
+            "model": "openai/gpt-4.1-mini",
+        },
+    )
+    assert send.status_code == 200
+
+    after = client.post(
+        "/v1/preview",
+        json={"prompt": prompt, "enhance_alternatives": False},
+    ).json()
+    assert after.get("user_override") is None
+
+
+def test_preview_manual_update_judgement_ignored(client: TestClient):
+    prompt = "Debug unique token manualupdateomega lock contention in actors"
+    prefer = client.post(
+        "/v1/feedback/prefer",
+        json={
+            "prompt": prompt,
+            "model": "openai/gpt-4.1-mini",
+            "category": "coding",
+        },
+    )
+    assert prefer.status_code == 200
+    old_model = prefer.json()["model"]
+
+    redo = client.post(
+        "/v1/preview",
+        json={
+            "prompt": prompt,
+            "enhance_alternatives": False,
+            "skip_analysis_on_judgement": False,
+            "update_judgement": True,
+            "route_mode": "manual",
+            "preferred_model": "openai/gpt-4.1",
+            "routing_profile": {
+                "coding": "anthropic/claude-sonnet-4",
+                "security": "anthropic/claude-sonnet-4",
+                "reasoning": "anthropic/claude-opus-4",
+                "vision": "google/gemini-2.5-flash",
+                "cost": "openai/gpt-4.1-mini",
+                "performance": "google/gemini-2.5-flash",
+                "confidence": "anthropic/claude-opus-4",
+                "general": "meta-llama/llama-3.3-70b-instruct",
+            },
+        },
+    )
+    assert redo.status_code == 200
+    body = redo.json()
+    assert body.get("user_override") is not None
+    assert body["user_override"]["model"] == old_model
+
+
+def test_skip_analysis_on_judgement(client: TestClient):
+    prompt = "Refactor unique token skipanalysiszeta modules with unit tests please"
+    prefer = client.post(
+        "/v1/feedback/prefer",
+        json={
+            "prompt": prompt,
+            "model": "openai/gpt-4.1",
+            "category": "coding",
+            "category_overridden": True,
+        },
+    )
+    assert prefer.status_code == 200
+
+    full = client.post(
+        "/v1/preview",
+        json={
+            "prompt": prompt,
+            "enhance_alternatives": False,
+            "skip_analysis_on_judgement": False,
+        },
+    )
+    assert full.status_code == 200
+    assert full.json().get("analysis_skipped") is False
+
+    skipped = client.post(
+        "/v1/preview",
+        json={
+            "prompt": prompt,
+            "enhance_alternatives": True,
+            "skip_analysis_on_judgement": True,
+        },
+    )
+    assert skipped.status_code == 200
+    body = skipped.json()
+    assert body["analysis_skipped"] is True
+    assert body["user_override"] is not None
+    assert body["recommended_model"] == "openai/gpt-4.1"
+
+
+def test_redo_analysis_updates_judgement(client: TestClient):
+    prompt = "Debug unique token redoanalysisomega memory leak in swift concurrency"
+    prefer = client.post(
+        "/v1/feedback/prefer",
+        json={
+            "prompt": prompt,
+            "model": "openai/gpt-4.1-mini",
+            "category": "coding",
+        },
+    )
+    assert prefer.status_code == 200
+    old_id = prefer.json()["classification_id"]
+
+    redo = client.post(
+        "/v1/preview",
+        json={
+            "prompt": prompt,
+            "enhance_alternatives": False,
+            "skip_analysis_on_judgement": False,
+            "update_judgement": True,
+            "routing_profile": {
+                "coding": "anthropic/claude-sonnet-4",
+                "security": "anthropic/claude-sonnet-4",
+                "reasoning": "anthropic/claude-opus-4",
+                "vision": "google/gemini-2.5-flash",
+                "cost": "openai/gpt-4.1-mini",
+                "performance": "google/gemini-2.5-flash",
+                "confidence": "anthropic/claude-opus-4",
+                "general": "meta-llama/llama-3.3-70b-instruct",
+            },
+        },
+    )
+    assert redo.status_code == 200
+    body = redo.json()
+    assert body.get("analysis_skipped") is False
+    assert body.get("user_override") is not None
+    assert body["user_override"]["classification_id"] == old_id
+    assert body["recommended_model"] == body["user_override"]["model"]
+    # Fresh grade notes should not claim the analysis was skipped.
+    assert not any("skipped" in note.lower() for note in body.get("grade", {}).get("notes", []))

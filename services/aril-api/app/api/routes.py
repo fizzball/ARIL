@@ -37,6 +37,7 @@ from app.core.schemas import (
     ProbeResponse,
     PromptAlternative,
     RouteCategory,
+    RouteMode,
     SessionDetail,
     SessionSummary,
     SessionUpsert,
@@ -53,11 +54,13 @@ from app.routing.pipeline import (
     DEFAULT_PROFILE,
     IMAGE_GEN_MODEL,
     build_preview,
+    build_preview_from_judgement,
     classify,
     estimate_tokens,
     grade_prompt,
     resolve_profile,
     score_routes,
+    select_judge_models,
     wants_image_generation,
 )
 from app.routing.pricing import list_catalog, pricing_for_models, resolve_cost_usd
@@ -87,8 +90,14 @@ def _auto_judgement_after_send(
     prompt: str,
     category: str,
     model: str,
+    route_mode: RouteMode,
 ) -> None:
-    """First successful Auto/Manual send seeds Learning like Prefer would."""
+    """First successful Auto (or Compare) send seeds Learning like Prefer would.
+
+    Manual mode never writes judgements — the locked model is not a routing opinion.
+    """
+    if route_mode == RouteMode.manual:
+        return
     try:
         pref_store.ensure_auto_judgement(
             prompt=prompt,
@@ -161,13 +170,34 @@ async def _complete_cached(
 async def preview(req: PreviewRequest) -> PreviewResponse:
     """Classify, grade, optionally LLM-rewrite alternatives, rank routes."""
     profile_dict = req.routing_profile.model_dump() if req.routing_profile else None
+
+    # Token saver: reuse Learning judgement without re-analysis / rewrite LLM.
+    if req.skip_analysis_on_judgement:
+        override = pref_store.lookup_classification(req.prompt)
+        if override:
+            cached = analysis_store.get(
+                req.prompt,
+                routing_profile=profile_dict,
+                system_prompt=req.system_prompt,
+                enhance_alternatives=req.enhance_alternatives,
+            )
+            payload = (
+                cached.get("payload")
+                if cached and isinstance(cached.get("payload"), dict)
+                else None
+            )
+            return build_preview_from_judgement(
+                req, override, cached_payload=payload
+            )
+
     cached = analysis_store.get(
         req.prompt,
         routing_profile=profile_dict,
         system_prompt=req.system_prompt,
         enhance_alternatives=req.enhance_alternatives,
     )
-    if cached and isinstance(cached.get("payload"), dict):
+    # Redo Analysis must rebuild (and may refresh the Learning judgement).
+    if cached and isinstance(cached.get("payload"), dict) and not req.update_judgement:
         payload = cached["payload"]
         alts_raw = payload.get("alternatives") or []
         alts = [PromptAlternative(**a) for a in alts_raw if isinstance(a, dict)]
@@ -203,6 +233,36 @@ async def preview(req: PreviewRequest) -> PreviewResponse:
         system_prompt=req.system_prompt,
         enhance_alternatives=req.enhance_alternatives,
     )
+    if req.update_judgement and req.route_mode != RouteMode.manual:
+        existing = pref_store.lookup_classification(req.prompt)
+        pref_store.record_preference(
+            prompt=req.prompt,
+            category=resp.classification.primary.value,
+            model=resp.recommended_model,
+            accuracy=existing.get("accuracy") if existing else None,
+            category_overridden=bool(existing.get("category_overridden")) if existing else False,
+        )
+        # Refresh override insight on the response after upsert.
+        refreshed = pref_store.lookup_classification(req.prompt)
+        if refreshed:
+            from app.core.schemas import UserOverrideInsight
+
+            try:
+                ov_cat = RouteCategory(refreshed["category"])
+                resp = resp.model_copy(
+                    update={
+                        "user_override": UserOverrideInsight(
+                            classification_id=refreshed["id"],
+                            category=ov_cat,
+                            model=refreshed.get("model"),
+                            accuracy=refreshed.get("accuracy"),
+                            category_overridden=bool(refreshed.get("category_overridden")),
+                            prompt_snippet=refreshed.get("prompt_snippet"),
+                        )
+                    }
+                )
+            except ValueError:
+                pass
     return resp
 
 
@@ -265,6 +325,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         prompt=last_user,
         category=classification.primary.value,
         model=result.model,
+        route_mode=req.route_mode,
     )
     return ChatResponse(
         session_id=session_id,
@@ -339,6 +400,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     prompt=last_user,
                     category=classification.primary.value,
                     model=str(meta["model"]),
+                    route_mode=req.route_mode,
                 )
                 yield f"event: done\ndata: {json.dumps(meta)}\n\n"
                 return
@@ -431,6 +493,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             prompt=last_user,
             category=classification.primary.value,
             model=str(meta.get("model") or model),
+            route_mode=req.route_mode,
         )
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
 
@@ -447,21 +510,50 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
 @router.post("/compare", response_model=CompareResponse)
 async def compare(req: CompareRequest) -> CompareResponse:
-    """Run the same prompt across multiple models and return side-by-side results."""
+    """Run the same prompt across capability-matched models and return side-by-side results.
+
+    Classifies the user prompt, then judges the profile model for that category
+    against two peers that share the same capability (e.g. three Vision models).
+    Explicit `models` still overrides for tests / advanced clients.
+    """
     last_user = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
     classification = classify(last_user)
+    # Prefer a saved Learning category override when present.
+    override = pref_store.lookup_classification(last_user)
+    if override and override.get("category"):
+        try:
+            route_category = RouteCategory(override["category"])
+        except ValueError:
+            route_category = classification.primary
+    else:
+        route_category = classification.primary
+
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
     profile = resolve_profile(req.routing_profile)
-    routes = score_routes(last_user or " ", classification.primary, profile)
     target_count = max(3, settings.aril_compare_model_count)
-    models = req.models or [r.model_id for r in routes[:target_count]]
-    # Deduplicate while preserving order
+
+    if req.models:
+        models = list(req.models)
+    else:
+        models = select_judge_models(
+            last_user or " ",
+            route_category,
+            profile=profile,
+            count=target_count,
+        )
+
+    # Deduplicate while preserving order; pad with capability peers if thin.
     seen: set[str] = set()
     models = [m for m in models if not (m in seen or seen.add(m))]
     if len(models) < target_count:
-        for mid in profile.values():
+        for mid in select_judge_models(
+            last_user or " ",
+            route_category,
+            profile=profile,
+            count=target_count * 2,
+        ):
             if mid not in seen:
                 models.append(mid)
                 seen.add(mid)
@@ -526,7 +618,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
     # the preferred user/assistant turn when the user picks Prefer.
     return CompareResponse(
         session_id=session_id,
-        route_category=classification.primary,
+        route_category=route_category,
         results=list(results),
         probe=probe_rows,
     )

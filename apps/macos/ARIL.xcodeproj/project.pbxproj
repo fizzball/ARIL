@@ -20,6 +20,7 @@
 		647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */; };
 		7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */; };
 		822BC840B98AADC146B3C60B /* OpenRouterModelBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */; };
+		8A11B01C01D000000000A001 /* HelpHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A11B01C01D000000000A002 /* HelpHint.swift */; };
 		8CC21960279B31457BD24A9C /* ARILAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */; };
 		90AE6789C0D39645F031E68E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 275830288881563C30E79654 /* Assets.xcassets */; };
 		9252747744954B4396BEC2B4 /* ARILGhostMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117873442667CB37A568D620 /* ARILGhostMark.swift */; };
@@ -50,6 +51,7 @@
 		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterModelBrowserView.swift; sourceTree = "<group>"; };
 		796899604D33C1CBC8518B48 /* ARILTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILTheme.swift; sourceTree = "<group>"; };
+		8A11B01C01D000000000A002 /* HelpHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpHint.swift; sourceTree = "<group>"; };
 		9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusFooterView.swift; sourceTree = "<group>"; };
 		9ECDA663B4CC8289E453914E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILAPIClient.swift; sourceTree = "<group>"; };
@@ -112,6 +114,7 @@
 				73F7258E2BF863107D0D1C2F /* ContentView.swift */,
 				F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */,
 				F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */,
+				8A11B01C01D000000000A002 /* HelpHint.swift */,
 				5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */,
 				32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */,
 				F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */,
@@ -237,6 +240,7 @@
 				4B8284C195B20A12359734B4 /* ContentView.swift in Sources */,
 				9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */,
 				D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */,
+				8A11B01C01D000000000A001 /* HelpHint.swift in Sources */,
 				43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */,
 				F379B2566042AEF3969B0C2D /* LearningView.swift in Sources */,
 				3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */,

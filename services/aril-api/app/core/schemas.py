@@ -117,6 +117,11 @@ class PreviewRequest(BaseModel):
     session_id: str | None = None
     routing_profile: RoutingProfile | None = None
     enhance_alternatives: bool = True
+    # When true and a Learning judgement matches, skip re-grading / LLM rewrite
+    # and reuse judgement (+ optional analysis-cache) to save tokens.
+    skip_analysis_on_judgement: bool = False
+    # After a full analysis (Redo), upsert the Learning judgement for this prompt.
+    update_judgement: bool = False
     # Optional Claude.md-style system prompt; counted toward token/cost estimates only.
     system_prompt: str | None = None
 
@@ -130,8 +135,9 @@ class PreviewResponse(BaseModel):
     cache: CacheInsight
     temperature: float
     route_mode: RouteMode
-    alternatives_source: Literal["none", "heuristic", "llm", "cache"] = "heuristic"
+    alternatives_source: Literal["none", "heuristic", "llm", "cache", "judgement"] = "heuristic"
     user_override: UserOverrideInsight | None = None
+    analysis_skipped: bool = False
 
 
 class ChatMessage(BaseModel):

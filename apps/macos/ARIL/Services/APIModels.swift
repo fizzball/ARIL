@@ -46,6 +46,8 @@ struct PreviewRequest: Encodable {
     let sessionId: String?
     let routingProfile: APIRoutingProfile?
     let enhanceAlternatives: Bool
+    let skipAnalysisOnJudgement: Bool
+    let updateJudgement: Bool
     let systemPrompt: String?
 
     enum CodingKeys: String, CodingKey {
@@ -55,6 +57,8 @@ struct PreviewRequest: Encodable {
         case sessionId = "session_id"
         case routingProfile = "routing_profile"
         case enhanceAlternatives = "enhance_alternatives"
+        case skipAnalysisOnJudgement = "skip_analysis_on_judgement"
+        case updateJudgement = "update_judgement"
         case systemPrompt = "system_prompt"
     }
 }
@@ -70,6 +74,7 @@ struct PreviewResponse: Codable, Equatable {
     let routeMode: RouteMode
     let alternativesSource: String?
     let userOverride: UserOverrideInsight?
+    let analysisSkipped: Bool?
 
     enum CodingKeys: String, CodingKey {
         case classification, grade, alternatives, routes, cache, temperature
@@ -77,6 +82,7 @@ struct PreviewResponse: Codable, Equatable {
         case routeMode = "route_mode"
         case alternativesSource = "alternatives_source"
         case userOverride = "user_override"
+        case analysisSkipped = "analysis_skipped"
     }
 }
 

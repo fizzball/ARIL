@@ -55,6 +55,8 @@ final class AppState: ObservableObject {
 
     /// Seconds of typing idle before prompt analysis runs (Preferences; 0…10, step 0.5).
     @Published var analysisIdleSeconds: Double = 2.0
+    /// When on, matching Learning judgements skip re-analysis / rewrite LLM (token saver).
+    @Published var skipAnalysisOnJudgement: Bool = true
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
@@ -89,6 +91,10 @@ final class AppState: ObservableObject {
     @Published var databaseCheckMessage: String?
     @Published var chatProvider: String = "stub"
     @Published var preview: PreviewResponse?
+    /// Draft text for which we last showed a judgement-skipped analysis (avoid re-runs).
+    private var lastJudgementSkipPrompt: String = ""
+    /// After Redo Analysis, keep the fresh full result until the draft changes.
+    private var pinnedFullAnalysisPrompt: String = ""
     @Published var analysisStatus: AnalysisStatus = .idle
     @Published var isPreviewing: Bool = false
     @Published var isSending: Bool = false
@@ -99,6 +105,8 @@ final class AppState: ObservableObject {
     @Published var showAbout: Bool = false
     @Published var lastError: String?
     @Published var compareResults: [CompareResultDTO] = []
+    /// Prompt capability category used to pick the 3 Judge peer models.
+    @Published var compareRouteCategory: RouteCategory?
     @Published var lastCacheLabel: String = "—"
     @Published var lastLatencyMs: Int?
     @Published var estimatedLatencyMs: Int?
@@ -200,6 +208,8 @@ final class AppState: ObservableObject {
         analysisIdleSeconds = Self.clampedIdleSeconds(
             defaults.object(forKey: "aril.analysisIdleSeconds") as? Double ?? 2.0
         )
+        skipAnalysisOnJudgement =
+            defaults.object(forKey: "aril.skipAnalysisOnJudgement") as? Bool ?? true
         mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
         mcpServers = Self.loadMCPServers()
         systemPromptEnabled = defaults.object(forKey: "aril.systemPromptEnabled") as? Bool ?? false
@@ -239,6 +249,14 @@ final class AppState: ObservableObject {
         let clamped = Self.clampedIdleSeconds(value)
         analysisIdleSeconds = clamped
         UserDefaults.standard.set(clamped, forKey: "aril.analysisIdleSeconds")
+    }
+
+    func setSkipAnalysisOnJudgement(_ enabled: Bool) {
+        skipAnalysisOnJudgement = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.skipAnalysisOnJudgement")
+        if analysisStatus == .ready || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            schedulePreview()
+        }
     }
 
     func setSystemPromptEnabled(_ enabled: Bool) {
@@ -600,6 +618,7 @@ final class AppState: ObservableObject {
         showIntelligencePanel = false
         analysisStatus = .idle
         compareResults = []
+        compareRouteCategory = nil
         preferredCompareModel = nil
         pendingAttachments = []
         saveLocalSessions()
@@ -619,6 +638,7 @@ final class AppState: ObservableObject {
             showIntelligencePanel = false
             analysisStatus = .idle
             compareResults = []
+            compareRouteCategory = nil
             preferredCompareModel = nil
             pendingAttachments = []
         }
@@ -642,6 +662,7 @@ final class AppState: ObservableObject {
         showIntelligencePanel = false
         analysisStatus = .idle
         compareResults = []
+        compareRouteCategory = nil
         preferredCompareModel = nil
         pendingAttachments = []
         saveLocalSessions()
@@ -935,6 +956,7 @@ final class AppState: ObservableObject {
         showIntelligencePanel = false
         analysisStatus = .idle
         compareResults = []
+        compareRouteCategory = nil
         preferredCompareModel = nil
         estimatedLatencyMs = nil
         lastError = nil
@@ -950,13 +972,40 @@ final class AppState: ObservableObject {
         guard text.count >= 3 else {
             showIntelligencePanel = false
             preview = nil
+            lastJudgementSkipPrompt = ""
+            pinnedFullAnalysisPrompt = ""
             analysisStatus = .idle
             estimatedLatencyMs = nil
             return
         }
 
+        // Fresh Redo Analysis result should stick until the draft changes.
+        if text == pinnedFullAnalysisPrompt,
+           preview != nil,
+           preview?.analysisSkipped != true,
+           analysisStatus == .ready {
+            showIntelligencePanel = true
+            return
+        }
+
+        // Same judged prompt already showing skipped metrics — don't re-animate analysis.
+        if skipAnalysisOnJudgement,
+           text == lastJudgementSkipPrompt,
+           preview?.analysisSkipped == true,
+           analysisStatus == .ready {
+            showIntelligencePanel = true
+            return
+        }
+
+        if text != pinnedFullAnalysisPrompt {
+            pinnedFullAnalysisPrompt = ""
+        }
+
         showIntelligencePanel = true
-        preview = nil
+        // Keep prior skipped metrics visible during the idle wait when re-typing briefly.
+        if preview?.analysisSkipped != true || text != lastJudgementSkipPrompt {
+            preview = nil
+        }
         estimatedLatencyMs = nil
         let idle = analysisIdleSeconds
         analysisStatus = .analysing(secondsRemaining: idle)
@@ -982,7 +1031,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    func runPreview() async {
+    func runPreview(forceFullAnalysis: Bool = false, updateJudgement: Bool = false) async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         isPreviewing = true
@@ -990,6 +1039,7 @@ final class AppState: ObservableObject {
         lastError = nil
         defer { isPreviewing = false }
         do {
+            let skip = forceFullAnalysis ? false : skipAnalysisOnJudgement
             let result = try await client.preview(
                 baseURL: gatewayURL,
                 request: PreviewRequest(
@@ -1000,12 +1050,24 @@ final class AppState: ObservableObject {
                     sessionId: selectedSessionID?.uuidString.lowercased(),
                     routingProfile: APIRoutingProfile(routingProfile),
                     enhanceAlternatives: true,
+                    skipAnalysisOnJudgement: skip,
+                    updateJudgement: updateJudgement,
                     systemPrompt: activeSystemPromptForAPI
                 )
             )
             preview = result
             showIntelligencePanel = true
             analysisStatus = .ready
+            if result.analysisSkipped == true {
+                lastJudgementSkipPrompt = text
+                pinnedFullAnalysisPrompt = ""
+            } else if updateJudgement || forceFullAnalysis {
+                lastJudgementSkipPrompt = ""
+                pinnedFullAnalysisPrompt = text
+            } else {
+                lastJudgementSkipPrompt = ""
+                pinnedFullAnalysisPrompt = ""
+            }
             updateCacheLabel(from: result)
             // Auto adopts the recommended model. Manual/Compare keep the user's pick
             // (still run analysis for grade, fit, cost, alternatives).
@@ -1014,10 +1076,22 @@ final class AppState: ObservableObject {
                 objectWillChange.send()
             }
             await refreshEstimatedLatency(for: result.recommendedModel)
+            if updateJudgement {
+                await loadClassifications()
+                await loadStoreBrowser()
+            }
         } catch {
             lastError = error.localizedDescription
             analysisStatus = .idle
         }
+    }
+
+    /// Force a fresh grade/route analysis. Updates Learning only outside Manual.
+    func redoAnalysis() async {
+        lastJudgementSkipPrompt = ""
+        pinnedFullAnalysisPrompt = ""
+        let writeJudgement = routeMode != .manual
+        await runPreview(forceFullAnalysis: true, updateJudgement: writeJudgement)
     }
 
     private func refreshEstimatedLatency(for model: String) async {
@@ -1142,33 +1216,12 @@ final class AppState: ObservableObject {
         let attachmentsForSend = pendingAttachments
         pendingAttachments = []
         let lockedManualModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
-        let compareModels: [String] = {
-            var picks: [String] = []
-            if let routes = preview?.routes {
-                for route in routes where !picks.contains(route.modelId) {
-                    picks.append(route.modelId)
-                    if picks.count >= 3 { break }
-                }
-            }
-            let fallbacks = [
-                routeMode == .manual ? lockedManualModel : selectedModel,
-                routingProfile.coding,
-                routingProfile.cost,
-                routingProfile.reasoning,
-                routingProfile.confidence,
-                defaultModel,
-            ]
-            for mid in fallbacks where !picks.contains(mid) {
-                picks.append(mid)
-                if picks.count >= 3 { break }
-            }
-            return Array(picks.prefix(3))
-        }()
         let cacheEligible = preview?.cache.eligible ?? false
         preview = nil
         showIntelligencePanel = false
         analysisStatus = .idle
         compareResults = []
+        compareRouteCategory = nil
         preferredCompareModel = nil
         lastCacheLabel = cacheEligible ? "not cached" : "not eligible"
 
@@ -1177,7 +1230,8 @@ final class AppState: ObservableObject {
         if Task.isCancelled { return }
 
         if routeMode == .compare {
-            await sendCompare(sessionID: sid, index: idx, history: historyForAPI, models: compareModels)
+            // Server classifies the prompt and picks 1 profile model + 2 capability peers.
+            await sendCompare(sessionID: sid, index: idx, history: historyForAPI)
             return
         }
 
@@ -1350,7 +1404,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func sendCompare(sessionID: UUID, index: Int, history: [APIChatMessage], models: [String]) async {
+    private func sendCompare(sessionID: UUID, index: Int, history: [APIChatMessage]) async {
         generationPhase = .thinking
         let promptText = history.last(where: { $0.role == "user" })?.content ?? lastUserPromptForPrefer
         do {
@@ -1358,7 +1412,7 @@ final class AppState: ObservableObject {
                 baseURL: gatewayURL,
                 request: CompareRequestDTO(
                     messages: history,
-                    models: models,
+                    models: nil,
                     temperature: temperature,
                     routingProfile: APIRoutingProfile(routingProfile),
                     sessionId: sessionID.uuidString.lowercased(),
@@ -1369,6 +1423,7 @@ final class AppState: ObservableObject {
             if Task.isCancelled { return }
             generationPhase = .streaming
             compareResults = response.results
+            compareRouteCategory = response.routeCategory
             compareCategoryDraft = [:]
             compareAccuracyDraft = [:]
             for result in response.results {
@@ -1381,6 +1436,7 @@ final class AppState: ObservableObject {
             if let fastest = response.results.map(\.latencyMs).min() {
                 lastLatencyMs = fastest
             }
+            let modelList = response.results.map(\.model).joined(separator: ", ")
             let summary = response.results.map { result in
                 let preview = String(result.content.prefix(240))
                 return "[\(shortModelLeaf(result.model))] \(preview)"
@@ -1388,7 +1444,7 @@ final class AppState: ObservableObject {
             recordExchange(
                 prompt: promptText,
                 response: summary,
-                model: models.joined(separator: ", "),
+                model: modelList,
                 mode: RouteMode.compare.label,
                 status: .compare,
                 latencyMs: lastLatencyMs
@@ -1401,7 +1457,7 @@ final class AppState: ObservableObject {
                 recordExchange(
                     prompt: promptText,
                     response: "",
-                    model: models.joined(separator: ", "),
+                    model: "judge-peers",
                     mode: RouteMode.compare.label,
                     status: .error,
                     errorMessage: error.localizedDescription
@@ -1550,6 +1606,7 @@ final class AppState: ObservableObject {
         }
 
         compareResults = []
+        compareRouteCategory = nil
         preferredCompareModel = result.model
         routeMode = .auto
         draft = ""
