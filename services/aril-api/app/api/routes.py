@@ -26,6 +26,7 @@ from app.core.schemas import (
     CompareResult,
     ModelPricingResponse,
     OpenRouterCatalogResponse,
+    OpenRouterConnectionStatus,
     OpenRouterKeyStatus,
     OpenRouterKeyUpdate,
     PreferRequest,
@@ -91,12 +92,15 @@ def _auto_judgement_after_send(
     category: str,
     model: str,
     route_mode: RouteMode,
+    skip: bool = False,
 ) -> None:
     """First successful Auto (or Compare) send seeds Learning like Prefer would.
 
     Manual mode never writes judgements — the locked model is not a routing opinion.
+    Early Enter (before analysis idle) also skips so Learning is not seeded from
+    an un-analysed prompt.
     """
-    if route_mode == RouteMode.manual:
+    if skip or route_mode == RouteMode.manual:
         return
     try:
         pref_store.ensure_auto_judgement(
@@ -326,6 +330,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         category=classification.primary.value,
         model=result.model,
         route_mode=req.route_mode,
+        skip=req.skip_auto_judgement,
     )
     return ChatResponse(
         session_id=session_id,
@@ -401,6 +406,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     category=classification.primary.value,
                     model=str(meta["model"]),
                     route_mode=req.route_mode,
+                    skip=req.skip_auto_judgement,
                 )
                 yield f"event: done\ndata: {json.dumps(meta)}\n\n"
                 return
@@ -523,6 +529,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             category=classification.primary.value,
             model=str(meta.get("model") or model),
             route_mode=req.route_mode,
+            skip=req.skip_auto_judgement,
         )
         yield f"event: done\ndata: {json.dumps(meta)}\n\n"
 
@@ -803,6 +810,12 @@ async def openrouter_key_put(req: OpenRouterKeyUpdate) -> OpenRouterKeyStatus:
 @router.delete("/settings/openrouter-key", response_model=OpenRouterKeyStatus)
 async def openrouter_key_delete() -> OpenRouterKeyStatus:
     return OpenRouterKeyStatus(**key_store.clear_api_key())
+
+
+@router.post("/settings/openrouter-key/check", response_model=OpenRouterConnectionStatus)
+async def openrouter_key_check() -> OpenRouterConnectionStatus:
+    """Validate the stored OpenRouter API key (Preferences → Check connection)."""
+    return OpenRouterConnectionStatus(**await key_store.check_connection())
 
 
 @router.get("/models/pricing", response_model=ModelPricingResponse)

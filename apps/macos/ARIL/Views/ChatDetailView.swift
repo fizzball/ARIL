@@ -46,11 +46,6 @@ struct ChatDetailView: View {
             .animation(.easeInOut(duration: 0.28), value: isEmpty)
             .animation(.easeInOut(duration: 0.25), value: state.compareResults.count)
         }
-        .sheet(isPresented: $state.showAbout) {
-            AboutView()
-                .environmentObject(state)
-                .environmentObject(theme)
-        }
         .sheet(isPresented: $state.showRoutingAnalysis) {
             RoutingAnalysisView()
                 .environmentObject(state)

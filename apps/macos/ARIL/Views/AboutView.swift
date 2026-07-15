@@ -3,20 +3,19 @@ import SwiftUI
 struct AboutView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 16) {
                 ARILGhostMark(color: theme.palette.accent, lineWidth: 2.2)
-                    .frame(width: 72, height: 72)
+                    .frame(width: 56, height: 56)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("ARIL")
-                        .font(ARILTheme.wordmarkFont)
+                        .font(ARILTheme.bodyFont.weight(.semibold))
                         .foregroundStyle(theme.palette.text)
                     Text("Adaptive Routing Intelligence Layer")
-                        .font(ARILTheme.bodyFont)
+                        .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.accent)
                     Text("Version \(state.appVersionString) | by Ramon Ali")
                         .font(ARILTheme.captionFont)
@@ -24,16 +23,20 @@ struct AboutView: View {
                 }
                 Spacer()
                 Button {
-                    dismiss()
+                    state.closeToolPanel()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(theme.palette.textMuted)
                 }
                 .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Close")
             }
-            .padding(24)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
 
-            Divider().background(theme.palette.hairline)
+            Divider().overlay(theme.palette.hairline)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -56,10 +59,11 @@ struct AboutView: View {
 
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(24)
+                .padding(16)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 460, height: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.backgroundElevated)
     }
 
@@ -69,6 +73,17 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.12", changes: [
+            "Enter during analysis idle: send immediately and skip Learning judgement writes",
+        ]),
+        ChangelogEntry(version: "0.3.11", changes: [
+            "Status bar: OpenRouter available credits when the API reports them",
+            "Toolbar tools (Preferences, Model costs, Learning, About) open as matching themed right flyouts",
+        ]),
+        ChangelogEntry(version: "0.3.10", changes: [
+            "Preferences: Check OpenRouter connection after saving an API key",
+            "Status bar: OpenRouter ready / not ready / not configured beside Gateway and Database",
+        ]),
         ChangelogEntry(version: "0.3.9", changes: [
             "Title bar: live CPU, memory, and disk use percentages",
             "Chat: recover empty/failed streams; MCP Preferences locked (URL + API key backlog)",

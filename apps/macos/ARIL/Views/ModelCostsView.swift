@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Popover listing selected routing-model rates and optional Web Search fee.
+/// Trailing flyout listing selected routing-model rates and optional Web Search fee.
 struct ModelCostsView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
@@ -43,7 +43,7 @@ struct ModelCostsView: View {
                         .controlSize(.small)
                 }
                 Button {
-                    state.showModelCosts = false
+                    state.closeToolPanel()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16, weight: .semibold))
@@ -92,11 +92,11 @@ struct ModelCostsView: View {
                 }
                 .padding(.trailing, 10)
             }
-            .frame(maxHeight: 360)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(16)
         .padding(.trailing, 4)
-        .frame(width: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.backgroundElevated)
         .task {
             await state.refreshModelPricing(forceRefresh: false)

@@ -23,6 +23,28 @@ enum GenerationPhase: Equatable {
     }
 }
 
+/// Trailing flyout opened from the toolbar / Preferences command.
+enum ToolPanel: String, Identifiable, Equatable {
+    case preferences
+    case modelCosts
+    case learning
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .preferences: return "Preferences"
+        case .modelCosts: return "Model costs"
+        case .learning: return "Learning"
+        case .about: return "About ARIL"
+        }
+    }
+
+    /// Shared flyout width for every tools panel.
+    static let flyoutWidth: CGFloat = 560
+}
+
 @MainActor
 final class AppState: ObservableObject {
     static let modelCatalog = [
@@ -102,7 +124,8 @@ final class AppState: ObservableObject {
     @Published var generationElapsedMs: Int = 0
     @Published var routingProfile: RoutingProfile = AppState.loadRoutingProfile()
     @Published var showIntelligencePanel: Bool = false
-    @Published var showAbout: Bool = false
+    /// Single trailing tools flyout (Preferences, Model Costs, Learning, About).
+    @Published var activeToolPanel: ToolPanel?
     @Published var lastError: String?
     @Published var compareResults: [CompareResultDTO] = []
     /// Prompt capability category used to pick the 3 Judge peer models.
@@ -116,8 +139,6 @@ final class AppState: ObservableObject {
     @Published var userDisplayName: String
     @Published var showRoutingAnalysis: Bool = false
     @Published var showExchangeLog: Bool = false
-    @Published var showLearning: Bool = false
-    @Published var showModelCosts: Bool = false
     @Published var exchangeLog: [ExchangeLogEntry] = []
     @Published var classifications: [ClassificationRecordDTO] = []
     @Published var storeRecords: [StoreRecordDTO] = []
@@ -130,6 +151,11 @@ final class AppState: ObservableObject {
     @Published var openRouterKeyDraft: String = ""
     @Published var isEditingOpenRouterKey: Bool = false
     @Published var openRouterKeyMessage: String?
+    /// Result of Preferences → OpenRouter “Check connection” / main footer status.
+    @Published var openRouterReady: Bool = false
+    @Published var openRouterStatus: String = "OpenRouter not configured"
+    @Published var openRouterCheckMessage: String?
+    @Published var openRouterCreditsRemaining: Double?
     /// OpenRouter USD / 1K token rates keyed by model id (used in Preferences + analysis).
     @Published var modelPricingByID: [String: ModelPricingDTO] = [:]
     @Published var isLoadingModelPricing: Bool = false
@@ -163,7 +189,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.9"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.12"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "35"
         return "\(short) (\(build))"
     }
@@ -668,15 +694,12 @@ final class AppState: ObservableObject {
             chatProvider = health.chatProvider ?? "unknown"
             openRouterConfigured = health.openrouterConfigured == true
             if health.gateway == "ready" {
-                if openRouterConfigured {
-                    gatewayStatus = "Gateway ready"
-                } else {
-                    gatewayStatus = "API key required"
-                }
+                gatewayStatus = "Gateway ready"
             } else {
                 gatewayStatus = health.status
             }
             await refreshOpenRouterKeyStatus()
+            await refreshOpenRouterStatus()
             await refreshDatabaseStatus()
             // Reload history once the gateway becomes available after a cold start.
             // Skipped during bootstrap (which already loads sessions) to avoid races
@@ -691,6 +714,7 @@ final class AppState: ObservableObject {
             gatewayStatus = soloMode ? "Starting gateway…" : "Gateway offline"
             chatProvider = "offline"
             openRouterConfigured = false
+            markOpenRouterUnavailable(reason: "Gateway offline")
             markDatabaseUnavailable(reason: "Gateway offline")
         }
     }
@@ -755,10 +779,71 @@ final class AppState: ObservableObject {
                 openRouterKeyDraft = ""
             } else {
                 isEditingOpenRouterKey = true
+                markOpenRouterUnavailable(reason: "No OpenRouter API key configured.")
             }
         } catch {
             // Keep last known status if gateway briefly unavailable
         }
+    }
+
+    /// Probe OpenRouter when a key is present (health refresh + footer).
+    func refreshOpenRouterStatus() async {
+        guard openRouterConfigured else {
+            markOpenRouterUnavailable(reason: "No OpenRouter API key configured.")
+            return
+        }
+        do {
+            let status = try await client.checkOpenRouterConnection(baseURL: gatewayURL)
+            applyOpenRouterConnectionStatus(status)
+        } catch {
+            markOpenRouterUnavailable(reason: error.localizedDescription)
+        }
+    }
+
+    /// Preferences → OpenRouter "Check connection" action.
+    func checkOpenRouterConnection() async {
+        openRouterCheckMessage = nil
+        guard openRouterConfigured else {
+            markOpenRouterUnavailable(reason: "Save an OpenRouter API key first.")
+            openRouterCheckMessage = openRouterStatus
+            return
+        }
+        do {
+            let status = try await client.checkOpenRouterConnection(baseURL: gatewayURL)
+            applyOpenRouterConnectionStatus(status)
+            openRouterCheckMessage = status.message
+        } catch {
+            markOpenRouterUnavailable(reason: error.localizedDescription)
+            openRouterCheckMessage = error.localizedDescription
+        }
+    }
+
+    private func applyOpenRouterConnectionStatus(_ status: OpenRouterConnectionStatusDTO) {
+        openRouterReady = status.ready
+        openRouterConfigured = status.configured
+        if !status.maskedKey.isEmpty {
+            openRouterMaskedKey = status.maskedKey
+        }
+        openRouterCreditsRemaining = status.ready ? status.creditsRemaining : nil
+        if status.ready {
+            if let credits = status.creditsRemaining {
+                openRouterStatus = String(format: "OpenRouter ready (credits $%.2f)", credits)
+            } else {
+                openRouterStatus = "OpenRouter ready"
+            }
+        } else {
+            openRouterStatus = "OpenRouter not ready"
+        }
+        if !status.message.isEmpty {
+            openRouterCheckMessage = status.message
+        }
+    }
+
+    private func markOpenRouterUnavailable(reason: String) {
+        openRouterReady = false
+        openRouterCreditsRemaining = nil
+        openRouterStatus = openRouterConfigured ? "OpenRouter not ready" : "OpenRouter not configured"
+        openRouterCheckMessage = reason
     }
 
     func saveOpenRouterKey() async {
@@ -775,6 +860,10 @@ final class AppState: ObservableObject {
             openRouterKeyDraft = ""
             isEditingOpenRouterKey = false
             openRouterKeyMessage = "API key saved."
+            openRouterStatus = "OpenRouter not ready"
+            openRouterReady = false
+            openRouterCreditsRemaining = nil
+            openRouterCheckMessage = nil
             UserDefaults.standard.set(key, forKey: "aril.openRouterAPIKey")
             await refreshHealth()
             await refreshModelPricing(forceRefresh: true)
@@ -794,6 +883,7 @@ final class AppState: ObservableObject {
             openRouterKeyDraft = ""
             isEditingOpenRouterKey = true
             openRouterKeyMessage = "API key cleared. Add a key to use live models."
+            markOpenRouterUnavailable(reason: "API key cleared. Add a key to use live models.")
             UserDefaults.standard.removeObject(forKey: "aril.openRouterAPIKey")
             applyDefaultModelPricing()
             await refreshHealth()
@@ -806,6 +896,20 @@ final class AppState: ObservableObject {
         isEditingOpenRouterKey = true
         openRouterKeyDraft = ""
         openRouterKeyMessage = nil
+        openRouterCheckMessage = nil
+    }
+
+    /// Toggle a trailing tools flyout; opening one closes any other.
+    func openToolPanel(_ panel: ToolPanel) {
+        if activeToolPanel == panel {
+            activeToolPanel = nil
+        } else {
+            activeToolPanel = panel
+        }
+    }
+
+    func closeToolPanel() {
+        activeToolPanel = nil
     }
 
     func loadSessions(retryCount: Int = 1) async {
@@ -1082,6 +1186,9 @@ final class AppState: ObservableObject {
 
     func send(promptOverride: String? = nil) {
         sendTask?.cancel()
+        // Stop idle analysis countdown / queued preview before we possibly skip it.
+        previewTask?.cancel()
+        previewTask = nil
         // Show stop control immediately — including during pre-send analysis.
         isSending = true
         lastError = nil
@@ -1158,7 +1265,21 @@ final class AppState: ObservableObject {
             draft = text
         }
 
-        if !text.isEmpty, (preview == nil || analysisStatus != .ready) {
+        // Enter during the idle countdown: skip classify/preview and judgement logging.
+        let interruptedIdleAnalysis: Bool = {
+            if case .analysing(let remaining) = analysisStatus {
+                return remaining > 0
+            }
+            return false
+        }()
+
+        if interruptedIdleAnalysis {
+            isPreviewing = false
+            preview = nil
+            showIntelligencePanel = false
+            analysisStatus = .idle
+            estimatedLatencyMs = nil
+        } else if !text.isEmpty, (preview == nil || analysisStatus != .ready) {
             await runPreview()
             if Task.isCancelled {
                 return
@@ -1238,7 +1359,8 @@ final class AppState: ObservableObject {
             previewId: nil,
             routingProfile: APIRoutingProfile(routingProfile),
             attachments: attachmentDTOs,
-            webSearch: webSearchEnabled
+            webSearch: webSearchEnabled,
+            skipAutoJudgement: interruptedIdleAnalysis
         )
 
         // Stream token UI updates are async; track receipt so we never fall back to

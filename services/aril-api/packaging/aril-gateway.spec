@@ -42,6 +42,7 @@ a = Analysis(
         "app.main",
         "app.api.routes",
         "multipart",
+        "eval_type_backport",
     ],
     hookspath=[],
     hooksconfig={},

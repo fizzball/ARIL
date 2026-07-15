@@ -178,3 +178,15 @@ def test_models_list():
     r = client.get("/v1/models")
     assert r.status_code == 200
     assert len(r.json()["models"]) >= 3
+
+
+def test_openrouter_key_check_without_key(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "openrouter_api_key", "")
+    r = client.post("/v1/settings/openrouter-key/check")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ready"] is False
+    assert body["configured"] is False
+    assert "No OpenRouter API key" in body["message"]

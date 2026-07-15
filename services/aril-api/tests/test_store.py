@@ -20,6 +20,8 @@ def isolated_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     config.settings.aril_data_dir = str(tmp_path)
     config.settings.aril_sqlite_retention = 3
+    # Use stub provider so chat tests don’t require a live OpenRouter key.
+    config.settings.openrouter_api_key = ""
     store.reset_connection()
     yield tmp_path
     store.reset_connection()
@@ -204,6 +206,32 @@ def test_chat_manual_does_not_write_judgement(client: TestClient):
             "messages": [{"role": "user", "content": prompt}],
             "route_mode": "manual",
             "model": "openai/gpt-4.1-mini",
+        },
+    )
+    assert send.status_code == 200
+
+    after = client.post(
+        "/v1/preview",
+        json={"prompt": prompt, "enhance_alternatives": False},
+    ).json()
+    assert after.get("user_override") is None
+
+
+def test_chat_skip_auto_judgement_flag(client: TestClient):
+    prompt = "Explain unique token skipautojudgementgamma early enter without analyse"
+    before = client.post(
+        "/v1/preview",
+        json={"prompt": prompt, "enhance_alternatives": False},
+    ).json()
+    assert before.get("user_override") is None
+
+    send = client.post(
+        "/v1/chat",
+        json={
+            "messages": [{"role": "user", "content": prompt}],
+            "route_mode": "auto",
+            "model": "openai/gpt-4.1-mini",
+            "skip_auto_judgement": True,
         },
     )
     assert send.status_code == 200

@@ -163,6 +163,8 @@ class ChatRequest(BaseModel):
     stream: bool = False
     attachments: list[Attachment] = Field(default_factory=list)
     web_search: bool = False
+    # Enter before analysis idle timer — chat normally but do not seed Learning.
+    skip_auto_judgement: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -338,6 +340,20 @@ class OpenRouterKeyStatus(BaseModel):
     configured: bool
     masked_key: str = ""
     required: bool = True
+
+
+class OpenRouterConnectionStatus(BaseModel):
+    """Result of Preferences → OpenRouter “Check connection”."""
+
+    ready: bool
+    configured: bool
+    masked_key: str = ""
+    latency_ms: int | None = None
+    message: str = ""
+    checked_at: str | None = None
+    # Remaining USD when OpenRouter reports account balance or a key limit.
+    credits_remaining: float | None = None
+    credits_source: str | None = None
 
 
 class ModelPricing(BaseModel):

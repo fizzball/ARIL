@@ -27,15 +27,15 @@ struct ARILApp: App {
             }
             CommandGroup(replacing: .appInfo) {
                 Button("About ARIL") {
-                    appState.showAbout = true
+                    appState.openToolPanel(.about)
                 }
             }
-        }
-
-        Settings {
-            SettingsView()
-                .environmentObject(appState)
-                .environmentObject(theme)
+            CommandGroup(replacing: .appSettings) {
+                Button("Preferences…") {
+                    appState.openToolPanel(.preferences)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }

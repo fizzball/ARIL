@@ -202,6 +202,8 @@ struct ChatRequest: Encodable {
     let routingProfile: APIRoutingProfile?
     let attachments: [AttachmentDTO]
     let webSearch: Bool
+    /// Enter before analysis idle timer — chat normally but do not seed Learning.
+    let skipAutoJudgement: Bool
 
     enum CodingKeys: String, CodingKey {
         case messages, model, temperature, attachments
@@ -211,6 +213,7 @@ struct ChatRequest: Encodable {
         case previewId = "preview_id"
         case routingProfile = "routing_profile"
         case webSearch = "web_search"
+        case skipAutoJudgement = "skip_auto_judgement"
     }
 }
 
@@ -537,6 +540,26 @@ struct OpenRouterKeyStatusDTO: Codable {
     enum CodingKeys: String, CodingKey {
         case configured, required
         case maskedKey = "masked_key"
+    }
+}
+
+struct OpenRouterConnectionStatusDTO: Codable, Equatable {
+    let ready: Bool
+    let configured: Bool
+    let maskedKey: String
+    let latencyMs: Int?
+    let message: String
+    let checkedAt: String?
+    let creditsRemaining: Double?
+    let creditsSource: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ready, configured, message
+        case maskedKey = "masked_key"
+        case latencyMs = "latency_ms"
+        case checkedAt = "checked_at"
+        case creditsRemaining = "credits_remaining"
+        case creditsSource = "credits_source"
     }
 }
 

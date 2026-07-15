@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
@@ -14,41 +13,53 @@ struct SettingsView: View {
     @State private var showMCPBacklogAlert = false
 
     var body: some View {
-        TabView {
-            gatewayTab
-                .tabItem { Label("General", systemImage: "gearshape") }
-            systemPromptTab
-                .tabItem { Label("System Prompt", systemImage: "doc.plaintext") }
-            routingTab
-                .tabItem { Label("Models", systemImage: "cpu") }
-            mcpTab
-                .tabItem { Label("MCP", systemImage: "server.rack") }
-            logAnalysisTab
-                .tabItem { Label("Log Analysis", systemImage: "doc.text.magnifyingglass") }
-            appearanceTab
-                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+        VStack(spacing: 0) {
+            HStack {
+                Text("Preferences")
+                    .font(ARILTheme.bodyFont.weight(.semibold))
+                    .foregroundStyle(theme.palette.text)
+                Spacer()
+                Button {
+                    state.closeToolPanel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Close")
+                .accessibilityLabel("Close")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            Divider().overlay(theme.palette.hairline)
+
+            TabView {
+                gatewayTab
+                    .tabItem { Label("General", systemImage: "gearshape") }
+                systemPromptTab
+                    .tabItem { Label("System Prompt", systemImage: "doc.plaintext") }
+                routingTab
+                    .tabItem { Label("Models", systemImage: "cpu") }
+                mcpTab
+                    .tabItem { Label("MCP", systemImage: "server.rack") }
+                logAnalysisTab
+                    .tabItem { Label("Log Analysis", systemImage: "doc.text.magnifyingglass") }
+                appearanceTab
+                    .tabItem { Label("Appearance", systemImage: "paintpalette") }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 720, height: 700)
-        .navigationTitle("Preferences")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.palette.backgroundElevated)
+        .preferredColorScheme(theme.palette.colorScheme)
         .task {
-            Self.renameSettingsWindow()
             await state.refreshDatabaseStatus()
         }
         .onAppear {
-            Self.renameSettingsWindow()
             Task { await state.refreshDatabaseStatus() }
-        }
-    }
-
-    /// macOS Settings scene defaults to "Settings"; prefer "Preferences".
-    private static func renameSettingsWindow() {
-        DispatchQueue.main.async {
-            for window in NSApplication.shared.windows {
-                let title = window.title
-                if title == "Settings" || title == "ARIL Settings" || title.hasSuffix("Settings") {
-                    window.title = "Preferences"
-                }
-            }
         }
     }
 
@@ -68,7 +79,7 @@ struct SettingsView: View {
                             .truncationMode(.middle)
                         Spacer()
                         Text("Configured")
-                            .foregroundStyle(Color.green)
+                            .foregroundStyle(theme.palette.accent)
                     }
                     HStack {
                         Button("Update key") {
@@ -78,12 +89,24 @@ struct SettingsView: View {
                             Task { await state.clearOpenRouterKey() }
                         }
                     }
+                    HStack {
+                        Button("Check connection") {
+                            Task { await state.checkOpenRouterConnection() }
+                        }
+                        Text(state.openRouterReady ? "Connected" : "Not connected")
+                            .foregroundStyle(state.openRouterReady ? theme.palette.accent : theme.palette.danger)
+                    }
+                    if let checkMsg = state.openRouterCheckMessage {
+                        Text(checkMsg)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     // Spacer row to separate key actions from the next section
                     Color.clear.frame(height: 12)
                 } else {
                     if !state.openRouterConfigured {
                         Text("No API key configured — enter one to enable OpenRouter.")
-                            .foregroundStyle(Color.red)
+                            .foregroundStyle(theme.palette.danger)
                     }
                     SecureField("sk-or-v1-…", text: $state.openRouterKeyDraft)
                     HStack {
@@ -135,7 +158,7 @@ struct SettingsView: View {
                         Task { await state.refreshHealth() }
                     }
                     Text(state.gatewayReady ? "Gateway ready" : "Gateway not ready")
-                        .foregroundStyle(state.gatewayReady ? Color.green : Color.red)
+                        .foregroundStyle(state.gatewayReady ? theme.palette.accent : theme.palette.danger)
                 }
             }
 
@@ -169,7 +192,7 @@ struct SettingsView: View {
                         Task { await state.checkDatabase() }
                     }
                     Text(state.databaseReady ? "Database ready" : "Database not ready")
-                        .foregroundStyle(state.databaseReady ? Color.green : Color.red)
+                        .foregroundStyle(state.databaseReady ? theme.palette.accent : theme.palette.danger)
                 }
                 if let msg = state.databaseCheckMessage {
                     Text(msg)

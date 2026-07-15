@@ -41,7 +41,6 @@ private enum StoreBrowserFilter: String, CaseIterable, Identifiable {
 struct LearningView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
-    @Environment(\.dismiss) private var dismiss
     @State private var storeFilter: StoreBrowserFilter = .activity
 
     private var filteredRecords: [StoreRecordDTO] {
@@ -52,22 +51,24 @@ struct LearningView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Label("Learning", systemImage: "brain")
-                    .font(ARILTheme.wordmarkFont)
+                    .font(ARILTheme.bodyFont.weight(.semibold))
                     .foregroundStyle(theme.palette.text)
                 Spacer()
                 Button {
-                    dismiss()
+                    state.closeToolPanel()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(theme.palette.textMuted)
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
                 .help("Close")
             }
-            .padding(20)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
 
-            Divider().background(theme.palette.hairline)
+            Divider().overlay(theme.palette.hairline)
 
             Form {
                 Section("Local SQLite store") {
@@ -155,7 +156,7 @@ struct LearningView: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 12)
         }
-        .frame(width: 720, height: 640)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.backgroundElevated)
         .task {
             await state.loadStoreBrowser()

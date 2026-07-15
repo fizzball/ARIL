@@ -12,9 +12,7 @@ struct StatusFooterView: View {
             Text(state.gatewayStatus)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(
-                    state.gatewayReady && !state.openRouterConfigured
-                        ? theme.palette.danger
-                        : theme.palette.textMuted
+                    state.gatewayReady ? theme.palette.textMuted : theme.palette.danger
                 )
 
             Circle()
@@ -26,6 +24,28 @@ struct StatusFooterView: View {
                     state.databaseReady ? theme.palette.textMuted : theme.palette.danger
                 )
                 .help(state.databasePath.isEmpty ? state.databaseDetail : state.databasePath)
+
+            Circle()
+                .fill(state.openRouterReady ? theme.palette.accent : theme.palette.danger)
+                .frame(width: 6, height: 6)
+            Text(state.openRouterStatus)
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(
+                    state.openRouterReady ? theme.palette.textMuted : theme.palette.danger
+                )
+                .help({
+                    var parts: [String] = []
+                    if let msg = state.openRouterCheckMessage, !msg.isEmpty {
+                        parts.append(msg)
+                    }
+                    if let credits = state.openRouterCreditsRemaining {
+                        parts.append(String(format: "Credits $%.2f", credits))
+                    }
+                    if !state.openRouterMaskedKey.isEmpty {
+                        parts.append(state.openRouterMaskedKey)
+                    }
+                    return parts.isEmpty ? "OpenRouter" : parts.joined(separator: " · ")
+                }())
 
             if state.lastCacheLabel == "cached" || state.lastCacheLabel == "not cached" {
                 Text(state.lastCacheLabel)
@@ -62,7 +82,7 @@ struct StatusFooterView: View {
             Text(state.routeMode.label)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted)
-            Text("# v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.2")")
+            Text("# v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.12")")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted.opacity(0.7))
         }

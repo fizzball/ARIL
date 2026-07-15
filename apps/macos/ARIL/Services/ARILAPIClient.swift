@@ -201,6 +201,15 @@ final class ARILAPIClient {
         return try decode(data)
     }
 
+    func checkOpenRouterConnection(baseURL: String) async throws -> OpenRouterConnectionStatusDTO {
+        var req = URLRequest(url: try url(baseURL, path: "/v1/settings/openrouter-key/check"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: req)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
     func modelPricing(
         baseURL: String,
         modelIDs: [String],

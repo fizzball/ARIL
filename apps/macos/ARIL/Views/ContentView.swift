@@ -4,67 +4,75 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
-    @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @StateObject private var systemMetrics = SystemMetricsMonitor()
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
-        } detail: {
-            VStack(spacing: 0) {
-                if state.gatewayReady && !state.openRouterConfigured {
-                    HStack(spacing: 10) {
-                        Image(systemName: "key.fill")
-                        Text("OpenRouter API key required — add it in Preferences to enable live models.")
-                            .font(ARILTheme.captionFont)
-                        Spacer()
-                        Button("Open Preferences") {
-                            openSettings()
+        HStack(spacing: 0) {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView()
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+            } detail: {
+                VStack(spacing: 0) {
+                    if state.gatewayReady && !state.openRouterConfigured {
+                        HStack(spacing: 10) {
+                            Image(systemName: "key.fill")
+                            Text("OpenRouter API key required — add it in Preferences to enable live models.")
+                                .font(ARILTheme.captionFont)
+                            Spacer()
+                            Button("Open Preferences") {
+                                state.openToolPanel(.preferences)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .tint(theme.palette.accentStrong)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(theme.palette.accentStrong)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(theme.palette.danger.opacity(0.92))
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(theme.palette.danger.opacity(0.92))
-                }
 
-                ChatDetailView()
+                    ChatDetailView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if state.activeToolPanel != nil {
+                ToolFlyoutPanel()
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .background(theme.palette.background)
+        .animation(.easeInOut(duration: 0.22), value: state.activeToolPanel)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 SystemMetricsTitleView(metrics: systemMetrics)
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    state.showLearning = true
+                    state.openToolPanel(.learning)
                 } label: {
                     Image(systemName: "brain")
                 }
                 .help("Learning — stored judgements and classifications")
 
                 Button {
-                    state.showModelCosts = true
+                    state.openToolPanel(.modelCosts)
                 } label: {
                     Image(systemName: "dollarsign.circle")
                 }
                 .help("Selected model costs (OpenRouter)")
 
                 Button {
-                    openSettings()
+                    state.openToolPanel(.preferences)
                 } label: {
                     Image(systemName: "gearshape")
                 }
                 .help("Preferences")
 
                 Button {
-                    state.showAbout = true
+                    state.openToolPanel(.about)
                 } label: {
                     Image(systemName: "info.circle")
                 }
@@ -78,16 +86,6 @@ struct ContentView: View {
                 }
                 .help("Quit ARIL")
             }
-        }
-        .sheet(isPresented: $state.showLearning) {
-            LearningView()
-                .environmentObject(state)
-                .environmentObject(theme)
-        }
-        .popover(isPresented: $state.showModelCosts, arrowEdge: .bottom) {
-            ModelCostsView()
-                .environmentObject(state)
-                .environmentObject(theme)
         }
         .preferredColorScheme(theme.palette.colorScheme)
         .task {
