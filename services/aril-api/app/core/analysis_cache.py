@@ -151,46 +151,47 @@ def record_chat_transaction(
 
     with store._LOCK:
         conn = store.connect()
-        # Same session + fingerprint within a short window = same user turn
-        # (stream success + non-stream fallback used to create duplicates).
-        if sid:
-            existing = conn.execute(
+        # Collapse duplicate writes for the same prompt fingerprint within a short
+        # window (stream + /chat fallback, or Solo binary without client fix).
+        existing = conn.execute(
+            """
+            SELECT id, created_at FROM chat_transactions
+            WHERE fingerprint = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (fp,),
+        ).fetchone()
+        if existing and _within_seconds(existing["created_at"], now, seconds=60):
+            conn.execute(
                 """
-                SELECT id, created_at FROM chat_transactions
-                WHERE session_id = ? AND fingerprint = ?
-                ORDER BY created_at DESC
-                LIMIT 1
+                UPDATE chat_transactions SET
+                  session_id = COALESCE(?, session_id),
+                  model = ?, category = ?,
+                  input_tokens = ?, output_tokens = ?,
+                  cost_usd = ?, cached = ?, analysis_json = ?
+                WHERE id = ?
                 """,
-                (sid, fp),
-            ).fetchone()
-            if existing and _within_seconds(existing["created_at"], now, seconds=30):
-                conn.execute(
-                    """
-                    UPDATE chat_transactions SET
-                      model = ?, category = ?,
-                      input_tokens = ?, output_tokens = ?,
-                      cost_usd = ?, cached = ?, analysis_json = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        model or "",
-                        category,
-                        input_tokens,
-                        output_tokens,
-                        cost_usd,
-                        1 if cached else 0,
-                        analysis_json,
-                        existing["id"],
-                    ),
-                )
-                conn.commit()
-                return {
-                    "id": existing["id"],
-                    "fingerprint": fp,
-                    "prompt_snippet": snippet,
-                    "created_at": existing["created_at"],
-                    "deduped": True,
-                }
+                (
+                    sid,
+                    model or "",
+                    category,
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
+                    1 if cached else 0,
+                    analysis_json,
+                    existing["id"],
+                ),
+            )
+            conn.commit()
+            return {
+                "id": existing["id"],
+                "fingerprint": fp,
+                "prompt_snippet": snippet,
+                "created_at": existing["created_at"],
+                "deduped": True,
+            }
 
         record_id = str(uuid.uuid4())
         conn.execute(

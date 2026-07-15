@@ -110,10 +110,9 @@ def test_chat_transaction_dedupes_same_turn(isolated_store: Path):
     from app.core import db as store
 
     store.reset_connection()
-    sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     prompt = "Unique dedupe token moon distance query omega"
     first = analysis_store.record_chat_transaction(
-        session_id=sid,
+        session_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         prompt=prompt,
         model="openai/gpt-4.1-mini",
         category="cost",
@@ -122,8 +121,9 @@ def test_chat_transaction_dedupes_same_turn(isolated_store: Path):
         cost_usd=0.0001,
         cached=False,
     )
+    # Second write may omit / change session_id (still same turn fingerprint).
     second = analysis_store.record_chat_transaction(
-        session_id=sid,
+        session_id="ffffffff-eeee-dddd-cccc-bbbbbbbbbbbb",
         prompt=prompt,
         model="openai/gpt-4.1-mini",
         category="cost",

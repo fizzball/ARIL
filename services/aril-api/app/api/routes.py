@@ -438,12 +438,41 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                         meta["model"] = chunk.model
                 if chunk.done:
                     break
-        except RuntimeError as exc:
-            err = json.dumps({"error": str(exc)})
+        except Exception as exc:
+            # Broad catch: httpx/network errors used to tear down the body with
+            # neither `error` nor `done`, which surfaced as client "Try again".
+            err = json.dumps({"error": str(exc) or "Upstream stream failed"})
             yield f"event: error\ndata: {err}\n\n"
             return
 
         full = "".join(parts)
+        # Empty upstream stream — one non-stream completion before failing closed.
+        if not full.strip():
+            try:
+                result = await provider.complete(
+                    provider_messages,
+                    model=model,
+                    temperature=temperature,
+                    web_search=req.web_search,
+                    generate_image=generate_image,
+                )
+            except Exception as exc:
+                err = json.dumps({"error": str(exc) or "Model returned an empty response"})
+                yield f"event: error\ndata: {err}\n\n"
+                return
+            if not (result.content or "").strip():
+                err = json.dumps({"error": "Model returned an empty response. Try sending again."})
+                yield f"event: error\ndata: {err}\n\n"
+                return
+            full = result.content
+            parts = [full]
+            payload = json.dumps({"content": full, "model": result.model or model})
+            yield f"event: token\ndata: {payload}\n\n"
+            meta["input_tokens"] = result.input_tokens or meta["input_tokens"]
+            meta["output_tokens"] = result.output_tokens or meta["output_tokens"]
+            meta["cost_usd"] = result.cost_usd or meta["cost_usd"]
+            if result.model:
+                meta["model"] = result.model
         # Persist a slim copy so later turns don't rehydrate multi-hundred-kB base64 images.
         stored_full = sanitize_content_for_context(full)
         if (

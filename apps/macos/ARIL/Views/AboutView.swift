@@ -69,6 +69,18 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.9", changes: [
+            "Title bar: live CPU, memory, and disk use percentages",
+            "Chat: recover empty/failed streams; MCP Preferences locked (URL + API key backlog)",
+        ]),
+        ChangelogEntry(version: "0.3.8", changes: [
+            "Chat: recover empty/failed streams via non-stream fallback; clearer gateway errors",
+            "Preferences → MCP locked (backlog); future config is URL + API key per server",
+        ]),
+        ChangelogEntry(version: "0.3.7", changes: [
+            "Learning: one send → one judgement + one chat transaction (deduped)",
+            "Chat: recover empty/failed streams via non-stream fallback; clearer gateway errors",
+        ]),
         ChangelogEntry(version: "0.3.6", changes: [
             "Solo packaging: DMG embeds the gateway; public Install docs + GitHub Release workflow",
             "Learning store: dedupe chat transactions; Activity filter hides analysis-cache noise",
@@ -88,7 +100,7 @@ struct AboutView: View {
             "Toolbar Learning panel for judgements / classifications; Log Analysis lives in Preferences",
             "Analysis button shows confidence-index breakdown and overrides",
             "Deleted sessions stay deleted (tombstones + bulk delete API)",
-            "Preferences → MCP to configure servers; Cost estimate highlights yellow when MCP is in use",
+            "Preferences → MCP (backlog): when ready, each server needs a URL + API key",
         ]),
         ChangelogEntry(version: "0.3.2", changes: [
             "Web search as a checkbox toggle; configurable prompt analysis idle delay",

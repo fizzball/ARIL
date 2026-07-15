@@ -21,7 +21,17 @@ final class ARILAPIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
-    init(session: URLSession = .shared) {
+    /// Shared session with longer idle timeouts so slow TTFT / web-search streams
+    /// don't die before the first token under URLSession defaults (~60s).
+    private static let defaultSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 900
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
+
+    init(session: URLSession = ARILAPIClient.defaultSession) {
         self.session = session
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
@@ -271,6 +281,7 @@ final class ARILAPIClient {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 300
         req.httpBody = try encoder.encode(request)
 
         let (bytes, response) = try await session.bytes(for: req)

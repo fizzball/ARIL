@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var modelBrowserTitle = "Choose OpenRouter model"
     @State private var modelBrowserCategory: RouteCategory?
     @State private var modelBrowserForDefault = false
+    @State private var showMCPBacklogAlert = false
 
     var body: some View {
         TabView {
@@ -461,33 +462,26 @@ struct SettingsView: View {
             Section("MCP servers") {
                 Toggle("Use MCP servers", isOn: Binding(
                     get: { state.mcpEnabled },
-                    set: { state.setMCPEnabled($0) }
-                ))
-                Text("When enabled with at least one ready server, cost estimates are highlighted to warn that tool use may raise spend. Add servers below even before enabling.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if state.mcpServers.isEmpty {
-                    Text("No MCP servers yet. Add one to point at a local stdio process or an SSE/HTTP endpoint.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach($state.mcpServers) { $server in
-                        MCPServerRow(server: $server) {
-                            state.removeMCPServer(server.id)
-                        }
-                        .onChange(of: server) { _, _ in
-                            state.persistMCPServers()
+                    set: { newValue in
+                        if newValue {
+                            showMCPBacklogAlert = true
+                        } else {
+                            state.setMCPEnabled(false)
                         }
                     }
-                }
-
-                Button("Add MCP server") {
-                    state.addMCPServer()
-                }
+                ))
+                Text("MCP server support is on the backlog and cannot be configured yet. When it ships, each server will need a target URL and an API key.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding()
         .formStyle(.grouped)
+        .alert("MCP servers", isPresented: $showMCPBacklogAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("MCP server support is on the backlog.")
+        }
     }
 
     private var logAnalysisTab: some View {
@@ -602,37 +596,5 @@ private struct FullWidthTemperatureSlider: View {
         .frame(maxWidth: .infinity)
         .frame(height: 28)
         .padding(.bottom, 6)
-    }
-}
-
-private struct MCPServerRow: View {
-    @Binding var server: MCPServerConfig
-    var onRemove: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Toggle(isOn: $server.enabled) {
-                    TextField("Name", text: $server.name)
-                }
-                Spacer(minLength: 8)
-                Button("Remove", role: .destructive, action: onRemove)
-                    .buttonStyle(.borderless)
-            }
-
-            Picker("Transport", selection: $server.transport) {
-                ForEach(MCPTransport.allCases) { transport in
-                    Text(transport.label).tag(transport)
-                }
-            }
-
-            if server.transport == .stdio {
-                TextField("Command (e.g. npx or /usr/local/bin/server)", text: $server.endpoint)
-                TextField("Arguments (optional, space-separated)", text: $server.args)
-            } else {
-                TextField("URL (e.g. https://host/mcp)", text: $server.endpoint)
-            }
-        }
-        .padding(.vertical, 6)
     }
 }

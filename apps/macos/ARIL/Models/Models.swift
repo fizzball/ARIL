@@ -274,54 +274,88 @@ struct PendingAttachment: Identifiable, Hashable {
 }
 
 enum MCPTransport: String, CaseIterable, Identifiable, Codable {
-    case stdio
+    /// Remote MCP over HTTP/SSE (primary).
+    case http
+    /// Legacy label kept for decoding older drafts.
     case sse
+    case stdio
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
+        case .http, .sse: return "HTTP / SSE"
         case .stdio: return "stdio (local command)"
-        case .sse: return "SSE / HTTP"
         }
     }
 }
 
-/// User-configured MCP server entry (Preferences). Runtime wiring can consume this list later.
+/// User-configured MCP server entry (Preferences). Runtime wiring will consume this later.
+/// Expected fields when the backlog item ships: target URL + API key (stdio optional later).
 struct MCPServerConfig: Identifiable, Hashable, Codable {
     var id: UUID
     var name: String
     var transport: MCPTransport
-    /// Executable for stdio, or base URL for SSE/HTTP.
-    var endpoint: String
-    /// Optional argv for stdio (space-separated).
-    var args: String
+    /// Target MCP server URL (e.g. https://host/mcp).
+    var url: String
+    /// API key / bearer token for the MCP server.
+    var apiKey: String
     var enabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, transport, url, apiKey, enabled
+        case endpoint, args // legacy draft fields
+    }
 
     init(
         id: UUID = UUID(),
         name: String = "",
-        transport: MCPTransport = .stdio,
-        endpoint: String = "",
-        args: String = "",
+        transport: MCPTransport = .http,
+        url: String = "",
+        apiKey: String = "",
         enabled: Bool = true
     ) {
         self.id = id
         self.name = name
         self.transport = transport
-        self.endpoint = endpoint
-        self.args = args
+        self.url = url
+        self.apiKey = apiKey
         self.enabled = enabled
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        transport = try c.decodeIfPresent(MCPTransport.self, forKey: .transport) ?? .http
+        let decodedURL = try c.decodeIfPresent(String.self, forKey: .url)
+        let legacyEndpoint = try c.decodeIfPresent(String.self, forKey: .endpoint)
+        url = (decodedURL?.isEmpty == false ? decodedURL : legacyEndpoint) ?? ""
+        apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        _ = try c.decodeIfPresent(String.self, forKey: .args)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(transport, forKey: .transport)
+        try c.encode(url, forKey: .url)
+        try c.encode(apiKey, forKey: .apiKey)
+        try c.encode(enabled, forKey: .enabled)
+    }
+
     var isReady: Bool {
-        enabled && !endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        enabled
+            && !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var displayName: String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
-        let leaf = endpoint.split(separator: "/").last.map(String.init) ?? endpoint
+        let leaf = url.split(separator: "/").last.map(String.init) ?? url
         return leaf.isEmpty ? "Untitled MCP server" : leaf
     }
 }

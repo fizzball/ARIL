@@ -11,6 +11,7 @@
 		11DF1396F1C5933598399718 /* ARILApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */; };
 		17A3C70916F018539718B02E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F569C76A392C4EAF2B396EB7 /* AppState.swift */; };
 		1D263CB4D3FDB6D7A45EAD4B /* ModelCostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90B92597E00798BF7FB75B1 /* ModelCostsView.swift */; };
+		2143BD1EEDEAB0F06806F37C /* SystemMetricsMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */; };
 		22022D6BC26C6FFE70F5A810 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464CC3D69B6588E73D3EF50F /* APIModels.swift */; };
 		32343AEA72927095488EB9D2 /* HelpHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB9C5BA9A53629691A392680 /* HelpHint.swift */; };
 		3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */; };
@@ -19,6 +20,7 @@
 		4B8284C195B20A12359734B4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F7258E2BF863107D0D1C2F /* ContentView.swift */; };
 		5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */; };
 		647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */; };
+		78671E9ACB7E7353C329A250 /* SystemMetricsTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */; };
 		7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */; };
 		822BC840B98AADC146B3C60B /* OpenRouterModelBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */; };
 		8CC21960279B31457BD24A9C /* ARILAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */; };
@@ -42,6 +44,7 @@
 		1416251B652DE7DE8C09313A /* MessageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListView.swift; sourceTree = "<group>"; };
 		275830288881563C30E79654 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningView.swift; sourceTree = "<group>"; };
+		419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMetricsTitleView.swift; sourceTree = "<group>"; };
 		4471C3658442F237DC5C1C61 /* CompareResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareResultsView.swift; sourceTree = "<group>"; };
 		464CC3D69B6588E73D3EF50F /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGatewayManager.swift; sourceTree = "<group>"; };
@@ -56,6 +59,7 @@
 		A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILAPIClient.swift; sourceTree = "<group>"; };
 		AF7F3C1872C5C680482304E6 /* ARIL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ARIL.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILApp.swift; sourceTree = "<group>"; };
+		C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMetricsMonitor.swift; sourceTree = "<group>"; };
 		CB6275E8A54ADE3171B7EA48 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDetailView.swift; sourceTree = "<group>"; };
 		D90B92597E00798BF7FB75B1 /* ModelCostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCostsView.swift; sourceTree = "<group>"; };
@@ -100,6 +104,7 @@
 				464CC3D69B6588E73D3EF50F /* APIModels.swift */,
 				A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */,
 				48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */,
+				C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -125,6 +130,7 @@
 				51A5248C42FB7C5D311DC40B /* SettingsView.swift */,
 				E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */,
 				9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */,
+				419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -253,6 +259,8 @@
 				B8EB569822A0AC3A6D7FFD52 /* SettingsView.swift in Sources */,
 				5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */,
 				647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */,
+				2143BD1EEDEAB0F06806F37C /* SystemMetricsMonitor.swift in Sources */,
+				78671E9ACB7E7353C329A250 /* SystemMetricsTitleView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,7 +301,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 39;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -306,7 +314,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.3.9;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -323,7 +331,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 39;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
@@ -334,7 +342,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.3.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
 				PRODUCT_NAME = ARIL;
 				SDKROOT = macosx;
@@ -375,7 +383,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 39;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -394,7 +402,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.3.9;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -412,7 +420,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 39;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
@@ -423,7 +431,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.6;
+				MARKETING_VERSION = 0.3.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
 				PRODUCT_NAME = ARIL;
 				SDKROOT = macosx;

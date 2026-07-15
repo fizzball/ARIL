@@ -163,7 +163,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.6"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.9"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "35"
         return "\(short) (\(build))"
     }
@@ -210,8 +210,11 @@ final class AppState: ObservableObject {
         )
         skipAnalysisOnJudgement =
             defaults.object(forKey: "aril.skipAnalysisOnJudgement") as? Bool ?? true
-        mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
-        mcpServers = Self.loadMCPServers()
+        mcpEnabled = false
+        UserDefaults.standard.set(false, forKey: "aril.mcpEnabled")
+        // Drafting is paused until the backlog MCP config (URL + API key) ships.
+        mcpServers = []
+        UserDefaults.standard.removeObject(forKey: "aril.mcpServers")
         systemPromptEnabled = defaults.object(forKey: "aril.systemPromptEnabled") as? Bool ?? false
         let storedPrompt = defaults.string(forKey: "aril.systemPrompt") ?? ""
         systemPrompt = storedPrompt
@@ -386,38 +389,10 @@ final class AppState: ObservableObject {
     }
 
     func setMCPEnabled(_ enabled: Bool) {
-        mcpEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "aril.mcpEnabled")
-    }
-
-    func addMCPServer() {
-        mcpServers.append(MCPServerConfig(name: "New MCP server"))
-        persistMCPServers()
-    }
-
-    func updateMCPServer(_ server: MCPServerConfig) {
-        guard let idx = mcpServers.firstIndex(where: { $0.id == server.id }) else { return }
-        mcpServers[idx] = server
-        persistMCPServers()
-    }
-
-    func removeMCPServer(_ id: UUID) {
-        mcpServers.removeAll { $0.id == id }
-        persistMCPServers()
-    }
-
-    func persistMCPServers() {
-        if let data = try? JSONEncoder().encode(mcpServers) {
-            UserDefaults.standard.set(data, forKey: "aril.mcpServers")
-        }
-    }
-
-    private static func loadMCPServers() -> [MCPServerConfig] {
-        guard let data = UserDefaults.standard.data(forKey: "aril.mcpServers"),
-              let servers = try? JSONDecoder().decode([MCPServerConfig].self, from: data) else {
-            return []
-        }
-        return servers
+        // MCP runtime wiring is still on the backlog — never persist enabled.
+        guard !enabled else { return }
+        mcpEnabled = false
+        UserDefaults.standard.set(false, forKey: "aril.mcpEnabled")
     }
 
     private func bootstrap() async {
@@ -1287,6 +1262,14 @@ final class AppState: ObservableObject {
                 }
             }
             if Task.isCancelled { return }
+            let streamedText = sessions.first(where: { $0.id == sid })?
+                .messages.first(where: { $0.id == assistantID })?.content ?? ""
+            // Empty `done` (model returned nothing) — recover via non-stream once.
+            // Server dedupes chat_transaction within 60s, so this stays Learning-safe.
+            if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !streamTokens.sawTokens {
+                throw ARILAPIError.stream("No response received from the model. Try sending again.")
+            }
             lastError = nil
             lastCacheLabel = (done.cached ?? false) ? "cached" : "not cached"
             if let ms = done.latencyMs {
@@ -1300,11 +1283,9 @@ final class AppState: ObservableObject {
                 inputTokens: done.inputTokens,
                 outputTokens: done.outputTokens
             )
-            let responseText = sessions.first(where: { $0.id == sid })?
-                .messages.first(where: { $0.id == assistantID })?.content ?? ""
             recordExchange(
                 prompt: displayText,
-                response: responseText,
+                response: streamedText,
                 model: done.model,
                 mode: routeMode.label,
                 status: .completed,
@@ -1331,8 +1312,8 @@ final class AppState: ObservableObject {
             }
         } catch {
             if Task.isCancelled { return }
-            // If tokens already landed (or the stream callback fired), treat as success.
-            // Falling back to /v1/chat here used to duplicate Learning chat_transaction rows.
+            // Prefer the streamed reply when any tokens arrived. Only fall back to
+            // /v1/chat on zero-token failures; server dedupes duplicate Learning rows.
             let alreadyHasContent: Bool = {
                 guard let session = sessions.first(where: { $0.id == sid }),
                       let msg = session.messages.first(where: { $0.id == assistantID })
@@ -1389,9 +1370,11 @@ final class AppState: ObservableObject {
                     response: responseText,
                     model: response.model,
                     mode: routeMode.label,
-                    status: .completed
+                    status: .completed,
+                    latencyMs: lastLatencyMs ?? generationElapsedMs
                 )
                 await persistSelectedSession()
+                await refreshHealth()
             } catch {
                 lastError = error.localizedDescription
                 recordExchange(

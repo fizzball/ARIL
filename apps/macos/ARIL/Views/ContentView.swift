@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var theme: ThemeStore
     @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @StateObject private var systemMetrics = SystemMetricsMonitor()
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -37,6 +38,9 @@ struct ContentView: View {
         }
         .background(theme.palette.background)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                SystemMetricsTitleView(metrics: systemMetrics)
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     state.showLearning = true
@@ -87,8 +91,12 @@ struct ContentView: View {
         }
         .preferredColorScheme(theme.palette.colorScheme)
         .task {
+            systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.
             await state.refreshHealth(reloadSessionsOnReady: false)
+        }
+        .onDisappear {
+            systemMetrics.stop()
         }
     }
 }
