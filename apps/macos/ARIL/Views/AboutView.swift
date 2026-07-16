@@ -73,6 +73,10 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.15", changes: [
+            "Developer ID signed and notarized builds — installs without Gatekeeper workarounds",
+            "Automated notarized releases via GitHub Actions",
+        ]),
         ChangelogEntry(version: "0.3.14", changes: [
             "Preferences: optional menu bar icon while ARIL is running (Open ARIL, Preferences, Quit)",
         ]),
