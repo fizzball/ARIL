@@ -1,0 +1,4 @@
+# GitHub auto-attaches "Source code (zip)" and "Source code (tar.gz)" to every
+# release tag; those links cannot be removed. export-ignore keeps the archives
+# empty so only the uploaded DMG is a useful download.
+* export-ignore
