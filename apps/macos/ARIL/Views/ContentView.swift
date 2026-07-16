@@ -4,6 +4,7 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @StateObject private var systemMetrics = SystemMetricsMonitor()
 
@@ -21,7 +22,7 @@ struct ContentView: View {
                                 .font(ARILTheme.captionFont)
                             Spacer()
                             Button("Open Preferences") {
-                                state.openToolPanel(.preferences)
+                                openSettings()
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
@@ -65,7 +66,7 @@ struct ContentView: View {
                 .help("Selected model costs (OpenRouter)")
 
                 Button {
-                    state.openToolPanel(.preferences)
+                    openSettings()
                 } label: {
                     Image(systemName: "gearshape")
                 }

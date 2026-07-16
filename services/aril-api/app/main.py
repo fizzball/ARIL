@@ -1,10 +1,19 @@
 """ARIL API — Adaptive Routing Intelligent Layer gateway."""
 
-from fastapi import FastAPI
+from __future__ import annotations
+
+import logging
+import traceback
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import router
 from app.core.config import settings
+
+logger = logging.getLogger("aril-api")
 
 app = FastAPI(
     title="ARIL API",
@@ -21,6 +30,19 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Surface a concise reason so Solo clients are not stuck with a bare 500."""
+    # Let FastAPI's own handlers deal with expected HTTP / validation failures.
+    if isinstance(exc, (HTTPException, RequestValidationError)):
+        raise exc
+    logger.error("Unhandled error on %s %s\n%s", request.method, request.url.path, traceback.format_exc())
+    detail = str(exc).strip() or exc.__class__.__name__
+    if len(detail) > 400:
+        detail = detail[:397] + "…"
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 @app.get("/health")

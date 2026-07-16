@@ -69,6 +69,8 @@ def set_api_key(key: str) -> dict:
     cleaned = (key or "").strip()
     if not cleaned:
         raise ValueError("API key cannot be empty")
+    if len(cleaned) < 20 or not cleaned.startswith("sk-or-"):
+        raise ValueError("API key looks invalid — paste a key from openrouter.ai/keys (sk-or-…)")
     settings.openrouter_api_key = cleaned
     _upsert_env_key(cleaned)
     return status()

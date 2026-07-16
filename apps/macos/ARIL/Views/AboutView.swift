@@ -73,12 +73,18 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.14", changes: [
+            "Preferences: optional menu bar icon while ARIL is running (Open ARIL, Preferences, Quit)",
+        ]),
+        ChangelogEntry(version: "0.3.13", changes: [
+            "Preferences restored as a full themed dialog (all tabs); Model costs / Learning / About stay as flyouts",
+        ]),
         ChangelogEntry(version: "0.3.12", changes: [
             "Enter during analysis idle: send immediately and skip Learning judgement writes",
         ]),
         ChangelogEntry(version: "0.3.11", changes: [
             "Status bar: OpenRouter available credits when the API reports them",
-            "Toolbar tools (Preferences, Model costs, Learning, About) open as matching themed right flyouts",
+            "Toolbar tools: Model costs, Learning, About as matching themed right flyouts",
         ]),
         ChangelogEntry(version: "0.3.10", changes: [
             "Preferences: Check OpenRouter connection after saving an API key",

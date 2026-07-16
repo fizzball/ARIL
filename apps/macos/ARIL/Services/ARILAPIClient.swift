@@ -424,7 +424,12 @@ final class ARILAPIClient {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw ARILAPIError.badStatus(http.statusCode, body)
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let detail = obj["detail"] as? String,
+               !detail.isEmpty {
+                throw ARILAPIError.badStatus(http.statusCode, detail)
+            }
+            throw ARILAPIError.badStatus(http.statusCode, body.isEmpty ? "Unknown error" : body)
         }
     }
 

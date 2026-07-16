@@ -5,6 +5,7 @@ import AppKit
 struct ARILApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var theme = ThemeStore()
+    @StateObject private var statusBar = StatusBarController()
 
     var body: some Scene {
         WindowGroup {
@@ -12,6 +13,12 @@ struct ARILApp: App {
                 .environmentObject(appState)
                 .environmentObject(theme)
                 .frame(minWidth: 980, minHeight: 640)
+                .task {
+                    statusBar.setEnabled(appState.showInMenuBar)
+                }
+                .onChange(of: appState.showInMenuBar) { _, enabled in
+                    statusBar.setEnabled(enabled)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     appState.shutdown()
                 }
@@ -30,12 +37,13 @@ struct ARILApp: App {
                     appState.openToolPanel(.about)
                 }
             }
-            CommandGroup(replacing: .appSettings) {
-                Button("Preferences…") {
-                    appState.openToolPanel(.preferences)
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
+        }
+
+        Settings {
+            SettingsView()
+                .environmentObject(appState)
+                .environmentObject(theme)
+                .preferredColorScheme(theme.palette.colorScheme)
         }
     }
 }

@@ -82,7 +82,7 @@ struct StatusFooterView: View {
             Text(state.routeMode.label)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted)
-            Text("# v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.12")")
+            Text("# v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.14")")
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.textMuted.opacity(0.7))
         }

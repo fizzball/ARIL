@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Full-height trailing column for toolbar tools (Preferences, costs, Learning, About).
+/// Full-height trailing column for toolbar tools (Model costs, Learning, About).
 struct ToolFlyoutPanel: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
@@ -8,8 +8,6 @@ struct ToolFlyoutPanel: View {
     var body: some View {
         Group {
             switch state.activeToolPanel {
-            case .preferences:
-                SettingsView()
             case .modelCosts:
                 ModelCostsView()
             case .learning:

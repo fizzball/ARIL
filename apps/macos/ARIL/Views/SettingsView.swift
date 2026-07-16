@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
@@ -13,53 +14,53 @@ struct SettingsView: View {
     @State private var showMCPBacklogAlert = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Preferences")
-                    .font(ARILTheme.bodyFont.weight(.semibold))
-                    .foregroundStyle(theme.palette.text)
-                Spacer()
-                Button {
-                    state.closeToolPanel()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(theme.palette.textMuted)
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
-                .help("Close")
-                .accessibilityLabel("Close")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-
-            Divider().overlay(theme.palette.hairline)
-
-            TabView {
-                gatewayTab
-                    .tabItem { Label("General", systemImage: "gearshape") }
-                systemPromptTab
-                    .tabItem { Label("System Prompt", systemImage: "doc.plaintext") }
-                routingTab
-                    .tabItem { Label("Models", systemImage: "cpu") }
-                mcpTab
-                    .tabItem { Label("MCP", systemImage: "server.rack") }
-                logAnalysisTab
-                    .tabItem { Label("Log Analysis", systemImage: "doc.text.magnifyingglass") }
-                appearanceTab
-                    .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TabView {
+            gatewayTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+            systemPromptTab
+                .tabItem { Label("System Prompt", systemImage: "doc.plaintext") }
+            routingTab
+                .tabItem { Label("Models", systemImage: "cpu") }
+            mcpTab
+                .tabItem { Label("MCP", systemImage: "server.rack") }
+            logAnalysisTab
+                .tabItem { Label("Log Analysis", systemImage: "doc.text.magnifyingglass") }
+            appearanceTab
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: 720, height: 700)
         .background(theme.palette.backgroundElevated)
         .preferredColorScheme(theme.palette.colorScheme)
+        .navigationTitle("Preferences")
         .task {
+            Self.applyWindowChrome(colorScheme: theme.palette.colorScheme)
             await state.refreshDatabaseStatus()
         }
         .onAppear {
+            Self.applyWindowChrome(colorScheme: theme.palette.colorScheme)
             Task { await state.refreshDatabaseStatus() }
+        }
+        .onChange(of: theme.option) { _, _ in
+            Self.applyWindowChrome(colorScheme: theme.palette.colorScheme)
+        }
+    }
+
+    /// Title + NSAppearance so the Settings window matches the app theme (not system white).
+    private static func applyWindowChrome(colorScheme: ColorScheme) {
+        DispatchQueue.main.async {
+            let appearance = NSAppearance(
+                named: colorScheme == .dark ? .darkAqua : .aqua
+            )
+            for window in NSApplication.shared.windows {
+                let title = window.title
+                if title == "Settings"
+                    || title == "ARIL Settings"
+                    || title == "Preferences"
+                    || title.hasSuffix("Settings") {
+                    window.title = "Preferences"
+                    window.appearance = appearance
+                }
+            }
         }
     }
 
@@ -160,6 +161,19 @@ struct SettingsView: View {
                     Text(state.gatewayReady ? "Gateway ready" : "Gateway not ready")
                         .foregroundStyle(state.gatewayReady ? theme.palette.accent : theme.palette.danger)
                 }
+            }
+
+            Section("Menu bar") {
+                Toggle(
+                    "Show ARIL in the menu bar",
+                    isOn: Binding(
+                        get: { state.showInMenuBar },
+                        set: { state.setShowInMenuBar($0) }
+                    )
+                )
+                Text("When enabled, ARIL appears in the macOS menu bar while it’s running.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Database") {

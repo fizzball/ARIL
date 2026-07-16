@@ -23,9 +23,8 @@ enum GenerationPhase: Equatable {
     }
 }
 
-/// Trailing flyout opened from the toolbar / Preferences command.
+/// Trailing flyout opened from the toolbar.
 enum ToolPanel: String, Identifiable, Equatable {
-    case preferences
     case modelCosts
     case learning
     case about
@@ -34,7 +33,6 @@ enum ToolPanel: String, Identifiable, Equatable {
 
     var title: String {
         switch self {
-        case .preferences: return "Preferences"
         case .modelCosts: return "Model costs"
         case .learning: return "Learning"
         case .about: return "About ARIL"
@@ -79,6 +77,8 @@ final class AppState: ObservableObject {
     @Published var analysisIdleSeconds: Double = 2.0
     /// When on, matching Learning judgements skip re-analysis / rewrite LLM (token saver).
     @Published var skipAnalysisOnJudgement: Bool = true
+    /// When on, show ARIL in the macOS menu bar (Preferences).
+    @Published var showInMenuBar: Bool = false
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
@@ -189,8 +189,8 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.12"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "35"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.14"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "44"
         return "\(short) (\(build))"
     }
 
@@ -236,6 +236,7 @@ final class AppState: ObservableObject {
         )
         skipAnalysisOnJudgement =
             defaults.object(forKey: "aril.skipAnalysisOnJudgement") as? Bool ?? true
+        showInMenuBar = defaults.object(forKey: "aril.showInMenuBar") as? Bool ?? false
         mcpEnabled = false
         UserDefaults.standard.set(false, forKey: "aril.mcpEnabled")
         // Drafting is paused until the backlog MCP config (URL + API key) ships.
@@ -286,6 +287,11 @@ final class AppState: ObservableObject {
         if analysisStatus == .ready || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             schedulePreview()
         }
+    }
+
+    func setShowInMenuBar(_ enabled: Bool) {
+        showInMenuBar = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.showInMenuBar")
     }
 
     func setSystemPromptEnabled(_ enabled: Bool) {
