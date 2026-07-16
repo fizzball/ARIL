@@ -47,6 +47,10 @@ struct LearningView: View {
         state.storeRecords.filter { storeFilter.includes($0.kind) }
     }
 
+    private var categoryPreferRows: [PreferWinRow] {
+        PreferWinRow.rows(from: state.categoryPreferWins)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -117,6 +121,96 @@ struct LearningView: View {
                     }
                 }
 
+                Section("Category Prefer wins") {
+                    Text("Models you Prefer in Judge (and explicit Prefer) ranked by category. Auto uses these when fingerprint history doesn’t match.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if categoryPreferRows.isEmpty {
+                        Text("No Prefer wins yet. Run Judge and Prefer a winner.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(categoryPreferRows) { row in
+                            HStack {
+                                Text(row.categoryLabel)
+                                    .font(.caption.weight(.semibold))
+                                    .frame(width: 88, alignment: .leading)
+                                Text(row.model)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer(minLength: 8)
+                                Text("\(row.wins)")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                Section("Auto eval") {
+                    Text("Runs \(AutoEvalPrompts.all.count) fixed smoke prompts through Auto. Results append below (prompt, model, cost, ok/fail).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button {
+                            Task { await state.runAutoEval() }
+                        } label: {
+                            if state.isRunningAutoEval {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Running…")
+                            } else {
+                                Text("Run Auto eval")
+                            }
+                        }
+                        .disabled(state.isRunningAutoEval || state.isSending || !state.gatewayReady)
+                        Spacer()
+                        if !state.evalLog.isEmpty {
+                            Button("Clear log") {
+                                state.evalLog = []
+                            }
+                            .disabled(state.isRunningAutoEval)
+                        }
+                    }
+
+                    if state.evalLog.isEmpty {
+                        Text("No eval runs yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(state.evalLog) { entry in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: entry.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                        .foregroundStyle(entry.ok ? theme.palette.accent : theme.palette.danger)
+                                    Text(entry.ok ? "ok" : "fail")
+                                        .font(.caption.weight(.semibold))
+                                    if let cost = entry.costUsd {
+                                        Text(String(format: "$%.4f", cost))
+                                            .font(.caption)
+                                            .monospacedDigit()
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(entry.model)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Text(entry.prompt)
+                                    .lineLimit(2)
+                                if let detail = entry.detail, !detail.isEmpty {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .foregroundStyle(theme.palette.danger)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
                 Section("Stored records") {
                     Picker("Show", selection: $storeFilter) {
                         ForEach(StoreBrowserFilter.allCases) { filter in
@@ -161,6 +255,40 @@ struct LearningView: View {
         .task {
             await state.loadStoreBrowser()
             await state.loadClassifications()
+        }
+    }
+}
+
+private struct PreferWinRow: Identifiable {
+    let id: String
+    let category: String
+    let model: String
+    let wins: Int
+
+    var categoryLabel: String {
+        RouteCategory(rawValue: category)?.label ?? category.capitalized
+    }
+
+    static func rows(from wins: [String: [String: Int]]) -> [PreferWinRow] {
+        var out: [PreferWinRow] = []
+        for (category, models) in wins {
+            for (model, count) in models where count > 0 {
+                out.append(
+                    PreferWinRow(
+                        id: "\(category)|\(model)",
+                        category: category,
+                        model: model,
+                        wins: count
+                    )
+                )
+            }
+        }
+        return out.sorted {
+            if $0.wins != $1.wins { return $0.wins > $1.wins }
+            if $0.category != $1.category {
+                return $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending
+            }
+            return $0.model.localizedCaseInsensitiveCompare($1.model) == .orderedAscending
         }
     }
 }

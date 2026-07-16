@@ -42,6 +42,7 @@ def record_preference(
     model: str,
     accuracy: float | None = None,
     category_overridden: bool = False,
+    count_wins: bool = True,
 ) -> dict:
     with store._LOCK:
         conn = store.connect()
@@ -49,20 +50,21 @@ def record_preference(
         snippet = (prompt or "").strip().replace("\n", " ")[:120]
         now = _now()
 
-        conn.execute(
-            """
-            INSERT INTO category_wins(category, model, wins) VALUES(?,?,1)
-            ON CONFLICT(category, model) DO UPDATE SET wins = wins + 1
-            """,
-            (category, model),
-        )
-        conn.execute(
-            """
-            INSERT INTO fingerprint_wins(fingerprint, model, wins) VALUES(?,?,1)
-            ON CONFLICT(fingerprint, model) DO UPDATE SET wins = wins + 1
-            """,
-            (fp, model),
-        )
+        if count_wins:
+            conn.execute(
+                """
+                INSERT INTO category_wins(category, model, wins) VALUES(?,?,1)
+                ON CONFLICT(category, model) DO UPDATE SET wins = wins + 1
+                """,
+                (category, model),
+            )
+            conn.execute(
+                """
+                INSERT INTO fingerprint_wins(fingerprint, model, wins) VALUES(?,?,1)
+                ON CONFLICT(fingerprint, model) DO UPDATE SET wins = wins + 1
+                """,
+                (fp, model),
+            )
 
         existing = conn.execute(
             "SELECT * FROM classifications WHERE fingerprint = ?", (fp,)
@@ -121,22 +123,28 @@ def record_preference(
             )
             store._fifo_trim(conn, "classifications", store.get_retention())
 
-        cat_wins = conn.execute(
+        cat_wins = 0
+        fp_wins = 0
+        cat_row = conn.execute(
             "SELECT wins FROM category_wins WHERE category = ? AND model = ?",
             (category, model),
-        ).fetchone()["wins"]
-        fp_wins = conn.execute(
+        ).fetchone()
+        if cat_row:
+            cat_wins = int(cat_row["wins"])
+        fp_row = conn.execute(
             "SELECT wins FROM fingerprint_wins WHERE fingerprint = ? AND model = ?",
             (fp, model),
-        ).fetchone()["wins"]
+        ).fetchone()
+        if fp_row:
+            fp_wins = int(fp_row["wins"])
         conn.commit()
 
         return {
             "category": category,
             "fingerprint": fp,
             "model": model,
-            "category_wins": int(cat_wins),
-            "fingerprint_wins": int(fp_wins),
+            "category_wins": cat_wins,
+            "fingerprint_wins": fp_wins,
             "classification_id": classification_id,
             "accuracy": class_accuracy,
             "category_overridden": class_overridden,
@@ -161,8 +169,8 @@ def ensure_auto_judgement(
 ) -> dict | None:
     """Create a Learning judgement on first successful Auto send for this fingerprint.
 
-    Does not overwrite an existing Prefer / Analysis judgement. Returns the
-    created record summary, or None when a judgement already existed.
+    Does not overwrite an existing Prefer / Analysis judgement. Does **not**
+    increment Prefer win counters (so Auto does not train on itself).
     Callers must not invoke this for Manual mode.
     """
     if not (prompt or "").strip():
@@ -175,7 +183,75 @@ def ensure_auto_judgement(
         model=model,
         accuracy=None,
         category_overridden=False,
+        count_wins=False,
     )
+
+
+_CATEGORY_LABELS: dict[str, str] = {
+    "coding": "Coding",
+    "security": "Security",
+    "reasoning": "Reasoning",
+    "vision": "Vision",
+    "cost": "Cost",
+    "performance": "Performance",
+    "confidence": "Confidence",
+    "general": "General",
+}
+
+
+def _category_label(category: str) -> str:
+    key = (category or "").strip().lower()
+    return _CATEGORY_LABELS.get(key, (category or "General").strip().title() or "General")
+
+
+def preferred_model_for_prompt(prompt: str, category: str) -> dict[str, str] | None:
+    """Pick a model from real Prefer wins (fingerprint, then category).
+
+    Ignores Auto-seeded judgements (those do not increment win tables).
+    Returns ``{model, reason, source}`` or ``None``.
+    """
+    cat = (category or "general").strip().lower() or "general"
+    label = _category_label(cat)
+    with store._LOCK:
+        conn = store.connect()
+        fp = fingerprint(prompt)
+
+        fp_rows = conn.execute(
+            """
+            SELECT model, wins FROM fingerprint_wins
+            WHERE fingerprint = ?
+            ORDER BY wins DESC, model ASC
+            """,
+            (fp,),
+        ).fetchall()
+        if fp_rows and int(fp_rows[0]["wins"]) >= 1:
+            model = str(fp_rows[0]["model"])
+            return {
+                "model": model,
+                "reason": f"Because you preferred {model} for a similar prompt ({label}).",
+                "source": "fingerprint",
+            }
+
+        cat_rows = conn.execute(
+            """
+            SELECT model, wins FROM category_wins
+            WHERE category = ?
+            ORDER BY wins DESC, model ASC
+            """,
+            (cat,),
+        ).fetchall()
+        if not cat_rows or int(cat_rows[0]["wins"]) < 1:
+            return None
+        top_wins = int(cat_rows[0]["wins"])
+        # Require a clear winner when there is a tie at the top.
+        if len(cat_rows) > 1 and int(cat_rows[1]["wins"]) == top_wins:
+            return None
+        model = str(cat_rows[0]["model"])
+        return {
+            "model": model,
+            "reason": f"Because you preferred {model} for {label}.",
+            "source": "category",
+        }
 
 
 def confidence_boost(prompt: str, category: str, model: str) -> float:

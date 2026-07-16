@@ -40,7 +40,7 @@ for arg in "$@"; do
 done
 
 VERSION="$(grep -E 'MARKETING_VERSION:' "$MACOS/project.yml" | head -1 | awk '{print $2}' | tr -d '"')"
-VERSION="${VERSION:-0.3.16}"
+VERSION="${VERSION:-0.3.28}"
 
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 NOTARIZE="${NOTARIZE:-0}"

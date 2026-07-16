@@ -67,6 +67,12 @@ struct RoutingAnalysisView: View {
                         Text(short(topRoute?.modelId ?? state.selectedModel))
                             .font(ARILTheme.bodyFont)
                             .foregroundStyle(theme.palette.accent)
+                        if let reason = preview?.preferenceReason, !reason.isEmpty {
+                            Text(reason)
+                                .font(ARILTheme.captionFont)
+                                .foregroundStyle(theme.palette.accent)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         metricRow(
                             "Category fit",
                             breakdown.categoryFit,

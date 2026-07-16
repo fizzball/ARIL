@@ -11,4 +11,6 @@ Phase 2+ harness. Place golden prompts here:
 }
 ```
 
+In-app smoke: [`auto_smoke.json`](auto_smoke.json) (~8 prompts) is mirrored by Learning → **Run Auto eval** in the macOS client (Auto mode only; full Auto vs Manual vs Judge bake-off is deferred).
+
 Runners will land under `evals/runner/` once the preview pipeline leaves stub heuristics.

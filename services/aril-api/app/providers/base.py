@@ -10,9 +10,12 @@ from app.core.config import settings
 @dataclass
 class ProviderMessage:
     role: str
-    content: str
+    content: str = ""
     # OpenAI-style multimodal parts when set (overrides plain content for API payload)
     parts: list[dict] | None = None
+    # Assistant tool_calls (OpenAI format) or tool-role linkage
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
 
 
 @dataclass
@@ -23,6 +26,8 @@ class ProviderResult:
     output_tokens: int
     cost_usd: float
     cached: bool = False
+    tool_calls: list[dict] | None = None
+    finish_reason: str | None = None
 
 
 @dataclass
@@ -48,6 +53,8 @@ class LLMProvider(ABC):
         temperature: float,
         web_search: bool = False,
         generate_image: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> ProviderResult:
         raise NotImplementedError
 
@@ -59,6 +66,8 @@ class LLMProvider(ABC):
         temperature: float,
         web_search: bool = False,
         generate_image: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Default: emit the full completion as a single chunk."""
         result = await self.complete(
@@ -67,6 +76,8 @@ class LLMProvider(ABC):
             temperature=temperature,
             web_search=web_search,
             generate_image=generate_image,
+            tools=tools,
+            tool_choice=tool_choice,
         )
         if result.content:
             yield StreamChunk(content=result.content, model=result.model)
@@ -92,12 +103,15 @@ class StubProvider(LLMProvider):
         temperature: float,
         web_search: bool = False,
         generate_image: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> ProviderResult:
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         web = " · web" if web_search else ""
         img = " · image" if generate_image else ""
+        tool_note = f" · tools={len(tools)}" if tools else ""
         reply = (
-            f"[ARIL stub · {model} · temp={temperature:.2f}{web}{img}]\n\n"
+            f"[ARIL stub · {model} · temp={temperature:.2f}{web}{img}{tool_note}]\n\n"
             f"Received your prompt ({len(last_user)} chars). "
             "Set OPENROUTER_API_KEY to enable live multi-model routing."
         )

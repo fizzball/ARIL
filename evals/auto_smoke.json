@@ -1,0 +1,34 @@
+[
+  {
+    "id": "auto-smoke-001",
+    "prompt": "Write a one-line Swift function that returns the larger of two Ints."
+  },
+  {
+    "id": "auto-smoke-002",
+    "prompt": "What is the difference between OAuth access tokens and refresh tokens?"
+  },
+  {
+    "id": "auto-smoke-003",
+    "prompt": "Reason step by step: if a train leaves at 3pm going 60mph and another at 4pm going 80mph from the same station same direction, when does the second catch up?"
+  },
+  {
+    "id": "auto-smoke-004",
+    "prompt": "Suggest three secure password storage practices for a web API."
+  },
+  {
+    "id": "auto-smoke-005",
+    "prompt": "Rewrite this sentence more clearly: 'The thing that the team did was they made improvements to the system which resulted in better performance metrics.'"
+  },
+  {
+    "id": "auto-smoke-006",
+    "prompt": "Explain what a race condition is using a short everyday analogy."
+  },
+  {
+    "id": "auto-smoke-007",
+    "prompt": "Give a minimal Python snippet that reads a CSV and prints the column names."
+  },
+  {
+    "id": "auto-smoke-008",
+    "prompt": "List three trade-offs between SQLite and Postgres for a single-user desktop app."
+  }
+]

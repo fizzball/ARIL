@@ -75,6 +75,8 @@ struct PreviewResponse: Codable, Equatable {
     let alternativesSource: String?
     let userOverride: UserOverrideInsight?
     let analysisSkipped: Bool?
+    /// When Auto honors a Prefer win (fingerprint or category).
+    let preferenceReason: String?
 
     enum CodingKeys: String, CodingKey {
         case classification, grade, alternatives, routes, cache, temperature
@@ -83,6 +85,7 @@ struct PreviewResponse: Codable, Equatable {
         case alternativesSource = "alternatives_source"
         case userOverride = "user_override"
         case analysisSkipped = "analysis_skipped"
+        case preferenceReason = "preference_reason"
     }
 }
 
@@ -191,6 +194,22 @@ struct APIChatMessage: Codable {
     let content: String
 }
 
+struct MCPServerInRequestDTO: Encodable {
+    let id: String
+    let name: String
+    let url: String
+    let authStyle: String
+    let authHeaderName: String?
+    let apiKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, url
+        case authStyle = "auth_style"
+        case authHeaderName = "auth_header_name"
+        case apiKey = "api_key"
+    }
+}
+
 struct ChatRequest: Encodable {
     let messages: [APIChatMessage]
     let model: String?
@@ -204,6 +223,7 @@ struct ChatRequest: Encodable {
     let webSearch: Bool
     /// Enter before analysis idle timer — chat normally but do not seed Learning.
     let skipAutoJudgement: Bool
+    let mcpServers: [MCPServerInRequestDTO]
 
     enum CodingKeys: String, CodingKey {
         case messages, model, temperature, attachments
@@ -214,6 +234,7 @@ struct ChatRequest: Encodable {
         case routingProfile = "routing_profile"
         case webSearch = "web_search"
         case skipAutoJudgement = "skip_auto_judgement"
+        case mcpServers = "mcp_servers"
     }
 }
 
@@ -289,6 +310,7 @@ struct StreamDoneEvent: Codable {
     let costUsd: Double?
     let cached: Bool?
     let latencyMs: Int?
+    let preferenceReason: String?
 
     enum CodingKeys: String, CodingKey {
         case model, cached
@@ -298,6 +320,7 @@ struct StreamDoneEvent: Codable {
         case outputTokens = "output_tokens"
         case costUsd = "cost_usd"
         case latencyMs = "latency_ms"
+        case preferenceReason = "preference_reason"
     }
 }
 
@@ -439,6 +462,14 @@ struct ClassificationRecordDTO: Codable, Identifiable, Equatable {
 
 struct PreferencesSnapshotDTO: Codable {
     let classifications: [ClassificationRecordDTO]
+    let categoryWins: [String: [String: Int]]?
+    let fingerprintWins: [String: [String: Int]]?
+
+    enum CodingKeys: String, CodingKey {
+        case classifications
+        case categoryWins = "category_wins"
+        case fingerprintWins = "fingerprint_wins"
+    }
 }
 
 struct StoreRecordDTO: Codable, Identifiable, Equatable {
@@ -571,6 +602,37 @@ struct OpenRouterKeyUpdateDTO: Encodable {
     }
 }
 
+struct MCPCheckRequestDTO: Encodable {
+    let url: String
+    let authStyle: String
+    let authHeaderName: String?
+    let apiKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case authStyle = "auth_style"
+        case authHeaderName = "auth_header_name"
+        case apiKey = "api_key"
+    }
+}
+
+struct MCPCheckResponseDTO: Codable {
+    let ok: Bool
+    let toolsCount: Int?
+    let toolNames: [String]?
+    let latencyMs: Int?
+    let message: String
+    let checkedAt: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, message
+        case toolsCount = "tools_count"
+        case toolNames = "tool_names"
+        case latencyMs = "latency_ms"
+        case checkedAt = "checked_at"
+    }
+}
+
 struct ModelPricingDTO: Codable, Identifiable, Equatable {
     let id: String
     let promptPer1k: Double
@@ -604,6 +666,8 @@ struct OpenRouterCatalogModelDTO: Codable, Identifiable, Equatable, Hashable {
     let completionPer1k: Double
     let webSearchPerRequest: Double?
     let contextLength: Int?
+    let inputModalities: [String]?
+    let outputModalities: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, name
@@ -611,10 +675,24 @@ struct OpenRouterCatalogModelDTO: Codable, Identifiable, Equatable, Hashable {
         case completionPer1k = "completion_per_1k"
         case webSearchPerRequest = "web_search_per_request"
         case contextLength = "context_length"
+        case inputModalities = "input_modalities"
+        case outputModalities = "output_modalities"
     }
 
     var pricingLabel: String {
         String(format: "$%.4f / $%.4f per 1K", promptPer1k, completionPer1k)
+    }
+
+    /// True when the catalog lists image as an input modality.
+    var acceptsImageInput: Bool? {
+        guard let mods = inputModalities, !mods.isEmpty else { return nil }
+        return mods.contains { $0.caseInsensitiveCompare("image") == .orderedSame }
+    }
+
+    /// True when the catalog lists image as an output modality (image-gen).
+    var emitsImageOutput: Bool? {
+        guard let mods = outputModalities, !mods.isEmpty else { return nil }
+        return mods.contains { $0.caseInsensitiveCompare("image") == .orderedSame }
     }
 }
 
@@ -622,4 +700,31 @@ struct OpenRouterCatalogResponseDTO: Codable {
     let models: [OpenRouterCatalogModelDTO]
     let count: Int
     let refreshed: Bool?
+}
+
+struct OpenRouterWeeklyRankingDTO: Codable, Identifiable, Equatable, Hashable {
+    let rank: Int
+    let id: String
+    let name: String
+    let promptPer1k: Double?
+    let completionPer1k: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case rank, id, name
+        case promptPer1k = "prompt_per_1k"
+        case completionPer1k = "completion_per_1k"
+    }
+
+    var pricingLabel: String? {
+        guard let prompt = promptPer1k, let completion = completionPer1k else { return nil }
+        return String(format: "$%.4f / $%.4f per 1K", prompt, completion)
+    }
+}
+
+struct OpenRouterWeeklyRankingsResponseDTO: Codable {
+    let models: [OpenRouterWeeklyRankingDTO]
+    let count: Int
+    let period: String?
+    let refreshed: Bool?
+    let source: String?
 }

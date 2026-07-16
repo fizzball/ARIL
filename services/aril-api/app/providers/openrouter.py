@@ -78,10 +78,25 @@ class OpenRouterProvider(LLMProvider):
     def _serialize_messages(self, messages: list[ProviderMessage]) -> list[dict]:
         out: list[dict] = []
         for m in messages:
+            if m.role == "tool":
+                entry: dict = {
+                    "role": "tool",
+                    "content": m.content or "",
+                }
+                if m.tool_call_id:
+                    entry["tool_call_id"] = m.tool_call_id
+                out.append(entry)
+                continue
             if m.parts:
-                out.append({"role": m.role, "content": m.parts})
+                entry = {"role": m.role, "content": m.parts}
             else:
-                out.append({"role": m.role, "content": m.content})
+                entry = {"role": m.role, "content": m.content}
+            if m.tool_calls:
+                entry["tool_calls"] = m.tool_calls
+                # OpenAI allows null content when tool_calls are present
+                if not m.content and not m.parts:
+                    entry["content"] = None
+            out.append(entry)
         return out
 
     def _build_payload(
@@ -93,6 +108,8 @@ class OpenRouterProvider(LLMProvider):
         stream: bool,
         web_search: bool,
         generate_image: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> dict:
         payload: dict = {
             "model": model,
@@ -112,6 +129,10 @@ class OpenRouterProvider(LLMProvider):
                 payload["modalities"] = ["image"]
             else:
                 payload["modalities"] = ["image", "text"]
+        if tools:
+            payload["tools"] = tools
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
         return payload
 
     async def complete(
@@ -122,6 +143,8 @@ class OpenRouterProvider(LLMProvider):
         temperature: float,
         web_search: bool = False,
         generate_image: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> ProviderResult:
         self._require_key()
         payload = self._build_payload(
@@ -131,6 +154,8 @@ class OpenRouterProvider(LLMProvider):
             stream=False,
             web_search=web_search,
             generate_image=generate_image,
+            tools=tools,
+            tool_choice=tool_choice,
         )
 
         async with httpx.AsyncClient(timeout=180.0) as client:
@@ -148,8 +173,11 @@ class OpenRouterProvider(LLMProvider):
         if not choices:
             raise RuntimeError(f"OpenRouter returned no choices: {data!r}")
 
-        message = choices[0].get("message") or {}
+        choice0 = choices[0] or {}
+        message = choice0.get("message") or {}
         content = _extract_message_content(message)
+        raw_calls = message.get("tool_calls")
+        tool_calls = raw_calls if isinstance(raw_calls, list) and raw_calls else None
         usage = data.get("usage") or {}
         in_tok = int(usage.get("prompt_tokens") or 0)
         out_tok = int(usage.get("completion_tokens") or 0)
@@ -162,6 +190,8 @@ class OpenRouterProvider(LLMProvider):
             output_tokens=out_tok,
             cost_usd=round(cost, 6),
             cached=False,
+            tool_calls=tool_calls,
+            finish_reason=choice0.get("finish_reason"),
         )
 
     async def stream(
@@ -172,15 +202,20 @@ class OpenRouterProvider(LLMProvider):
         temperature: float,
         web_search: bool = False,
         generate_image: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         # Image generation is more reliable as a single non-stream completion.
-        if generate_image:
+        # Tool rounds also use complete(); stream is for final text only.
+        if generate_image or tools:
             result = await self.complete(
                 messages,
                 model=model,
                 temperature=temperature,
                 web_search=web_search,
-                generate_image=True,
+                generate_image=generate_image,
+                tools=tools,
+                tool_choice=tool_choice,
             )
             if result.content:
                 yield StreamChunk(content=result.content, model=result.model)

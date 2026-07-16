@@ -59,11 +59,11 @@ struct ContentView: View {
                 .help("Learning — stored judgements and classifications")
 
                 Button {
-                    state.openToolPanel(.modelCosts)
+                    state.openToolPanel(.modelPopularity)
                 } label: {
-                    Image(systemName: "dollarsign.circle")
+                    Image(systemName: "chart.bar.fill")
                 }
-                .help("Selected model costs (OpenRouter)")
+                .help("Model popularity — OpenRouter weekly rankings")
 
                 Button {
                     openSettings()
@@ -89,6 +89,22 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(theme.palette.colorScheme)
+        .alert(
+            "Budget warning",
+            isPresented: Binding(
+                get: { state.budgetConfirmMessage != nil },
+                set: { if !$0 { state.respondToBudgetConfirm(false) } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                state.respondToBudgetConfirm(false)
+            }
+            Button("Send anyway") {
+                state.respondToBudgetConfirm(true)
+            }
+        } message: {
+            Text(state.budgetConfirmMessage ?? "")
+        }
         .task {
             systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.

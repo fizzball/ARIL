@@ -138,6 +138,8 @@ class PreviewResponse(BaseModel):
     alternatives_source: Literal["none", "heuristic", "llm", "cache", "judgement"] = "heuristic"
     user_override: UserOverrideInsight | None = None
     analysis_skipped: bool = False
+    # When Auto honors a Prefer win (fingerprint or category).
+    preference_reason: str | None = None
 
 
 class ChatMessage(BaseModel):
@@ -165,6 +167,8 @@ class ChatRequest(BaseModel):
     web_search: bool = False
     # Enter before analysis idle timer — chat normally but do not seed Learning.
     skip_auto_judgement: bool = False
+    # Ready remote MCP servers for this turn (keys from the Mac Keychain).
+    mcp_servers: list[MCPServerInRequest] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -176,6 +180,7 @@ class ChatResponse(BaseModel):
     cost_usd: float
     cached: bool
     route_category: RouteCategory
+    preference_reason: str | None = None
 
 
 class CompareRequest(BaseModel):
@@ -376,6 +381,8 @@ class OpenRouterCatalogModel(BaseModel):
     completion_per_1k: float
     web_search_per_request: float = 0.005
     context_length: int | None = None
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
 
 
 class OpenRouterCatalogResponse(BaseModel):
@@ -384,5 +391,49 @@ class OpenRouterCatalogResponse(BaseModel):
     refreshed: bool = False
 
 
+class OpenRouterWeeklyRankingModel(BaseModel):
+    rank: int
+    id: str
+    name: str
+    prompt_per_1k: float = 0.0
+    completion_per_1k: float = 0.0
+
+
+class OpenRouterWeeklyRankingsResponse(BaseModel):
+    models: list[OpenRouterWeeklyRankingModel]
+    count: int
+    period: str = "top-weekly"
+    refreshed: bool = False
+    source: str = "openrouter"
+
+
 class OpenRouterKeyUpdate(BaseModel):
     api_key: str = Field(min_length=1)
+
+
+class MCPCheckRequest(BaseModel):
+    url: str = Field(min_length=1)
+    auth_style: str = "bearer"
+    auth_header_name: str | None = None
+    api_key: str | None = None
+
+
+class MCPCheckResponse(BaseModel):
+    ok: bool
+    tools_count: int | None = None
+    tool_names: list[str] = Field(default_factory=list)
+    latency_ms: int | None = None
+    message: str
+    checked_at: float | None = None
+
+
+class MCPServerInRequest(BaseModel):
+    """Per-turn MCP server config from the macOS client (secrets not stored on gateway)."""
+
+    id: str = ""
+    name: str = ""
+    url: str = Field(min_length=1)
+    auth_style: str = "bearer"
+    auth_header_name: str | None = None
+    api_key: str | None = None
+

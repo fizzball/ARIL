@@ -21,7 +21,7 @@ final class LocalGatewayManager: ObservableObject {
 
     func ensureRunning() async {
         if await healthOK() {
-            if await storeAPIAvailable() {
+            if await gatewayAPICompatible() {
                 lastMessage = "Local gateway already running"
                 return
             }
@@ -31,7 +31,7 @@ final class LocalGatewayManager: ObservableObject {
         start()
         for _ in 0..<40 {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            if await healthOK(), await storeAPIAvailable() {
+            if await healthOK(), await gatewayAPICompatible() {
                 lastMessage = "Solo gateway started on port \(port)"
                 return
             }
@@ -60,6 +60,39 @@ final class LocalGatewayManager: ObservableObject {
         do {
             let (_, response) = try await URLSession.shared.data(from: url)
             return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
+    }
+
+    /// True when this listener exposes the routes the current client expects.
+    /// Stale Solo binaries (still on :8741 after an upgrade) must be recycled —
+    /// `/health` alone is not enough.
+    private func gatewayAPICompatible() async -> Bool {
+        guard await storeAPIAvailable() else { return false }
+        guard await mcpCheckAPIAvailable() else { return false }
+        return await weeklyRankingsAPIAvailable()
+    }
+
+    /// `POST /v1/mcp/check` exists when GET returns 405 (not 404).
+    private func mcpCheckAPIAvailable() async -> Bool {
+        await routeExistsPreferringNon404(path: "/v1/mcp/check", method: "GET")
+    }
+
+    /// Weekly popularity rankings (added in 0.3.27).
+    private func weeklyRankingsAPIAvailable() async -> Bool {
+        await routeExistsPreferringNon404(path: "/v1/models/rankings/weekly", method: "GET")
+    }
+
+    /// Existing route typically returns 200/405/422/…; missing route → 404.
+    private func routeExistsPreferringNon404(path: String, method: String) async -> Bool {
+        guard let url = URL(string: "\(baseURL)\(path)") else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        do {
+            let (_, response) = try await URLSession.shared.data(for: req)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            return code != 404 && code != 0
         } catch {
             return false
         }

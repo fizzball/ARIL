@@ -417,13 +417,25 @@ def build_preview(
 
     # Prefer explicit profile mapping for the classified category (clearest Auto behavior)
     profile_pick = profile.get(classification.primary) or profile[RouteCategory.general]
+    preference_reason: str | None = None
 
     if req.preferred_model and req.route_mode.value == "manual":
         recommended = req.preferred_model
-    elif user_override and user_override.model and user_override.category_overridden:
-        recommended = user_override.model
     elif wants_image_generation(req.prompt):
         recommended = IMAGE_GEN_MODEL
+    elif req.route_mode.value == "auto":
+        pick = pref_store.preferred_model_for_prompt(
+            req.prompt, classification.primary.value
+        )
+        if pick:
+            recommended = pick["model"]
+            preference_reason = pick.get("reason")
+        elif user_override and user_override.model and user_override.category_overridden:
+            recommended = user_override.model
+        else:
+            recommended = profile_pick
+    elif user_override and user_override.model and user_override.category_overridden:
+        recommended = user_override.model
     else:
         recommended = profile_pick
 
@@ -431,6 +443,11 @@ def build_preview(
     routes.sort(
         key=lambda r: (0 if r.model_id == recommended else 1, -r.score),
     )
+    if preference_reason and routes:
+        # Surface Prefer reason on the winning route for Routing analysis.
+        top = routes[0]
+        if top.model_id == recommended and preference_reason not in top.reasons:
+            top.reasons = [preference_reason, *top.reasons]
 
     in_tok = estimate_tokens(req.prompt)
     if system_prompt:
@@ -471,6 +488,7 @@ def build_preview(
         alternatives_source=src,  # type: ignore[arg-type]
         user_override=user_override,
         analysis_skipped=False,
+        preference_reason=preference_reason,
     )
 
 
@@ -497,8 +515,20 @@ def build_preview_from_judgement(
     if not model:
         model = profile.get(primary) or profile[RouteCategory.general]
 
+    preference_reason: str | None = None
     if req.preferred_model and req.route_mode.value == "manual":
         recommended = req.preferred_model
+    elif wants_image_generation(req.prompt):
+        recommended = IMAGE_GEN_MODEL
+    elif req.route_mode.value == "auto":
+        from app.core import preferences as pref_store
+
+        pick = pref_store.preferred_model_for_prompt(req.prompt, primary.value)
+        if pick:
+            recommended = pick["model"]
+            preference_reason = pick.get("reason")
+        else:
+            recommended = model
     else:
         recommended = model
 
@@ -558,6 +588,9 @@ def build_preview_from_judgement(
     learn_note = (
         "Reused Learning judgement — prompt analysis skipped to save tokens."
     )
+    route_reasons = [learn_note]
+    if preference_reason:
+        route_reasons = [preference_reason, learn_note]
     routes = [
         ModelEstimate(
             model_id=recommended,
@@ -567,7 +600,7 @@ def build_preview_from_judgement(
             estimated_output_tokens=out_tok,
             estimated_cost_usd=cost,
             score=1.0,
-            reasons=[learn_note],
+            reasons=route_reasons,
             breakdown=ScoreBreakdown(
                 category_fit=1.0,
                 cost=1.0,
@@ -616,6 +649,7 @@ def build_preview_from_judgement(
         alternatives_source=src,  # type: ignore[arg-type]
         user_override=user_override,
         analysis_skipped=True,
+        preference_reason=preference_reason,
     )
 
 

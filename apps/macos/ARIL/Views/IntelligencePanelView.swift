@@ -119,7 +119,7 @@ struct IntelligencePanelView: View {
                 let willCache = preview.cache.eligible && preview.cache.wouldHit
                 let costWarning = state.hasConfiguredMCPServers || state.webSearchEnabled
                 let baseHelp = "Estimated USD cost for the top recommended route (input + expected output)."
-                let warnHelp = "If Web search or MCP servers are used, costs may increase."
+                let warnHelp = "If Web search is on, or MCP servers are enabled for a future tool-using turn, costs may increase."
                 let cacheHelp = "This prompt looks cacheable — expected to hit the prompt cache (shown in green)."
                 let systemHelp = "Includes the global system prompt when enabled."
                 let costColor: Color? = {
@@ -171,6 +171,13 @@ struct IntelligencePanelView: View {
                     ? "Manual mode keeps this model (highlighted red) — ARIL will not swap it."
                     : "Recommended model for this prompt."
             )
+            if let reason = preview.preferenceReason, !reason.isEmpty, state.routeMode == .auto {
+                Text(reason)
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("Auto is using a model you Preferred in Learning / Judge.")
+            }
             if preview.cache.eligible {
                 metric("Cache", preview.cache.wouldHit ? "cached" : "not cached", valueColor: valueColor)
             }

@@ -17,16 +17,26 @@ ARIL is a native **macOS 14+** chat client. Solo mode runs a bundled local gatew
 6. Paste your OpenRouter API key and save
 7. Keep **Solo mode** enabled (default) so the local gateway starts automatically
 
+### Optional MCP servers (Preferences → MCP)
+
+Remote HTTP MCP presets can be enabled for Auto/Manual chat tools. Turn on **Use MCP servers**, enable a preset (e.g. DeepWiki), run **Check**, then ask in chat — the reply may show `Using DeepWiki · …` while tools run. Judge mode does not use MCP. Playwright/stdio is deferred.
+
+| Preset | Auth | Notes |
+|--------|------|-------|
+| Agenty | Bearer API key | Web scraping / screenshots |
+| AI Diagram Maker | `X-ADM-API-Key` | Diagram generation |
+| Cloudflare Browser | Bearer / API token | Browser rendering |
+| DeepWiki | None | Public GitHub wiki Q&A |
+| GitHub | Bearer PAT | Repos / issues / PRs |
+| Firecrawl | Bearer or keyless free tier | Scrape / search |
+| Playwright | — | Deferred (needs local Node) |
+
 ### Gatekeeper / “app can’t be opened”
 
-Release builds from CI may be **ad-hoc signed** until Developer ID notarization is configured.
-
-If macOS blocks the app:
+Notarized release builds open normally. If an older unsigned build is blocked:
 
 1. Right-click **ARIL** → **Open** → **Open**
 2. Or: **System Settings → Privacy & Security** → allow the blocked app
-
-Notarized builds (when published) open without this step.
 
 ## Using ARIL
 

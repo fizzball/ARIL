@@ -25,7 +25,7 @@ enum GenerationPhase: Equatable {
 
 /// Trailing flyout opened from the toolbar.
 enum ToolPanel: String, Identifiable, Equatable {
-    case modelCosts
+    case modelPopularity
     case learning
     case about
 
@@ -33,7 +33,7 @@ enum ToolPanel: String, Identifiable, Equatable {
 
     var title: String {
         switch self {
-        case .modelCosts: return "Model costs"
+        case .modelPopularity: return "Model popularity"
         case .learning: return "Learning"
         case .about: return "About ARIL"
         }
@@ -86,6 +86,7 @@ final class AppState: ObservableObject {
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
+    @Published var mcpCheckingServerID: UUID?
     /// When on, `systemPrompt` is sent as a system message on every chat/compare request.
     @Published var systemPromptEnabled: Bool = false
     @Published var systemPrompt: String = ""
@@ -169,6 +170,23 @@ final class AppState: ObservableObject {
     @Published var openRouterCatalog: [OpenRouterCatalogModelDTO] = []
     @Published var isLoadingOpenRouterCatalog: Bool = false
     @Published var openRouterCatalogError: String?
+    /// Weekly popularity rankings (`sort=top-weekly`) for the Other… callout.
+    @Published var openRouterWeeklyRankings: [OpenRouterWeeklyRankingDTO] = []
+    @Published var isLoadingWeeklyRankings: Bool = false
+    @Published var weeklyRankingsError: String?
+
+    /// Preferences → Budget soft/hard USD caps (0 = off for that cap).
+    @Published var budgetCaps: BudgetCaps = .defaults
+    /// Master switch — when off, caps are ignored regardless of Soft/Hard values.
+    @Published var budgetEnabled: Bool = false
+    /// Spend accrued today (local calendar date), for daily caps.
+    @Published var dailySpendUsd: Double = 0
+    /// Soft-confirm dialog message; nil when no prompt is showing.
+    @Published var budgetConfirmMessage: String?
+    @Published var categoryPreferWins: [String: [String: Int]] = [:]
+    @Published var fingerprintPreferWins: [String: [String: Int]] = [:]
+    @Published var evalLog: [EvalLogEntry] = []
+    @Published var isRunningAutoEval: Bool = false
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
@@ -178,6 +196,9 @@ final class AppState: ObservableObject {
     private var lastUserPromptForPrefer: String = ""
     /// Local tombstone so reload can't resurrect until gateway agrees.
     private var deletedSessionIDs: Set<UUID> = []
+    private var budgetConfirmContinuation: CheckedContinuation<Bool, Never>?
+    /// Skip budget UI while Learning → Run Auto eval is driving sends.
+    private var budgetBypassForEval: Bool = false
 
     var selectedSession: ChatSession? {
         sessions.first { $0.id == selectedSessionID }
@@ -195,8 +216,8 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.16"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "46"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.28"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "52"
         return "\(short) (\(build))"
     }
 
@@ -244,20 +265,20 @@ final class AppState: ObservableObject {
         skipAnalysisOnJudgement =
             defaults.object(forKey: "aril.skipAnalysisOnJudgement") as? Bool ?? true
         showInMenuBar = defaults.object(forKey: "aril.showInMenuBar") as? Bool ?? false
-        mcpEnabled = false
-        UserDefaults.standard.set(false, forKey: "aril.mcpEnabled")
-        // Drafting is paused until the backlog MCP config (URL + API key) ships.
-        mcpServers = []
-        UserDefaults.standard.removeObject(forKey: "aril.mcpServers")
+        mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
+        mcpServers = Self.loadMCPServers()
         systemPromptEnabled = defaults.object(forKey: "aril.systemPromptEnabled") as? Bool ?? false
         let storedPrompt = defaults.string(forKey: "aril.systemPrompt") ?? ""
         systemPrompt = storedPrompt
         systemPromptBaseline = storedPrompt
         systemPromptDirty = false
+        budgetCaps = BudgetCaps.load()
+        budgetEnabled = UserDefaults.standard.object(forKey: "aril.budget.enabled") as? Bool ?? false
+        dailySpendUsd = Self.loadDailySpendUsd()
         loadDeletedSessionIDs()
         // Restore history synchronously so the first frame never looks empty.
         loadLocalSessions()
-        // Seed built-in rates immediately so Preferences / Model costs aren’t blank
+        // Seed built-in rates immediately so Preferences pricing isn’t blank
         // before the gateway answers (or when no OpenRouter key is configured).
         applyDefaultModelPricing()
         objectWillChange.send()
@@ -299,6 +320,204 @@ final class AppState: ObservableObject {
     func setShowInMenuBar(_ enabled: Bool) {
         showInMenuBar = enabled
         UserDefaults.standard.set(enabled, forKey: "aril.showInMenuBar")
+    }
+
+    func setBudgetEnabled(_ enabled: Bool) {
+        budgetEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.budget.enabled")
+    }
+
+    func setBudgetCaps(_ caps: BudgetCaps) {
+        budgetCaps = BudgetCaps(
+            sessionSoftUsd: BudgetCaps.clamped(caps.sessionSoftUsd),
+            sessionHardUsd: BudgetCaps.clamped(caps.sessionHardUsd),
+            dailySoftUsd: BudgetCaps.clamped(caps.dailySoftUsd),
+            dailyHardUsd: BudgetCaps.clamped(caps.dailyHardUsd)
+        )
+        budgetCaps.save()
+    }
+
+    func respondToBudgetConfirm(_ proceed: Bool) {
+        budgetConfirmMessage = nil
+        let cont = budgetConfirmContinuation
+        budgetConfirmContinuation = nil
+        cont?.resume(returning: proceed)
+    }
+
+    private func requestBudgetConfirmation(message: String) async -> Bool {
+        if budgetConfirmContinuation != nil {
+            respondToBudgetConfirm(false)
+        }
+        return await withCheckedContinuation { continuation in
+            budgetConfirmContinuation = continuation
+            budgetConfirmMessage = message
+        }
+    }
+
+    private static func localDayKey(_ date: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func loadDailySpendUsd(defaults: UserDefaults = .standard) -> Double {
+        let today = localDayKey()
+        let storedDay = defaults.string(forKey: "aril.budget.dailyDate") ?? ""
+        if storedDay != today {
+            defaults.set(today, forKey: "aril.budget.dailyDate")
+            defaults.set(0.0, forKey: "aril.budget.dailyTotalUsd")
+            return 0
+        }
+        return max(0, defaults.double(forKey: "aril.budget.dailyTotalUsd"))
+    }
+
+    private func accrueDailySpend(_ amount: Double) {
+        guard amount > 0 else { return }
+        let today = Self.localDayKey()
+        let defaults = UserDefaults.standard
+        let storedDay = defaults.string(forKey: "aril.budget.dailyDate") ?? ""
+        var total = storedDay == today ? max(0, defaults.double(forKey: "aril.budget.dailyTotalUsd")) : 0
+        total += amount
+        defaults.set(today, forKey: "aril.budget.dailyDate")
+        defaults.set(total, forKey: "aril.budget.dailyTotalUsd")
+        dailySpendUsd = total
+    }
+
+    /// Refresh published daily spend (e.g. after midnight while app stays open).
+    func refreshDailySpendFromDefaults() {
+        dailySpendUsd = Self.loadDailySpendUsd()
+    }
+
+    private var sessionSpendUsd: Double {
+        selectedSession?.totalCostUsd ?? 0
+    }
+
+    private func looksLikeImageGenModel(_ modelID: String) -> Bool {
+        if let row = openRouterCatalog.first(where: { $0.id == modelID }),
+           row.emitsImageOutput == true {
+            return true
+        }
+        let hay = modelID.lowercased()
+        return hay.contains("image") || hay.contains("dall-e") || hay.contains("flux")
+            || hay.contains("gpt-image") || hay.contains("imagen")
+    }
+
+    private func estimateOutgoingCostUsd() -> Double {
+        let routes = preview?.routes ?? []
+        if routeMode == .compare {
+            let peers = Array(routes.prefix(3))
+            if !peers.isEmpty {
+                return peers.map(\.estimatedCostUsd).reduce(0, +)
+            }
+            let one = routes.first?.estimatedCostUsd ?? 0.02
+            return one * 3
+        }
+        if let top = routes.first {
+            var est = top.estimatedCostUsd
+            if webSearchEnabled {
+                let fee = modelPricingByID[top.modelId]?.webSearchFee
+                    ?? Self.defaultWebSearchPerRequest
+                // Preview may already include web; add only when estimate looks token-only.
+                if est < fee {
+                    est += fee
+                }
+            }
+            return est
+        }
+        var fallback = 0.01
+        if webSearchEnabled {
+            fallback += Self.defaultWebSearchPerRequest
+        }
+        return fallback
+    }
+
+    private func evaluateBudgetGate(estimate: Double) -> BudgetGateResult {
+        refreshDailySpendFromDefaults()
+        let caps = budgetCaps
+        let sessionTotal = sessionSpendUsd
+        let dailyTotal = dailySpendUsd
+        let sessionNext = sessionTotal + estimate
+        let dailyNext = dailyTotal + estimate
+
+        if caps.sessionHardUsd > 0, sessionNext > caps.sessionHardUsd {
+            return .hardBlock(message: String(
+                format: "Session hard budget $%.2f would be exceeded (now $%.4f + est. $%.4f). Send blocked.",
+                caps.sessionHardUsd, sessionTotal, estimate
+            ))
+        }
+        if caps.dailyHardUsd > 0, dailyNext > caps.dailyHardUsd {
+            return .hardBlock(message: String(
+                format: "Daily hard budget $%.2f would be exceeded (today $%.4f + est. $%.4f). Send blocked.",
+                caps.dailyHardUsd, dailyTotal, estimate
+            ))
+        }
+
+        var softReasons: [String] = []
+        if caps.sessionSoftUsd > 0, sessionNext > caps.sessionSoftUsd, sessionTotal <= caps.sessionSoftUsd {
+            softReasons.append(String(
+                format: "session soft $%.2f (now $%.4f + est. $%.4f)",
+                caps.sessionSoftUsd, sessionTotal, estimate
+            ))
+        } else if caps.sessionSoftUsd > 0, sessionNext > caps.sessionSoftUsd {
+            softReasons.append(String(
+                format: "session soft $%.2f already crossed (now $%.4f + est. $%.4f)",
+                caps.sessionSoftUsd, sessionTotal, estimate
+            ))
+        }
+        if caps.dailySoftUsd > 0, dailyNext > caps.dailySoftUsd {
+            softReasons.append(String(
+                format: "daily soft $%.2f (today $%.4f + est. $%.4f)",
+                caps.dailySoftUsd, dailyTotal, estimate
+            ))
+        }
+
+        let anySoftConfigured = caps.sessionSoftUsd > 0 || caps.dailySoftUsd > 0
+        if anySoftConfigured {
+            if routeMode == .compare {
+                softReasons.append("Judge runs ~3 models")
+            }
+            if webSearchEnabled {
+                softReasons.append("web search is on")
+            }
+            let modelForImage: String = {
+                if routeMode == .manual {
+                    return UserDefaults.standard.string(forKey: "aril.lastModel") ?? selectedModel
+                }
+                return preview?.routes.first?.modelId ?? selectedModel
+            }()
+            if looksLikeImageGenModel(modelForImage) {
+                softReasons.append("image generation model")
+            }
+        }
+
+        // Dedupe while preserving order
+        var seen = Set<String>()
+        let unique = softReasons.filter { seen.insert($0).inserted }
+        guard !unique.isEmpty else { return .allow }
+        let message = "Budget check: \(unique.joined(separator: "; ")). Send anyway?"
+        return .softConfirm(message: message)
+    }
+
+    /// Returns false when send should abort (hard block or user cancelled soft confirm).
+    private func passBudgetGate() async -> Bool {
+        if budgetBypassForEval || !budgetEnabled { return true }
+        let estimate = estimateOutgoingCostUsd()
+        switch evaluateBudgetGate(estimate: estimate) {
+        case .allow:
+            return true
+        case .hardBlock(let message):
+            lastError = message
+            return false
+        case .softConfirm(let message):
+            let proceed = await requestBudgetConfirmation(message: message)
+            if !proceed {
+                lastError = nil
+            }
+            return proceed
+        }
     }
 
     func setSystemPromptEnabled(_ enabled: Bool) {
@@ -428,10 +647,160 @@ final class AppState: ObservableObject {
     }
 
     func setMCPEnabled(_ enabled: Bool) {
-        // MCP runtime wiring is still on the backlog — never persist enabled.
-        guard !enabled else { return }
-        mcpEnabled = false
-        UserDefaults.standard.set(false, forKey: "aril.mcpEnabled")
+        mcpEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.mcpEnabled")
+    }
+
+    func updateMCPServer(_ server: MCPServerConfig) {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == server.id }) else { return }
+        var next = server
+        if next.isDeferred {
+            next.enabled = false
+        }
+        mcpServers[idx] = next
+        MCPKeychainStore.save(serverID: next.id, apiKey: next.apiKey)
+        saveMCPServers()
+    }
+
+    func setMCPServerEnabled(id: UUID, enabled: Bool) {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
+        if mcpServers[idx].isDeferred { return }
+        mcpServers[idx].enabled = enabled
+        saveMCPServers()
+    }
+
+    func setMCPServerAPIKey(id: UUID, apiKey: String) {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
+        mcpServers[idx].apiKey = apiKey
+        MCPKeychainStore.save(serverID: id, apiKey: apiKey)
+        saveMCPServers()
+    }
+
+    func addCustomMCPServer(_ server: MCPServerConfig = MCPServerConfig()) {
+        var next = server
+        next.presetId = nil
+        next.isEditable = true
+        next.isDeferred = false
+        if next.transport == .stdio {
+            next.transport = .http
+        }
+        mcpServers.append(next)
+        MCPKeychainStore.save(serverID: next.id, apiKey: next.apiKey)
+        saveMCPServers()
+    }
+
+    func deleteMCPServer(id: UUID) {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
+        guard mcpServers[idx].presetId == nil else { return }
+        MCPKeychainStore.delete(serverID: id)
+        mcpServers.remove(at: idx)
+        saveMCPServers()
+    }
+
+    func resetMCPPreset(id: UUID) {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == id }),
+              let presetId = mcpServers[idx].presetId,
+              let factory = MCPServerConfig.builtInPresets().first(where: { $0.presetId == presetId })
+        else { return }
+        var restored = factory
+        restored.id = mcpServers[idx].id
+        restored.apiKey = ""
+        MCPKeychainStore.delete(serverID: restored.id)
+        mcpServers[idx] = restored
+        saveMCPServers()
+    }
+
+    func checkMCPServerConnection(id: UUID) async {
+        guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
+        var server = mcpServers[idx]
+        if server.isDeferred {
+            server.lastCheckStatus = .deferred
+            server.lastCheckMessage = "Coming soon — requires local Node (stdio)."
+            mcpServers[idx] = server
+            saveMCPServers()
+            return
+        }
+        mcpCheckingServerID = id
+        defer { mcpCheckingServerID = nil }
+        do {
+            let result = try await client.checkMCPServer(
+                baseURL: gatewayURL,
+                url: server.url,
+                authStyle: server.authStyle.rawValue,
+                authHeaderName: server.authHeaderName,
+                apiKey: server.apiKey
+            )
+            server.lastCheckStatus = result.ok ? .ok : .failed
+            let toolsNote: String = {
+                guard result.ok, let count = result.toolsCount else { return "" }
+                let names = (result.toolNames ?? []).prefix(8).joined(separator: ", ")
+                if names.isEmpty { return " · \(count) tools" }
+                return " · \(count) tools (\(names)\(count > 8 ? ", …" : ""))"
+            }()
+            server.lastCheckMessage = result.message + toolsNote
+            if let ms = result.latencyMs {
+                server.lastCheckMessage += " · \(ms) ms"
+            }
+        } catch {
+            server.lastCheckStatus = .failed
+            server.lastCheckMessage = error.localizedDescription
+        }
+        if let latest = mcpServers.firstIndex(where: { $0.id == id }) {
+            mcpServers[latest] = server
+            saveMCPServers()
+        }
+    }
+
+    private func saveMCPServers() {
+        // Persist non-secrets only (apiKey stripped by encode).
+        if let data = try? JSONEncoder().encode(mcpServers) {
+            UserDefaults.standard.set(data, forKey: "aril.mcpServers")
+        }
+    }
+
+    private static func loadMCPServers() -> [MCPServerConfig] {
+        let presets = MCPServerConfig.builtInPresets()
+        var byPreset: [String: MCPServerConfig] = [:]
+        for p in presets { if let pid = p.presetId { byPreset[pid] = p } }
+
+        var customs: [MCPServerConfig] = []
+        if let data = UserDefaults.standard.data(forKey: "aril.mcpServers"),
+           let saved = try? JSONDecoder().decode([MCPServerConfig].self, from: data) {
+            for var row in saved {
+                if let pid = row.presetId, var preset = byPreset[pid] {
+                    // Keep stable preset id UUID from factory; restore user enable + URL override if editable.
+                    preset.enabled = row.enabled && !preset.isDeferred
+                    if row.isEditable || !preset.url.isEmpty {
+                        // Allow advanced URL overrides only when user saved a non-empty url on a preset.
+                        if !row.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           row.url != MCPServerConfig.builtInPresets().first(where: { $0.presetId == pid })?.url {
+                            // Keep factory URL for non-editable presets.
+                            if preset.isEditable {
+                                preset.url = row.url
+                            }
+                        }
+                    }
+                    preset.lastCheckStatus = row.lastCheckStatus
+                    preset.lastCheckMessage = row.lastCheckMessage
+                    preset.apiKey = MCPKeychainStore.load(serverID: preset.id)
+                    byPreset[pid] = preset
+                } else if row.presetId == nil {
+                    row.apiKey = MCPKeychainStore.load(serverID: row.id)
+                    customs.append(row)
+                }
+            }
+        }
+
+        var merged: [MCPServerConfig] = MCPServerConfig.builtInPresets().compactMap { factory in
+            guard let pid = factory.presetId else { return factory }
+            var row = byPreset[pid] ?? factory
+            if row.apiKey.isEmpty {
+                row.apiKey = MCPKeychainStore.load(serverID: row.id)
+            }
+            return row
+        }
+        merged.append(contentsOf: customs)
+        return merged
     }
 
     private func bootstrap() async {
@@ -609,6 +978,22 @@ final class AppState: ObservableObject {
             modelPricingByID = next
         } catch {
             openRouterCatalogError = error.localizedDescription
+        }
+    }
+
+    func refreshWeeklyRankings(forceRefresh: Bool = false) async {
+        isLoadingWeeklyRankings = true
+        weeklyRankingsError = nil
+        defer { isLoadingWeeklyRankings = false }
+        do {
+            let response = try await client.openRouterWeeklyRankings(
+                baseURL: gatewayURL,
+                limit: 25,
+                refresh: forceRefresh
+            )
+            openRouterWeeklyRankings = response.models
+        } catch {
+            weeklyRankingsError = error.localizedDescription
         }
     }
 
@@ -1075,6 +1460,10 @@ final class AppState: ObservableObject {
         lastError = nil
         if routeMode == .manual {
             selectedModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
+        } else if routeMode == .auto {
+            // Drop the Manual lock so the footer does not keep showing it, and so a
+            // fast send before preview cannot re-send the Manual id as a hint.
+            selectedModel = defaultModel
         }
     }
 
@@ -1322,6 +1711,11 @@ final class AppState: ObservableObject {
 
         lastError = nil
 
+        // Budget soft/hard gates — before mutating the session.
+        if !(await passBudgetGate()) {
+            return
+        }
+
         ensureSession()
         guard let sid = selectedSessionID else { return }
 
@@ -1383,9 +1777,27 @@ final class AppState: ObservableObject {
             )
         }
 
+        let mcpForRequest: [MCPServerInRequestDTO] = {
+            guard mcpEnabled else { return [] }
+            return mcpServers.filter(\.isReady).map {
+                MCPServerInRequestDTO(
+                    id: $0.id.uuidString,
+                    name: $0.name,
+                    url: $0.url,
+                    authStyle: $0.authStyle.rawValue,
+                    authHeaderName: $0.authHeaderName,
+                    apiKey: $0.apiKey.isEmpty ? nil : $0.apiKey
+                )
+            }
+        }()
+
+        // Auto must not send the Manual lock as `model` — the gateway ignores it for
+        // Auto routing, but omitting it keeps the contract obvious.
+        let requestModel: String? = routeMode == .manual ? selectedModel : nil
+
         let request = ChatRequest(
             messages: historyForAPI,
-            model: selectedModel,
+            model: requestModel,
             temperature: temperature,
             routeMode: routeMode,
             useCache: true,
@@ -1394,29 +1806,65 @@ final class AppState: ObservableObject {
             routingProfile: APIRoutingProfile(routingProfile),
             attachments: attachmentDTOs,
             webSearch: webSearchEnabled,
-            skipAutoJudgement: interruptedIdleAnalysis
+            skipAutoJudgement: interruptedIdleAnalysis,
+            mcpServers: mcpForRequest
         )
 
         // Stream token UI updates are async; track receipt so we never fall back to
         // /v1/chat after the gateway already wrote a chat_transaction.
         let streamTokens = StreamTokenProbe()
         do {
-            let done = try await client.chatStream(baseURL: gatewayURL, request: request) { [weak self] token in
-                streamTokens.mark()
-                Task { @MainActor in
-                    guard let self,
-                          let i = self.sessions.firstIndex(where: { $0.id == sid }),
-                          let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
-                    else { return }
-                    if self.generationPhase == .thinking {
-                        self.generationPhase = .streaming
+            let done = try await client.chatStream(
+                baseURL: gatewayURL,
+                request: request,
+                onToken: { [weak self] token in
+                    streamTokens.mark()
+                    Task { @MainActor in
+                        guard let self,
+                              let i = self.sessions.firstIndex(where: { $0.id == sid }),
+                              let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+                        else { return }
+                        if self.generationPhase == .thinking {
+                            self.generationPhase = .streaming
+                        }
+                        // Reassign array so @Published notifies during streaming.
+                        var next = self.sessions
+                        next[i].messages[m].content += token
+                        self.sessions = next
                     }
-                    // Reassign array so @Published notifies during streaming.
-                    var next = self.sessions
-                    next[i].messages[m].content += token
-                    self.sessions = next
+                },
+                onMCPStatus: { [weak self] server, tool, phase in
+                    Task { @MainActor in
+                        guard let self,
+                              let i = self.sessions.firstIndex(where: { $0.id == sid }),
+                              let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+                        else { return }
+                        if self.generationPhase == .thinking {
+                            self.generationPhase = .streaming
+                        }
+                        let line: String = {
+                            switch phase {
+                            case "preparing":
+                                if tool == "connect" {
+                                    return "Connecting to \(server)…\n"
+                                }
+                                return "Asking model with MCP tools…\n"
+                            case "calling":
+                                return "Using \(server) · \(tool)…\n"
+                            default:
+                                return ""
+                            }
+                        }()
+                        guard !line.isEmpty else { return }
+                        var next = self.sessions
+                        let existing = next[i].messages[m].content
+                        if !existing.contains(line) {
+                            next[i].messages[m].content = existing + line
+                            self.sessions = next
+                        }
+                    }
                 }
-            }
+            )
             if Task.isCancelled { return }
             let streamedText = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
@@ -1430,6 +1878,9 @@ final class AppState: ObservableObject {
             lastCacheLabel = (done.cached ?? false) ? "cached" : "not cached"
             if let ms = done.latencyMs {
                 lastLatencyMs = ms
+            }
+            if routeMode == .auto, !done.model.isEmpty {
+                selectedModel = done.model
             }
             applyActualCost(
                 sessionID: sid,
@@ -1516,6 +1967,9 @@ final class AppState: ObservableObject {
                     inputTokens: response.inputTokens,
                     outputTokens: response.outputTokens
                 )
+                if routeMode == .auto, !response.model.isEmpty {
+                    selectedModel = response.model
+                }
                 lastError = nil
                 lastCacheLabel = response.cached ? "cached" : "not cached"
                 generationPhase = .streaming
@@ -1658,9 +2112,10 @@ final class AppState: ObservableObject {
             guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
             let body = session.messages[m].content
             guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            session.messages[m].content = ChatMessage.withActualCostFooter(body, costUsd: cost)
+            session.messages[m].content = ChatMessage.withActualCostFooter(body, costUsd: cost, model: model)
             session.recomputeTotalCost()
         }
+        accrueDailySpend(cost)
     }
 
     /// Drop embedded base64 images / huge blobs from outbound context (UI keeps originals).
@@ -1705,7 +2160,10 @@ final class AppState: ObservableObject {
         }
         if text.count > maxChars {
             // Preserve a trailing actual-cost footer when truncating.
-            let footer = ChatMessage.actualCostUsd(from: text).map { ChatMessage.formatActualCostFooter($0) } ?? ""
+            let model = ChatMessage.actualModelLeaf(from: text)
+            let footer = ChatMessage.actualCostUsd(from: text).map {
+                ChatMessage.formatActualCostFooter($0, model: model)
+            } ?? ""
             let budget = max(0, maxChars - footer.count - truncationMarker.count)
             let keep = text.prefix(budget)
             text = String(keep) + truncationMarker + footer
@@ -1743,7 +2201,10 @@ final class AppState: ObservableObject {
                     outputTokens: result.outputTokens
                 )
                 session.messages.append(
-                    ChatMessage(role: .assistant, content: ChatMessage.withActualCostFooter(result.content, costUsd: cost))
+                    ChatMessage(
+                        role: .assistant,
+                        content: ChatMessage.withActualCostFooter(result.content, costUsd: cost, model: result.model)
+                    )
                 )
                 session.recomputeTotalCost()
             }
@@ -1797,6 +2258,8 @@ final class AppState: ObservableObject {
         do {
             let snap = try await client.preferences(baseURL: gatewayURL)
             classifications = snap.classifications
+            categoryPreferWins = snap.categoryWins ?? [:]
+            fingerprintPreferWins = snap.fingerprintWins ?? [:]
         } catch {
             // Gateway may be offline
         }
@@ -1809,7 +2272,10 @@ final class AppState: ObservableObject {
             async let snap = client.preferences(baseURL: gatewayURL)
             storeStats = try await stats
             storeRecords = try await records
-            classifications = try await snap.classifications
+            let preferences = try await snap
+            classifications = preferences.classifications
+            categoryPreferWins = preferences.categoryWins ?? [:]
+            fingerprintPreferWins = preferences.fingerprintWins ?? [:]
         } catch {
             // Gateway may be offline
         }
@@ -1848,6 +2314,8 @@ final class AppState: ObservableObject {
             _ = try await client.deleteAllStoreRecords(baseURL: gatewayURL)
             storeRecords = []
             classifications = []
+            categoryPreferWins = [:]
+            fingerprintPreferWins = [:]
             if let stats = try? await client.storeStats(baseURL: gatewayURL) {
                 storeStats = stats
             }
@@ -1857,6 +2325,49 @@ final class AppState: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Learning → Run Auto eval: fixed smoke prompts through Auto routing.
+    func runAutoEval() async {
+        guard !isRunningAutoEval, !isSending else { return }
+        isRunningAutoEval = true
+        budgetBypassForEval = true
+        let previousMode = routeMode
+        routeMode = .auto
+        evalLog = []
+        defer {
+            routeMode = previousMode
+            budgetBypassForEval = false
+            isRunningAutoEval = false
+        }
+
+        for prompt in AutoEvalPrompts.all {
+            if Task.isCancelled { break }
+            draft = prompt
+            isSending = true
+            beginGenerationTracking()
+            await performSend(promptOverride: prompt)
+            if isSending {
+                endGenerationTracking()
+            }
+
+            let assistant = selectedSession?.messages.last(where: { $0.role == .assistant })
+            let body = assistant?.content ?? ""
+            let cost = ChatMessage.actualCostUsd(from: body)
+            let ok = !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && lastError == nil
+            let modelLeaf = exchangeLog.last?.model ?? selectedModel
+            evalLog.append(
+                EvalLogEntry(
+                    prompt: prompt,
+                    model: modelLeaf,
+                    costUsd: cost,
+                    ok: ok,
+                    detail: ok ? nil : (lastError ?? "Empty response")
+                )
+            )
+            lastError = nil
+        }
+        await loadStoreBrowser()
     }
 
     func updateClassification(

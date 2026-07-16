@@ -14,6 +14,8 @@ struct OpenRouterModelBrowserView: View {
     @State private var query = ""
     @State private var selectedID: String?
     @State private var categoryFilter: RouteCategory?
+    /// Callout panel for OpenRouter top-weekly popularity rankings.
+    @State private var showWeeklyRankings = false
 
     private var filtered: [OpenRouterCatalogModelDTO] {
         var rows = state.openRouterCatalog
@@ -28,6 +30,19 @@ struct OpenRouterModelBrowserView: View {
         return rows.filter {
             $0.id.localizedCaseInsensitiveContains(q) || $0.name.localizedCaseInsensitiveContains(q)
         }
+    }
+
+    private var emptyFilterMessage: String {
+        if state.openRouterCatalog.isEmpty {
+            return "No models in the catalog yet. Refresh to load from OpenRouter."
+        }
+        if categoryFilter == .vision {
+            return "No Vision models match this filter. Try All, or refresh the catalog."
+        }
+        if let categoryFilter {
+            return "No \(categoryFilter.label) models match this filter. Try All or adjust search."
+        }
+        return "No models match this search."
     }
 
     var body: some View {
@@ -54,7 +69,7 @@ struct OpenRouterModelBrowserView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
 
-            HStack {
+            HStack(spacing: 10) {
                 Text("\(filtered.count) models")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.textMuted)
@@ -64,11 +79,36 @@ struct OpenRouterModelBrowserView: View {
                         .foregroundStyle(theme.palette.accent)
                 }
                 Spacer()
-                if state.isLoadingOpenRouterCatalog {
+                Button {
+                    showWeeklyRankings.toggle()
+                    if showWeeklyRankings, state.openRouterWeeklyRankings.isEmpty {
+                        Task { await state.refreshWeeklyRankings(forceRefresh: true) }
+                    }
+                } label: {
+                    Label(
+                        showWeeklyRankings ? "Hide rankings" : "Weekly popular",
+                        systemImage: "chart.bar.fill"
+                    )
+                    .font(ARILTheme.captionFont.weight(.semibold))
+                    .foregroundStyle(showWeeklyRankings ? theme.palette.background : theme.palette.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(showWeeklyRankings ? theme.palette.accentStrong : theme.palette.inputFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("Show OpenRouter’s top models by tokens processed this week")
+
+                if state.isLoadingOpenRouterCatalog || state.isLoadingWeeklyRankings {
                     ProgressView().controlSize(.small)
                 }
                 Button {
-                    Task { await state.refreshOpenRouterCatalog(query: query, forceRefresh: true) }
+                    Task {
+                        await state.refreshOpenRouterCatalog(query: query, forceRefresh: true)
+                        if showWeeklyRankings {
+                            await state.refreshWeeklyRankings(forceRefresh: true)
+                        }
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -78,6 +118,12 @@ struct OpenRouterModelBrowserView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
+            if showWeeklyRankings {
+                weeklyRankingsCallout
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+
             if let err = state.openRouterCatalogError {
                 Text(err)
                     .font(ARILTheme.captionFont)
@@ -86,34 +132,50 @@ struct OpenRouterModelBrowserView: View {
                     .padding(.bottom, 8)
             }
 
-            List(filtered, selection: $selectedID) { model in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.id)
-                            .font(ARILTheme.bodyFont)
-                            .foregroundStyle(theme.palette.text)
-                            .lineLimit(1)
-                        if model.name != model.id {
-                            Text(model.name)
-                                .font(ARILTheme.captionFont)
-                                .foregroundStyle(theme.palette.textMuted)
+            if filtered.isEmpty, !state.isLoadingOpenRouterCatalog {
+                VStack(spacing: 10) {
+                    Spacer(minLength: 40)
+                    Image(systemName: categoryFilter == .vision ? "eye.slash" : "magnifyingglass")
+                        .font(.system(size: 28, weight: .regular))
+                        .foregroundStyle(theme.palette.textMuted)
+                    Text(emptyFilterMessage)
+                        .font(ARILTheme.bodyFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Spacer(minLength: 40)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(filtered, selection: $selectedID) { model in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.id)
+                                .font(ARILTheme.bodyFont)
+                                .foregroundStyle(theme.palette.text)
                                 .lineLimit(1)
+                            if model.name != model.id {
+                                Text(model.name)
+                                    .font(ARILTheme.captionFont)
+                                    .foregroundStyle(theme.palette.textMuted)
+                                    .lineLimit(1)
+                            }
                         }
+                        Spacer(minLength: 8)
+                        Text(model.pricingLabel)
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.accent)
+                            .monospacedDigit()
                     }
-                    Spacer(minLength: 8)
-                    Text(model.pricingLabel)
-                        .font(ARILTheme.captionFont)
-                        .foregroundStyle(theme.palette.accent)
-                        .monospacedDigit()
+                    .tag(model.id)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedID = model.id
+                    }
                 }
-                .tag(model.id)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    selectedID = model.id
-                }
+                .listStyle(.inset)
+                .id(categoryFilter?.rawValue ?? "all")
             }
-            .listStyle(.inset)
-            .id(categoryFilter?.rawValue ?? "all")
 
             HStack {
                 Spacer()
@@ -157,6 +219,92 @@ struct OpenRouterModelBrowserView: View {
                 }
             }
         }
+    }
+
+    private var weeklyRankingsCallout: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Weekly popular on OpenRouter", systemImage: "flame.fill")
+                    .font(ARILTheme.captionFont.weight(.semibold))
+                    .foregroundStyle(theme.palette.text)
+                Spacer()
+                Text("Tokens this week · tap to select")
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.textMuted)
+            }
+
+            if let err = state.weeklyRankingsError {
+                Text(err)
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.danger)
+            } else if state.isLoadingWeeklyRankings, state.openRouterWeeklyRankings.isEmpty {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Loading rankings…")
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                .padding(.vertical, 8)
+            } else if state.openRouterWeeklyRankings.isEmpty {
+                Text("No weekly rankings available. Refresh and try again.")
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.textMuted)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(state.openRouterWeeklyRankings) { row in
+                            Button {
+                                selectedID = row.id
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text("#\(row.rank)")
+                                        .font(ARILTheme.captionFont.weight(.semibold))
+                                        .foregroundStyle(theme.palette.accent)
+                                        .monospacedDigit()
+                                        .frame(width: 36, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.id)
+                                            .font(ARILTheme.captionFont.weight(.medium))
+                                            .foregroundStyle(theme.palette.text)
+                                            .lineLimit(1)
+                                        if row.name != row.id {
+                                            Text(row.name)
+                                                .font(ARILTheme.captionFont)
+                                                .foregroundStyle(theme.palette.textMuted)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer(minLength: 8)
+                                    if let pricing = row.pricingLabel {
+                                        Text(pricing)
+                                            .font(ARILTheme.captionFont)
+                                            .foregroundStyle(theme.palette.accent)
+                                            .monospacedDigit()
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    selectedID == row.id
+                                        ? theme.palette.accent.opacity(0.14)
+                                        : Color.clear
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 180)
+            }
+        }
+        .padding(12)
+        .background(theme.palette.inputFill)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(theme.palette.hairline, lineWidth: 1)
+        )
     }
 
     private func filterChip(label: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -204,6 +352,10 @@ struct OpenRouterModelBrowserView: View {
                 "qwq", "pro",
             ])
         case .vision:
+            // Prefer catalog modalities when present; fall back to name heuristics.
+            if let accepts = model.acceptsImageInput {
+                return accepts
+            }
             return containsAny(hay, [
                 "vision", "image", "vl-", "-vl", "multimodal", "gemini", "gpt-4o",
                 "llava", "pixtral", "qwen2.5-vl", "qwen-vl",

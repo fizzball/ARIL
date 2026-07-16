@@ -29,6 +29,9 @@ from app.core.schemas import (
     OpenRouterConnectionStatus,
     OpenRouterKeyStatus,
     OpenRouterKeyUpdate,
+    OpenRouterWeeklyRankingsResponse,
+    MCPCheckRequest,
+    MCPCheckResponse,
     PreferRequest,
     PreferResponse,
     PreferencesSnapshot,
@@ -64,26 +67,80 @@ from app.routing.pipeline import (
     select_judge_models,
     wants_image_generation,
 )
-from app.routing.pricing import list_catalog, pricing_for_models, resolve_cost_usd
+from app.routing.pricing import list_catalog, list_weekly_rankings, pricing_for_models, resolve_cost_usd
 from app.routing.probe import probe_models
 from app.routing.rewrite import llm_alternatives
+from app.mcp import (
+    MCPServerSpec,
+    check_remote_mcp,
+    close_mcp_bundle,
+    open_mcp_bundle,
+    run_mcp_tool_rounds,
+)
 
 router = APIRouter(prefix="/v1")
 
 
-def _resolve_model(req_model: str | None, last_user: str, profile) -> tuple[str, object]:
+def _resolve_model(
+    req_model: str | None,
+    last_user: str,
+    profile,
+    *,
+    route_mode: RouteMode = RouteMode.auto,
+) -> tuple[str, object, str | None]:
     classification = classify(last_user)
     mapping = resolve_profile(profile) if profile is not None else DEFAULT_PROFILE
-    model = req_model or mapping[classification.primary]
+    preference_reason: str | None = None
+
+    if route_mode == RouteMode.manual and req_model:
+        # Manual is the only mode that honors the client-supplied model lock.
+        model = req_model
+    elif route_mode == RouteMode.auto:
+        # Never use req_model here — the Mac client keeps `selectedModel` as the
+        # last Manual pick until preview refreshes it, which made Auto look stuck.
+        pick = pref_store.preferred_model_for_prompt(
+            last_user, classification.primary.value
+        )
+        if pick:
+            model = pick["model"]
+            preference_reason = pick.get("reason")
+        else:
+            model = mapping[classification.primary]
+    else:
+        model = req_model or mapping[classification.primary]
+
     if wants_image_generation(last_user):
         model_l = (model or "").lower()
         if not any(tok in model_l for tok in ("image", "flux", "dall-e", "dalle", "seedream", "sourceful")):
             model = IMAGE_GEN_MODEL
-    return model, classification
+    return model, classification, preference_reason
 
 
 def _msg_dicts(messages: list[ChatMessage]) -> list[dict[str, str]]:
     return [{"role": m.role, "content": m.content} for m in messages]
+
+
+def _inject_model_identity(provider_messages: list, model: str) -> list:
+    """Tell the model its real OpenRouter id so identity questions don’t hallucinate."""
+    mid = (model or "").strip()
+    if not mid or not provider_messages:
+        return provider_messages
+    note = (
+        f"Authoritative runtime note: this turn is served by OpenRouter model id `{mid}`. "
+        "If asked which model you are (name, version, or provider), answer with that exact id. "
+        "Do not claim to be Claude, GPT, Gemini, or any other model unless that id matches."
+    )
+    from app.providers.base import ProviderMessage
+
+    out = list(provider_messages)
+    first = out[0]
+    role = getattr(first, "role", None)
+    content = getattr(first, "content", None)
+    if role == "system" and isinstance(content, str):
+        out[0] = ProviderMessage(role="system", content=f"{content.rstrip()}\n\n{note}")
+    else:
+        out.insert(0, ProviderMessage(role="system", content=note))
+    return out
 
 
 def _auto_judgement_after_send(
@@ -121,12 +178,23 @@ async def _complete_cached(
     attachments: list | None = None,
     web_search: bool = False,
     generate_image: bool = False,
+    mcp_servers: list | None = None,
 ) -> tuple[ProviderResult, bool]:
     provider = get_chat_provider()
-    provider_messages = attachments_to_provider_messages(messages, attachments or [])
+    provider_messages = _inject_model_identity(
+        attachments_to_provider_messages(messages, attachments or []),
+        model,
+    )
     msg_dicts = _msg_dicts(messages)
-    # Don't cache web search, multimodal, or image generation turns
-    cacheable = use_cache and not web_search and not attachments and not generate_image
+    mcp_specs = _mcp_specs(mcp_servers)
+    # Don't cache web search, multimodal, image generation, or MCP tool turns
+    cacheable = (
+        use_cache
+        and not web_search
+        and not attachments
+        and not generate_image
+        and not mcp_specs
+    )
     est = estimate_tokens(" ".join(m.content for m in messages))
     key = prompt_cache.make_key(
         messages=msg_dicts,
@@ -149,13 +217,28 @@ async def _complete_cached(
                 True,
             )
 
-    result = await provider.complete(
-        provider_messages,
-        model=model,
-        temperature=temperature,
-        web_search=web_search,
-        generate_image=generate_image,
-    )
+    if mcp_specs:
+        bundle = await open_mcp_bundle(mcp_specs)
+        try:
+            _, result = await run_mcp_tool_rounds(
+                provider,
+                provider_messages,
+                model=model,
+                temperature=temperature,
+                web_search=web_search,
+                generate_image=generate_image,
+                bundle=bundle,
+            )
+        finally:
+            await close_mcp_bundle(bundle)
+    else:
+        result = await provider.complete(
+            provider_messages,
+            model=model,
+            temperature=temperature,
+            web_search=web_search,
+            generate_image=generate_image,
+        )
     if cacheable and prompt_cache.eligible(result.input_tokens or est):
         prompt_cache.put(
             key,
@@ -168,6 +251,27 @@ async def _complete_cached(
             },
         )
     return result, False
+
+
+def _mcp_specs(servers: list | None) -> list[MCPServerSpec]:
+    if not servers:
+        return []
+    out: list[MCPServerSpec] = []
+    for s in servers:
+        url = (getattr(s, "url", None) or "").strip()
+        if not url:
+            continue
+        out.append(
+            MCPServerSpec(
+                id=str(getattr(s, "id", "") or ""),
+                name=str(getattr(s, "name", "") or ""),
+                url=url,
+                auth_style=str(getattr(s, "auth_style", None) or "bearer"),
+                auth_header_name=getattr(s, "auth_header_name", None),
+                api_key=getattr(s, "api_key", None),
+            )
+        )
+    return out
 
 
 @router.post("/preview", response_model=PreviewResponse)
@@ -274,7 +378,12 @@ async def preview(req: PreviewRequest) -> PreviewResponse:
 async def chat(req: ChatRequest) -> ChatResponse:
     """Execute a chat turn via OpenRouter (or stub if no key), with optional cache."""
     last_user = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
-    model, classification = _resolve_model(req.model, last_user, req.routing_profile)
+    model, classification, preference_reason = _resolve_model(
+        req.model,
+        last_user,
+        req.routing_profile,
+        route_mode=req.route_mode,
+    )
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
@@ -289,6 +398,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             attachments=req.attachments,
             web_search=req.web_search,
             generate_image=generate_image,
+            mcp_servers=req.mcp_servers,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -323,6 +433,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         analysis={
             "route_category": classification.primary.value,
             "temperature": temperature,
+            "preference_reason": preference_reason,
         },
     )
     _auto_judgement_after_send(
@@ -341,6 +452,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         cost_usd=final_cost,
         cached=cached,
         route_category=classification.primary,
+        preference_reason=preference_reason,
     )
 
 
@@ -348,7 +460,12 @@ async def chat(req: ChatRequest) -> ChatResponse:
 async def chat_stream(req: ChatRequest) -> StreamingResponse:
     """SSE stream of assistant tokens, ending with a `done` event."""
     last_user = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
-    model, classification = _resolve_model(req.model, last_user, req.routing_profile)
+    model, classification, preference_reason = _resolve_model(
+        req.model,
+        last_user,
+        req.routing_profile,
+        route_mode=req.route_mode,
+    )
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
     )
@@ -360,12 +477,14 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
     async def event_generator():
         stream_started = time.perf_counter()
-        # Cache short-circuit for large prompts (skip when web/attachments/image-gen)
+        mcp_specs = _mcp_specs(req.mcp_servers)
+        # Cache short-circuit for large prompts (skip when web/attachments/image-gen/MCP)
         if (
             req.use_cache
             and not req.web_search
             and not req.attachments
             and not generate_image
+            and not mcp_specs
             and prompt_cache.eligible(est)
         ):
             hit = prompt_cache.peek(key)
@@ -382,8 +501,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     "cost_usd": float(hit.get("cost_usd") or 0.0) * 0.45,
                     "cached": True,
                     "latency_ms": int((time.perf_counter() - stream_started) * 1000),
+                    "preference_reason": preference_reason,
                 }
-                assistant = ChatMessage(role="assistant", content=content)
                 session_store.record_chat_turn(
                     session_id,
                     title=last_user[:42] if last_user else "New session",
@@ -412,7 +531,10 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 return
 
         provider = get_chat_provider()
-        provider_messages = attachments_to_provider_messages(req.messages, req.attachments)
+        provider_messages = _inject_model_identity(
+            attachments_to_provider_messages(req.messages, req.attachments),
+            model,
+        )
         parts: list[str] = []
         meta = {
             "session_id": session_id,
@@ -423,33 +545,139 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             "cost_usd": 0.0,
             "cached": False,
             "web_search": req.web_search,
+            "preference_reason": preference_reason,
         }
-        try:
-            async for chunk in provider.stream(
-                provider_messages,
-                model=model,
-                temperature=temperature,
-                web_search=req.web_search,
-                generate_image=generate_image,
-            ):
-                if chunk.content:
-                    parts.append(chunk.content)
-                    payload = json.dumps({"content": chunk.content, "model": chunk.model or model})
-                    yield f"event: token\ndata: {payload}\n\n"
-                if chunk.input_tokens or chunk.output_tokens or chunk.cost_usd:
-                    meta["input_tokens"] = chunk.input_tokens or meta["input_tokens"]
-                    meta["output_tokens"] = chunk.output_tokens or meta["output_tokens"]
-                    meta["cost_usd"] = chunk.cost_usd or meta["cost_usd"]
-                    if chunk.model:
-                        meta["model"] = chunk.model
-                if chunk.done:
-                    break
-        except Exception as exc:
-            # Broad catch: httpx/network errors used to tear down the body with
-            # neither `error` nor `done`, which surfaced as client "Try again".
-            err = json.dumps({"error": str(exc) or "Upstream stream failed"})
-            yield f"event: error\ndata: {err}\n\n"
-            return
+
+        # MCP tool loop (non-stream rounds) then stream final text.
+        if mcp_specs:
+            bundle = None
+            status_q: asyncio.Queue[dict[str, str] | None] = asyncio.Queue()
+
+            async def on_status(evt: dict[str, str]) -> None:
+                await status_q.put(evt)
+
+            async def run_tools() -> tuple[list, ProviderResult]:
+                nonlocal bundle
+                try:
+                    for spec in mcp_specs:
+                        await on_status(
+                            {
+                                "server": (spec.name or "MCP").strip() or "MCP",
+                                "tool": "connect",
+                                "phase": "preparing",
+                            }
+                        )
+                    bundle = await open_mcp_bundle(mcp_specs)
+                    await on_status(
+                        {
+                            "server": "MCP",
+                            "tool": "model",
+                            "phase": "preparing",
+                        }
+                    )
+                    return await run_mcp_tool_rounds(
+                        provider,
+                        provider_messages,
+                        model=model,
+                        temperature=temperature,
+                        web_search=req.web_search,
+                        generate_image=generate_image,
+                        bundle=bundle,
+                        on_status=on_status,
+                    )
+                finally:
+                    await status_q.put(None)
+
+            tool_task = asyncio.create_task(run_tools())
+            try:
+                while True:
+                    evt = await status_q.get()
+                    if evt is None:
+                        break
+                    yield f"event: mcp_status\ndata: {json.dumps(evt)}\n\n"
+                working_messages, tool_result = await tool_task
+            except Exception as exc:
+                if not tool_task.done():
+                    tool_task.cancel()
+                err = json.dumps({"error": str(exc) or "MCP tool loop failed"})
+                yield f"event: error\ndata: {err}\n\n"
+                return
+            finally:
+                await close_mcp_bundle(bundle)
+
+            meta["input_tokens"] = tool_result.input_tokens
+            meta["output_tokens"] = tool_result.output_tokens
+            meta["cost_usd"] = tool_result.cost_usd
+            if tool_result.model:
+                meta["model"] = tool_result.model
+
+            # Tool loop already produced the final text via non-stream completes.
+            if (tool_result.content or "").strip():
+                parts.append(tool_result.content)
+                payload = json.dumps(
+                    {"content": tool_result.content, "model": tool_result.model or model}
+                )
+                yield f"event: token\ndata: {payload}\n\n"
+            else:
+                try:
+                    async for chunk in provider.stream(
+                        working_messages,
+                        model=model,
+                        temperature=temperature,
+                        web_search=req.web_search,
+                        generate_image=generate_image,
+                    ):
+                        if chunk.content:
+                            parts.append(chunk.content)
+                            payload = json.dumps(
+                                {"content": chunk.content, "model": chunk.model or model}
+                            )
+                            yield f"event: token\ndata: {payload}\n\n"
+                        if chunk.input_tokens or chunk.output_tokens or chunk.cost_usd:
+                            meta["input_tokens"] = (
+                                int(meta["input_tokens"] or 0) + (chunk.input_tokens or 0)
+                            )
+                            meta["output_tokens"] = (
+                                int(meta["output_tokens"] or 0) + (chunk.output_tokens or 0)
+                            )
+                            meta["cost_usd"] = float(meta["cost_usd"] or 0) + float(
+                                chunk.cost_usd or 0
+                            )
+                            if chunk.model:
+                                meta["model"] = chunk.model
+                        if chunk.done:
+                            break
+                except Exception as exc:
+                    err = json.dumps({"error": str(exc) or "Upstream stream failed"})
+                    yield f"event: error\ndata: {err}\n\n"
+                    return
+        else:
+            try:
+                async for chunk in provider.stream(
+                    provider_messages,
+                    model=model,
+                    temperature=temperature,
+                    web_search=req.web_search,
+                    generate_image=generate_image,
+                ):
+                    if chunk.content:
+                        parts.append(chunk.content)
+                        payload = json.dumps({"content": chunk.content, "model": chunk.model or model})
+                        yield f"event: token\ndata: {payload}\n\n"
+                    if chunk.input_tokens or chunk.output_tokens or chunk.cost_usd:
+                        meta["input_tokens"] = chunk.input_tokens or meta["input_tokens"]
+                        meta["output_tokens"] = chunk.output_tokens or meta["output_tokens"]
+                        meta["cost_usd"] = chunk.cost_usd or meta["cost_usd"]
+                        if chunk.model:
+                            meta["model"] = chunk.model
+                    if chunk.done:
+                        break
+            except Exception as exc:
+                # Broad catch: httpx/network errors used to tear down the body with
+                # neither `error` nor `done`, which surfaced as client "Try again".
+                err = json.dumps({"error": str(exc) or "Upstream stream failed"})
+                yield f"event: error\ndata: {err}\n\n"
+                return
 
         full = "".join(parts)
         # Empty upstream stream — one non-stream completion before failing closed.
@@ -486,6 +714,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             and not req.web_search
             and not req.attachments
             and not generate_image
+            and not mcp_specs
             and prompt_cache.eligible(int(meta["input_tokens"] or est))
         ):
             prompt_cache.put(
@@ -818,6 +1047,18 @@ async def openrouter_key_check() -> OpenRouterConnectionStatus:
     return OpenRouterConnectionStatus(**await key_store.check_connection())
 
 
+@router.post("/mcp/check", response_model=MCPCheckResponse)
+async def mcp_check(req: MCPCheckRequest) -> MCPCheckResponse:
+    """Probe a remote MCP server (initialize + tools/list). Does not invoke tools."""
+    result = await check_remote_mcp(
+        url=req.url,
+        auth_style=req.auth_style,
+        auth_header_name=req.auth_header_name,
+        api_key=req.api_key,
+    )
+    return MCPCheckResponse(**result)
+
+
 @router.get("/models/pricing", response_model=ModelPricingResponse)
 async def models_pricing(ids: str = "", refresh: bool = False) -> ModelPricingResponse:
     """USD / 1K token rates from OpenRouter for the given model ids (comma-separated)."""
@@ -840,6 +1081,21 @@ async def models_catalog(q: str = "", refresh: bool = False) -> OpenRouterCatalo
     """Full OpenRouter model list with pricing (optional `q` search filter)."""
     rows = list_catalog(query=q or None, force_refresh=refresh)
     return OpenRouterCatalogResponse(models=rows, count=len(rows), refreshed=refresh)
+
+
+@router.get("/models/rankings/weekly", response_model=OpenRouterWeeklyRankingsResponse)
+async def models_weekly_rankings(
+    limit: int = 25, refresh: bool = False
+) -> OpenRouterWeeklyRankingsResponse:
+    """Top OpenRouter models by weekly token volume (`sort=top-weekly`)."""
+    rows = list_weekly_rankings(limit=limit, force_refresh=refresh)
+    return OpenRouterWeeklyRankingsResponse(
+        models=rows,
+        count=len(rows),
+        period="top-weekly",
+        refreshed=refresh,
+        source="openrouter",
+    )
 
 
 @router.get("/models")

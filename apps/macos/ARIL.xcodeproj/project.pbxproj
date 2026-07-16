@@ -10,7 +10,6 @@
 		0642E4B64AFFAB0B2CEDE8D1 /* RoutingAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B6F3EF00A2E6D7AD243CA8A /* RoutingAnalysisView.swift */; };
 		11DF1396F1C5933598399718 /* ARILApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4BE5D37AD05D88C1F97C22A /* ARILApp.swift */; };
 		17A3C70916F018539718B02E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F569C76A392C4EAF2B396EB7 /* AppState.swift */; };
-		1D263CB4D3FDB6D7A45EAD4B /* ModelCostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D90B92597E00798BF7FB75B1 /* ModelCostsView.swift */; };
 		2143BD1EEDEAB0F06806F37C /* SystemMetricsMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */; };
 		22022D6BC26C6FFE70F5A810 /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464CC3D69B6588E73D3EF50F /* APIModels.swift */; };
 		32343AEA72927095488EB9D2 /* HelpHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB9C5BA9A53629691A392680 /* HelpHint.swift */; };
@@ -18,10 +17,12 @@
 		3F2352DCF92B7652FD578D2C /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB6275E8A54ADE3171B7EA48 /* AboutView.swift */; };
 		43FEFF44BC12126C3C0ABBA1 /* IntelligencePanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */; };
 		4B8284C195B20A12359734B4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F7258E2BF863107D0D1C2F /* ContentView.swift */; };
+		5893D8DC9ED804F866D51509 /* MCPServerEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3DA2E4C5C4C7C19C7831175 /* MCPServerEditorView.swift */; };
 		5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */; };
 		647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */; };
 		78671E9ACB7E7353C329A250 /* SystemMetricsTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */; };
 		7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */; };
+		80D522E4978591C865C52D27 /* ModelPopularityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F160030F13576729A8C964D0 /* ModelPopularityView.swift */; };
 		822BC840B98AADC146B3C60B /* OpenRouterModelBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */; };
 		8733524BC8975581135E1ECD /* ToolFlyoutPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C74640C08B47F41FFFDDC233 /* ToolFlyoutPanel.swift */; };
 		8CC21960279B31457BD24A9C /* ARILAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */; };
@@ -38,6 +39,7 @@
 		EC27484AD20E0994A78094A7 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9CF94248A2D3725D27ED3A2 /* StatusBarController.swift */; };
 		EF19B318BFD33393131FB656 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ECDA663B4CC8289E453914E /* Models.swift */; };
 		F379B2566042AEF3969B0C2D /* LearningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */; };
+		F774A3387117939F173AD06C /* MCPKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51ABE8FCBA2C6A4061205AF7 /* MCPKeychainStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +54,7 @@
 		48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGatewayManager.swift; sourceTree = "<group>"; };
 		4B6F3EF00A2E6D7AD243CA8A /* RoutingAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingAnalysisView.swift; sourceTree = "<group>"; };
 		51A5248C42FB7C5D311DC40B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		51ABE8FCBA2C6A4061205AF7 /* MCPKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPKeychainStore.swift; sourceTree = "<group>"; };
 		5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligencePanelView.swift; sourceTree = "<group>"; };
 		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterModelBrowserView.swift; sourceTree = "<group>"; };
@@ -65,11 +68,12 @@
 		C74640C08B47F41FFFDDC233 /* ToolFlyoutPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolFlyoutPanel.swift; sourceTree = "<group>"; };
 		C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMetricsMonitor.swift; sourceTree = "<group>"; };
 		CB6275E8A54ADE3171B7EA48 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		D3DA2E4C5C4C7C19C7831175 /* MCPServerEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerEditorView.swift; sourceTree = "<group>"; };
 		D836FC065BABA9BFBDFB872A /* ChatDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDetailView.swift; sourceTree = "<group>"; };
-		D90B92597E00798BF7FB75B1 /* ModelCostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCostsView.swift; sourceTree = "<group>"; };
 		E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		EB9C5BA9A53629691A392680 /* HelpHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpHint.swift; sourceTree = "<group>"; };
 		EBD5E146E4B831B21010D88F /* ARIL.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ARIL.entitlements; sourceTree = "<group>"; };
+		F160030F13576729A8C964D0 /* ModelPopularityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPopularityView.swift; sourceTree = "<group>"; };
 		F569C76A392C4EAF2B396EB7 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogAnalysisView.swift; sourceTree = "<group>"; };
 		F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyHeroView.swift; sourceTree = "<group>"; };
@@ -108,6 +112,7 @@
 				464CC3D69B6588E73D3EF50F /* APIModels.swift */,
 				A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */,
 				48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */,
+				51ABE8FCBA2C6A4061205AF7 /* MCPKeychainStore.swift */,
 				A9CF94248A2D3725D27ED3A2 /* StatusBarController.swift */,
 				C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */,
 			);
@@ -128,8 +133,9 @@
 				5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */,
 				32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */,
 				F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */,
+				D3DA2E4C5C4C7C19C7831175 /* MCPServerEditorView.swift */,
 				1416251B652DE7DE8C09313A /* MessageListView.swift */,
-				D90B92597E00798BF7FB75B1 /* ModelCostsView.swift */,
+				F160030F13576729A8C964D0 /* ModelPopularityView.swift */,
 				750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */,
 				4B6F3EF00A2E6D7AD243CA8A /* RoutingAnalysisView.swift */,
 				51A5248C42FB7C5D311DC40B /* SettingsView.swift */,
@@ -257,8 +263,10 @@
 				F379B2566042AEF3969B0C2D /* LearningView.swift in Sources */,
 				3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */,
 				7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */,
+				F774A3387117939F173AD06C /* MCPKeychainStore.swift in Sources */,
+				5893D8DC9ED804F866D51509 /* MCPServerEditorView.swift in Sources */,
 				D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */,
-				1D263CB4D3FDB6D7A45EAD4B /* ModelCostsView.swift in Sources */,
+				80D522E4978591C865C52D27 /* ModelPopularityView.swift in Sources */,
 				EF19B318BFD33393131FB656 /* Models.swift in Sources */,
 				822BC840B98AADC146B3C60B /* OpenRouterModelBrowserView.swift in Sources */,
 				0642E4B64AFFAB0B2CEDE8D1 /* RoutingAnalysisView.swift in Sources */,
@@ -309,7 +317,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 58;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -322,7 +330,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.3.16;
+				MARKETING_VERSION = 0.3.28;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -339,7 +347,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 58;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
@@ -350,7 +358,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.16;
+				MARKETING_VERSION = 0.3.28;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
 				PRODUCT_NAME = ARIL;
 				SDKROOT = macosx;
@@ -391,7 +399,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 58;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -410,7 +418,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.3.16;
+				MARKETING_VERSION = 0.3.28;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -428,7 +436,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 58;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
@@ -439,7 +447,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.16;
+				MARKETING_VERSION = 0.3.28;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
 				PRODUCT_NAME = ARIL;
 				SDKROOT = macosx;

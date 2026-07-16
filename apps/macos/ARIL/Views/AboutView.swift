@@ -73,6 +73,45 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.28", changes: [
+            "Recycle outdated Solo gateway when weekly rankings API is missing (fixes Model popularity 404)",
+        ]),
+        ChangelogEntry(version: "0.3.27", changes: [
+            "Toolbar Model popularity flyout (replaces Model costs); Other… Weekly popular rankings",
+        ]),
+        ChangelogEntry(version: "0.3.26", changes: [
+            "Budget: Enable toggle; Soft/Hard labels aligned; legacy $1/$5/$5/$20 seed migrates to Off",
+        ]),
+        ChangelogEntry(version: "0.3.25", changes: [
+            "Budget prefs: Session/Daily × Soft/Hard grid with $0.50 steppers (default Off)",
+            "Reply footer: total (in+out) token cost",
+        ]),
+        ChangelogEntry(version: "0.3.24", changes: [
+            "Show real model id in reply cost footer; gateway tells the model its OpenRouter id (stops false Claude claims)",
+        ]),
+        ChangelogEntry(version: "0.3.23", changes: [
+            "Budget soft/hard caps; Other… Vision modalities; Learning Prefer wins + Auto eval",
+            "Fix: Auto no longer keeps the Manual model after switching modes",
+        ]),
+        ChangelogEntry(version: "0.3.22", changes: [
+            "Auto honors Judge/Prefer wins (fingerprint then category) with “Because you preferred …” in Intelligence",
+        ]),
+        ChangelogEntry(version: "0.3.21", changes: [
+            "MCP chat: show Thinking… / Connecting… while tools prepare (not just the ghost)",
+        ]),
+        ChangelogEntry(version: "0.3.20", changes: [
+            "MCP in chat: enabled remote servers are used as tools in Auto/Manual (status in the reply)",
+        ]),
+        ChangelogEntry(version: "0.3.19", changes: [
+            "MCP Check: recycle outdated Solo gateway so DeepWiki and other probes work after upgrade",
+            "MCP Edit: presets show name, URL, and auth (locked fields no longer appear blank)",
+        ]),
+        ChangelogEntry(version: "0.3.18", changes: [
+            "Preferences → MCP: configure remote presets, keys in Keychain, Check connection (tools in chat later)",
+        ]),
+        ChangelogEntry(version: "0.3.17", changes: [
+            "Generated chat images: Copy image and Save…",
+        ]),
         ChangelogEntry(version: "0.3.16", changes: [
             "Manual mode model menu: searchable Other… from the full OpenRouter catalog (pins up to 8)",
             "Other… model browser: filter by Coding, Security, Reasoning, and other Preferences categories",

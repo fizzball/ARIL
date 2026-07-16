@@ -29,6 +29,20 @@ _CACHE: dict[str, dict[str, float]] = {}
 _CATALOG: list[dict[str, Any]] = []
 _CACHE_AT: float = 0.0
 _TTL_SECONDS = 3600.0
+_WEEKLY_RANKINGS: list[dict[str, Any]] = []
+_WEEKLY_RANKINGS_AT: float = 0.0
+_WEEKLY_RANKINGS_TTL_SECONDS = 900.0  # 15 minutes
+
+
+def _openrouter_headers() -> dict[str, str]:
+    headers = {
+        "Accept": "application/json",
+        "HTTP-Referer": settings.openrouter_site_url,
+        "X-Title": settings.openrouter_app_name,
+    }
+    if settings.openrouter_api_key.strip():
+        headers["Authorization"] = f"Bearer {settings.openrouter_api_key.strip()}"
+    return headers
 
 
 def _per_token_to_per_1k(value: Any) -> float:
@@ -38,17 +52,48 @@ def _per_token_to_per_1k(value: Any) -> float:
         return 0.0
 
 
+def _normalize_modality_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        token = item.strip().lower()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def modalities_from_catalog_row(row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Extract input/output modalities from an OpenRouter /models row."""
+    arch = row.get("architecture")
+    if isinstance(arch, dict):
+        inputs = _normalize_modality_list(arch.get("input_modalities"))
+        outputs = _normalize_modality_list(arch.get("output_modalities"))
+        if inputs or outputs:
+            return inputs, outputs
+        # Older catalog shape: "text+image->text"
+        modality = arch.get("modality")
+        if isinstance(modality, str) and "->" in modality:
+            left, _, right = modality.partition("->")
+            inputs = [p.strip().lower() for p in left.split("+") if p.strip()]
+            outputs = [p.strip().lower() for p in right.split("+") if p.strip()]
+            return inputs, outputs
+    return (
+        _normalize_modality_list(row.get("input_modalities")),
+        _normalize_modality_list(row.get("output_modalities")),
+    )
+
+
 def _refresh_cache() -> None:
     """Pull the public OpenRouter models catalog (pricing does not require a key)."""
     global _CACHE, _CACHE_AT, _CATALOG
     url = settings.openrouter_base_url.rstrip("/") + "/models"
-    headers = {
-        "Accept": "application/json",
-        "HTTP-Referer": settings.openrouter_site_url,
-        "X-Title": settings.openrouter_app_name,
-    }
-    if settings.openrouter_api_key.strip():
-        headers["Authorization"] = f"Bearer {settings.openrouter_api_key.strip()}"
+    headers = _openrouter_headers()
     try:
         with httpx.Client(timeout=20.0) as client:
             resp = client.get(url, headers=headers)
@@ -83,6 +128,10 @@ def _refresh_cache() -> None:
         }
         next_cache[mid] = rates
         name = row.get("name") if isinstance(row.get("name"), str) else mid
+        input_mods, output_mods = modalities_from_catalog_row(row)
+        context_length = row.get("context_length")
+        if not isinstance(context_length, int):
+            context_length = None
         next_catalog.append(
             {
                 "id": mid,
@@ -92,7 +141,9 @@ def _refresh_cache() -> None:
                 "web_search_per_request": web_search
                 if web_search > 0
                 else DEFAULT_WEB_SEARCH_PER_REQUEST,
-                "context_length": row.get("context_length"),
+                "context_length": context_length,
+                "input_modalities": input_mods,
+                "output_modalities": output_mods,
             }
         )
     if next_cache:
@@ -181,6 +232,10 @@ def list_catalog(*, query: str | None = None, force_refresh: bool = False) -> li
                 "completion_per_1k": rates[1],
                 "web_search_per_request": DEFAULT_WEB_SEARCH_PER_REQUEST,
                 "context_length": None,
+                "input_modalities": ["text", "image"]
+                if "image" in mid or "vision" in mid or "-vl" in mid
+                else ["text"],
+                "output_modalities": ["image", "text"] if "image" in mid else ["text"],
             }
             for mid, rates in FALLBACK_COST_PER_1K.items()
         ]
@@ -192,6 +247,69 @@ def list_catalog(*, query: str | None = None, force_refresh: bool = False) -> li
             if q in str(r.get("id", "")).lower() or q in str(r.get("name", "")).lower()
         ]
     return rows
+
+
+def _refresh_weekly_rankings(*, limit: int = 25) -> None:
+    """Pull OpenRouter `/models?sort=top-weekly` (tokens processed last week)."""
+    global _WEEKLY_RANKINGS, _WEEKLY_RANKINGS_AT
+    url = settings.openrouter_base_url.rstrip("/") + "/models"
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.get(
+                url,
+                headers=_openrouter_headers(),
+                params={"sort": "top-weekly"},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+    except Exception:
+        return
+
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        mid = row.get("id")
+        if not isinstance(mid, str) or not mid.strip():
+            continue
+        pricing = row.get("pricing") or {}
+        if not isinstance(pricing, dict):
+            pricing = {}
+        name = row.get("name") if isinstance(row.get("name"), str) else mid
+        out.append(
+            {
+                "rank": len(out) + 1,
+                "id": mid.strip(),
+                "name": name,
+                "prompt_per_1k": _per_token_to_per_1k(pricing.get("prompt")),
+                "completion_per_1k": _per_token_to_per_1k(pricing.get("completion")),
+            }
+        )
+        if len(out) >= max(1, limit):
+            break
+    if out:
+        with _LOCK:
+            _WEEKLY_RANKINGS = out
+            _WEEKLY_RANKINGS_AT = time.time()
+
+
+def list_weekly_rankings(
+    *, limit: int = 25, force_refresh: bool = False
+) -> list[dict[str, Any]]:
+    """Top models by OpenRouter weekly token volume (`sort=top-weekly`)."""
+    cap = min(100, max(1, int(limit)))
+    with _LOCK:
+        stale = (time.time() - _WEEKLY_RANKINGS_AT) > _WEEKLY_RANKINGS_TTL_SECONDS
+        have = list(_WEEKLY_RANKINGS)
+    if force_refresh or not have or stale:
+        _refresh_weekly_rankings(limit=cap)
+        with _LOCK:
+            have = list(_WEEKLY_RANKINGS)
+    return have[:cap]
 
 
 def estimate_cost_usd(

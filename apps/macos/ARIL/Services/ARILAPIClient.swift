@@ -210,6 +210,25 @@ final class ARILAPIClient {
         return try decode(data)
     }
 
+    func checkMCPServer(
+        baseURL: String,
+        url serverURL: String,
+        authStyle: String,
+        authHeaderName: String?,
+        apiKey: String
+    ) async throws -> MCPCheckResponseDTO {
+        try await post(
+            baseURL,
+            path: "/v1/mcp/check",
+            body: MCPCheckRequestDTO(
+                url: serverURL,
+                authStyle: authStyle,
+                authHeaderName: authHeaderName,
+                apiKey: apiKey.isEmpty ? nil : apiKey
+            )
+        )
+    }
+
     func modelPricing(
         baseURL: String,
         modelIDs: [String],
@@ -252,6 +271,28 @@ final class ARILAPIClient {
         return try decode(data)
     }
 
+    func openRouterWeeklyRankings(
+        baseURL: String,
+        limit: Int = 25,
+        refresh: Bool = false
+    ) async throws -> OpenRouterWeeklyRankingsResponseDTO {
+        var components = URLComponents(
+            url: try url(baseURL, path: "/v1/models/rankings/weekly"),
+            resolvingAgainstBaseURL: false
+        )
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if refresh {
+            items.append(URLQueryItem(name: "refresh", value: "true"))
+        }
+        components?.queryItems = items
+        guard let final = components?.url else { throw ARILAPIError.invalidURL }
+        let (data, response) = try await session.data(from: final)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
     private func put<Body: Encodable, Response: Decodable>(
         _ baseURL: String,
         path: String,
@@ -284,7 +325,8 @@ final class ARILAPIClient {
     func chatStream(
         baseURL: String,
         request: ChatRequest,
-        onToken: @escaping @Sendable (String) -> Void
+        onToken: @escaping @Sendable (String) -> Void,
+        onMCPStatus: (@Sendable (String, String, String) -> Void)? = nil
     ) async throws -> StreamDoneEvent {
         var req = URLRequest(url: try url(baseURL, path: "/v1/chat/stream"))
         req.httpMethod = "POST"
@@ -324,6 +366,13 @@ final class ARILAPIClient {
                     receivedTokens = true
                     onToken(content)
                 }
+            } else if name == "mcp_status" {
+                if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] {
+                    let server = obj["server"] as? String ?? "MCP"
+                    let tool = obj["tool"] as? String ?? "tool"
+                    let phase = obj["phase"] as? String ?? "calling"
+                    onMCPStatus?(server, tool, phase)
+                }
             } else if name == "done" {
                 // Soft-decode so a trailing schema quirk doesn't kill a successful stream.
                 if let parsed = try? decoder.decode(StreamDoneEvent.self, from: Data(payload.utf8)) {
@@ -337,7 +386,8 @@ final class ARILAPIClient {
                         outputTokens: obj["output_tokens"] as? Int,
                         costUsd: obj["cost_usd"] as? Double,
                         cached: obj["cached"] as? Bool,
-                        latencyMs: obj["latency_ms"] as? Int
+                        latencyMs: obj["latency_ms"] as? Int,
+                        preferenceReason: obj["preference_reason"] as? String
                     )
                 }
             } else if name == "error" {
@@ -379,7 +429,8 @@ final class ARILAPIClient {
                 outputTokens: nil,
                 costUsd: nil,
                 cached: false,
-                latencyMs: nil
+                latencyMs: nil,
+                preferenceReason: nil
             )
         }
         throw ARILAPIError.stream("No response received from the model. Try sending again.")

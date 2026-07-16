@@ -6,12 +6,14 @@ struct SettingsView: View {
     @EnvironmentObject private var theme: ThemeStore
 
     private static let otherModelToken = "__aril.other__"
+    private static let budgetRowLabelWidth: CGFloat = 64
+    private static let budgetCapColumnWidth: CGFloat = 108
 
     @State private var showModelBrowser = false
     @State private var modelBrowserTitle = "Choose OpenRouter model"
     @State private var modelBrowserCategory: RouteCategory?
     @State private var modelBrowserForDefault = false
-    @State private var showMCPBacklogAlert = false
+    @State private var mcpEditorTarget: MCPEditorTarget?
 
     var body: some View {
         TabView {
@@ -174,6 +176,98 @@ struct SettingsView: View {
                 Text("When enabled, ARIL appears in the macOS menu bar while it’s running.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Budget") {
+                Toggle(
+                    "Enable budget guardrails",
+                    isOn: Binding(
+                        get: { state.budgetEnabled },
+                        set: { state.setBudgetEnabled($0) }
+                    )
+                )
+                Text("When off, Soft/Hard values are kept but ignored. Soft caps confirm before send; hard caps block. \(String(format: "$%.2f", BudgetCaps.stepUsd)) steps · 0 = off for that cap. Judge, web, and image-gen soft-confirm when any soft cap is set.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Grid(alignment: .trailing, horizontalSpacing: 20, verticalSpacing: 10) {
+                    GridRow {
+                        Text("")
+                            .gridColumnAlignment(.leading)
+                            .frame(width: Self.budgetRowLabelWidth, alignment: .leading)
+                        Text("Soft")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: Self.budgetCapColumnWidth, alignment: .trailing)
+                        Text("Hard")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: Self.budgetCapColumnWidth, alignment: .trailing)
+                    }
+
+                    GridRow {
+                        Text("Session")
+                            .gridColumnAlignment(.leading)
+                            .frame(width: Self.budgetRowLabelWidth, alignment: .leading)
+                        budgetStepper(
+                            value: state.budgetCaps.sessionSoftUsd,
+                            set: { soft in
+                                state.setBudgetCaps(BudgetCaps(
+                                    sessionSoftUsd: soft,
+                                    sessionHardUsd: state.budgetCaps.sessionHardUsd,
+                                    dailySoftUsd: state.budgetCaps.dailySoftUsd,
+                                    dailyHardUsd: state.budgetCaps.dailyHardUsd
+                                ))
+                            }
+                        )
+                        budgetStepper(
+                            value: state.budgetCaps.sessionHardUsd,
+                            set: { hard in
+                                state.setBudgetCaps(BudgetCaps(
+                                    sessionSoftUsd: state.budgetCaps.sessionSoftUsd,
+                                    sessionHardUsd: hard,
+                                    dailySoftUsd: state.budgetCaps.dailySoftUsd,
+                                    dailyHardUsd: state.budgetCaps.dailyHardUsd
+                                ))
+                            }
+                        )
+                    }
+
+                    GridRow {
+                        Text("Daily")
+                            .gridColumnAlignment(.leading)
+                            .frame(width: Self.budgetRowLabelWidth, alignment: .leading)
+                        budgetStepper(
+                            value: state.budgetCaps.dailySoftUsd,
+                            set: { soft in
+                                state.setBudgetCaps(BudgetCaps(
+                                    sessionSoftUsd: state.budgetCaps.sessionSoftUsd,
+                                    sessionHardUsd: state.budgetCaps.sessionHardUsd,
+                                    dailySoftUsd: soft,
+                                    dailyHardUsd: state.budgetCaps.dailyHardUsd
+                                ))
+                            }
+                        )
+                        budgetStepper(
+                            value: state.budgetCaps.dailyHardUsd,
+                            set: { hard in
+                                state.setBudgetCaps(BudgetCaps(
+                                    sessionSoftUsd: state.budgetCaps.sessionSoftUsd,
+                                    sessionHardUsd: state.budgetCaps.sessionHardUsd,
+                                    dailySoftUsd: state.budgetCaps.dailySoftUsd,
+                                    dailyHardUsd: hard
+                                ))
+                            }
+                        )
+                    }
+                }
+                .disabled(!state.budgetEnabled)
+                .opacity(state.budgetEnabled ? 1 : 0.45)
+
+                LabeledContent("Today’s spend") {
+                    Text(String(format: "$%.4f", state.dailySpendUsd))
+                        .monospacedDigit()
+                }
             }
 
             Section("Database") {
@@ -500,29 +594,142 @@ struct SettingsView: View {
 
     private var mcpTab: some View {
         Form {
-            Section("MCP servers") {
+            Section("MCP") {
                 Toggle("Use MCP servers", isOn: Binding(
                     get: { state.mcpEnabled },
-                    set: { newValue in
-                        if newValue {
-                            showMCPBacklogAlert = true
-                        } else {
-                            state.setMCPEnabled(false)
-                        }
-                    }
+                    set: { state.setMCPEnabled($0) }
                 ))
-                Text("MCP server support is on the backlog and cannot be configured yet. When it ships, each server will need a target URL and an API key.")
+                Text("Enabled remote servers are available as tools in Auto/Manual chat. Judge mode does not use MCP. Playwright/stdio is deferred.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                let ready = state.mcpServers.filter(\.isReady).count
+                Text("\(ready) ready · \(state.mcpServers.filter(\.enabled).count) enabled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Servers") {
+                ForEach(state.mcpServers) { server in
+                    mcpServerRow(server)
+                }
+                Button("Add server…") {
+                    mcpEditorTarget = .new
+                }
             }
         }
         .padding()
         .formStyle(.grouped)
-        .alert("MCP servers", isPresented: $showMCPBacklogAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("MCP server support is on the backlog.")
+        .sheet(item: $mcpEditorTarget) { target in
+            MCPServerEditorView(serverID: target.serverID)
+                .environmentObject(state)
         }
+    }
+
+    @ViewBuilder
+    private func mcpServerRow(_ server: MCPServerConfig) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(server.displayName)
+                            .font(.headline)
+                        if server.isDeferred {
+                            Text("Soon")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.2))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        } else if server.isPreset {
+                            Text("Preset")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(server.isDeferred ? "Local stdio (deferred)" : server.url)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Toggle(
+                    "Enabled",
+                    isOn: Binding(
+                        get: { server.enabled },
+                        set: { state.setMCPServerEnabled(id: server.id, enabled: $0) }
+                    )
+                )
+                .labelsHidden()
+                .disabled(server.isDeferred || !state.mcpEnabled)
+                .help(server.isDeferred ? "Playwright requires local Node — coming later" : "Enable this server")
+            }
+
+            if !server.isDeferred, server.needsAPIKey {
+                SecureField(
+                    server.authStyle == .header
+                        ? "API key (\(server.authHeaderName ?? "header"))"
+                        : "API key / bearer token",
+                    text: Binding(
+                        get: { server.apiKey },
+                        set: { state.setMCPServerAPIKey(id: server.id, apiKey: $0) }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+
+            HStack(spacing: 10) {
+                statusPill(for: server)
+                Spacer()
+                if let docs = server.docsURL, let link = URL(string: docs) {
+                    Link("Docs", destination: link)
+                        .font(.caption)
+                }
+                Button("Edit") {
+                    mcpEditorTarget = .edit(server.id)
+                }
+                .font(.caption)
+                Button("Check") {
+                    Task { await state.checkMCPServerConnection(id: server.id) }
+                }
+                .font(.caption)
+                .disabled(server.isDeferred || state.mcpCheckingServerID == server.id)
+                if state.mcpCheckingServerID == server.id {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if !server.lastCheckMessage.isEmpty {
+                Text(server.lastCheckMessage)
+                    .font(.caption)
+                    .foregroundStyle(server.lastCheckStatus == .ok ? Color.secondary : Color.red.opacity(0.85))
+                    .lineLimit(3)
+            }
+        }
+        .padding(.vertical, 6)
+        .opacity(state.mcpEnabled || server.isDeferred ? 1 : 0.55)
+    }
+
+    @ViewBuilder
+    private func statusPill(for server: MCPServerConfig) -> some View {
+        let (label, color): (String, Color) = {
+            switch server.lastCheckStatus {
+            case .ok: return ("OK", .green)
+            case .failed: return ("Failed", .red)
+            case .deferred: return ("Deferred", .secondary)
+            case .unknown: return (server.isReady ? "Ready" : "Not ready", .secondary)
+            }
+        }()
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(color.opacity(0.4), lineWidth: 1)
+            )
     }
 
     private var logAnalysisTab: some View {
@@ -578,6 +785,24 @@ struct SettingsView: View {
                 }
             }
         )
+    }
+
+    private func budgetStepper(value: Double, set: @escaping (Double) -> Void) -> some View {
+        HStack(spacing: 8) {
+            Text(value <= 0 ? "Off" : String(format: "$%.2f", value))
+                .monospacedDigit()
+                .frame(minWidth: 40, alignment: .trailing)
+            Stepper(
+                "",
+                value: Binding(get: { value }, set: set),
+                in: 0...BudgetCaps.maxUsd,
+                step: BudgetCaps.stepUsd
+            )
+            .labelsHidden()
+            .fixedSize()
+        }
+        .frame(width: Self.budgetCapColumnWidth, alignment: .trailing)
+        .help(value <= 0 ? "Off — cap disabled" : String(format: "$%.2f USD", value))
     }
 }
 
@@ -637,5 +862,25 @@ private struct FullWidthTemperatureSlider: View {
         .frame(maxWidth: .infinity)
         .frame(height: 28)
         .padding(.bottom, 6)
+    }
+}
+
+/// Sheet identity for Add vs Edit MCP server (avoids stale `isPresented` captures).
+private enum MCPEditorTarget: Identifiable, Hashable {
+    case new
+    case edit(UUID)
+
+    var id: String {
+        switch self {
+        case .new: return "new"
+        case .edit(let uuid): return uuid.uuidString
+        }
+    }
+
+    var serverID: UUID? {
+        switch self {
+        case .new: return nil
+        case .edit(let uuid): return uuid
+        }
     }
 }
