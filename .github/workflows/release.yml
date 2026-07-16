@@ -17,9 +17,6 @@ permissions:
 jobs:
   macos:
     runs-on: macos-15
-    env:
-      KEYCHAIN_PATH: ${{ runner.temp }}/aril-build.keychain-db
-      KEYCHAIN_PASSWORD: aril-build
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +36,10 @@ jobs:
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: aril-build
         run: |
+          KEYCHAIN_PATH="${RUNNER_TEMP}/aril-build.keychain-db"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           test -n "$MACOS_CERT_P12"
           test -n "$MACOS_CERT_PASSWORD"
           echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/aril-cert.p12"
@@ -103,5 +103,8 @@ jobs:
 
       - name: Cleanup signing keychain
         if: always()
+        env:
+          KEYCHAIN_PASSWORD: aril-build
         run: |
+          KEYCHAIN_PATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/aril-build.keychain-db}"
           security delete-keychain "$KEYCHAIN_PATH" || true
