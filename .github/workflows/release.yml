@@ -16,7 +16,10 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      KEYCHAIN_PATH: ${{ runner.temp }}/aril-build.keychain-db
+      KEYCHAIN_PASSWORD: aril-build
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,10 +35,35 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Build DMG (ad-hoc signed)
+      - name: Import Developer ID certificate
         env:
-          SIGN_IDENTITY: "-"
-          NOTARIZE: "0"
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          test -n "$MACOS_CERT_P12"
+          test -n "$MACOS_CERT_PASSWORD"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/aril-cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/aril-cert.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERT_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/xcrun
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Build notarized DMG
+        env:
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+          NOTARIZE: "1"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           chmod +x scripts/package-gateway.sh scripts/package-macos.sh
           ./scripts/package-macos.sh
@@ -69,7 +97,11 @@ jobs:
             3. Launch ARIL (Solo mode starts the bundled gateway)
             4. Open **Preferences → General** and paste your OpenRouter API key
 
-            > First launch may show a Gatekeeper prompt for unsigned/ad-hoc builds.
-            > Right-click **ARIL → Open** if macOS blocks the app.
+            Builds are signed with Developer ID and notarized by Apple — no Gatekeeper workaround needed.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup signing keychain
+        if: always()
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" || true
