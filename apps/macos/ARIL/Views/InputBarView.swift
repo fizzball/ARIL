@@ -4,6 +4,7 @@ struct InputBarView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
     @FocusState private var focused: Bool
+    @State private var showModelBrowser = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -92,7 +93,7 @@ struct InputBarView: View {
 
                 HStack(alignment: .bottom, spacing: 8) {
                     Menu {
-                        ForEach(AppState.modelCatalog, id: \.self) { model in
+                        ForEach(state.modelCatalog, id: \.self) { model in
                             Button {
                                 state.selectModel(model)
                             } label: {
@@ -104,6 +105,10 @@ struct InputBarView: View {
                                     }
                                 }
                             }
+                        }
+                        Divider()
+                        Button("Other…") {
+                            showModelBrowser = true
                         }
                     } label: {
                         Text(shortModel(state.selectedModel))
@@ -168,6 +173,13 @@ struct InputBarView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.35 : 0.08), radius: 12, y: 4)
+        .sheet(isPresented: $showModelBrowser) {
+            OpenRouterModelBrowserView(title: "Choose OpenRouter model") { modelID in
+                state.selectModelFromCatalog(modelID)
+            }
+            .environmentObject(state)
+            .environmentObject(theme)
+        }
     }
 
     private var modelLabelColor: Color {
@@ -186,7 +198,7 @@ struct InputBarView: View {
         case .auto:
             return "Auto-selected for detected category"
         case .manual:
-            return "Manual mode — model is locked (shown in red) and will not be swapped by ARIL"
+            return "Manual mode — model is locked (shown in red). Use Other… to browse the full OpenRouter catalog."
         case .compare:
             return "Judge mode — three models are evaluated side by side"
         }

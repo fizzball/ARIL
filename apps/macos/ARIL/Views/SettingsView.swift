@@ -400,7 +400,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Text("Manual mode uses the last model you picked. Default is highlighted ★ in the model menu. Prices are OpenRouter USD per 1K input / output tokens. Choose Other… to browse the full OpenRouter catalog.")
+                Text("Manual mode uses the last model you picked (or Other… from the chat model menu). Default is highlighted ★ in the model menu. Prices are OpenRouter USD per 1K input / output tokens. Choose Other… to browse the full OpenRouter catalog — new picks are pinned to the top of the shortlist (max 8).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -462,7 +462,11 @@ struct SettingsView: View {
             await state.refreshModelPricing(forceRefresh: false)
         }
         .sheet(isPresented: $showModelBrowser) {
-            OpenRouterModelBrowserView(title: modelBrowserTitle) { modelID in
+            OpenRouterModelBrowserView(
+                title: modelBrowserTitle,
+                initialCategory: modelBrowserForDefault ? nil : modelBrowserCategory
+            ) { modelID in
+                state.promoteModelToCatalog(modelID)
                 if modelBrowserForDefault {
                     state.setDefaultModel(modelID)
                 } else if let category = modelBrowserCategory {
@@ -475,7 +479,7 @@ struct SettingsView: View {
     }
 
     private var defaultPickerModels: [String] {
-        var models = AppState.modelCatalog
+        var models = state.modelCatalog
         if !models.contains(state.defaultModel) {
             models.insert(state.defaultModel, at: 0)
         }
@@ -485,7 +489,7 @@ struct SettingsView: View {
     private func pickerModels(for category: RouteCategory) -> [String] {
         let selected = state.routingProfile.model(for: category)
         var models = recommended(for: category)
-        for model in AppState.modelCatalog where !models.contains(model) {
+        for model in state.modelCatalog where !models.contains(model) {
             models.append(model)
         }
         if !models.contains(selected) {
@@ -557,7 +561,7 @@ struct SettingsView: View {
     }
 
     private func recommended(for category: RouteCategory) -> [String] {
-        RoutingProfile.recommendations[category] ?? AppState.modelCatalog
+        RoutingProfile.recommendations[category] ?? AppState.factoryModelCatalog
     }
 
     private func binding(for category: RouteCategory) -> Binding<String> {

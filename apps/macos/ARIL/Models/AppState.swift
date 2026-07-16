@@ -45,7 +45,8 @@ enum ToolPanel: String, Identifiable, Equatable {
 
 @MainActor
 final class AppState: ObservableObject {
-    static let modelCatalog = [
+    /// Built-in starter models for the Manual-mode picker (before Other… picks).
+    static let factoryModelCatalog = [
         "openai/gpt-4.1",
         "openai/gpt-4.1-mini",
         "anthropic/claude-sonnet-4",
@@ -53,6 +54,9 @@ final class AppState: ObservableObject {
         "google/gemini-2.5-flash",
         "meta-llama/llama-3.3-70b-instruct",
     ]
+
+    /// Cap for the Manual / Preferences shortlist (factory set + Other… picks).
+    static let maxModelCatalogSize = 8
 
     /// Factory default for Preferences → Models (app default picker).
     static let factoryDefaultModel = "openai/gpt-4.1"
@@ -100,6 +104,8 @@ final class AppState: ObservableObject {
     @Published var routeMode: RouteMode = .auto
     @Published var selectedModel: String
     @Published var defaultModel: String
+    /// Shortlist shown in Manual mode (and Preferences pickers). Max `maxModelCatalogSize`.
+    @Published var modelCatalog: [String]
     @Published var gatewayURL: String
     @Published var soloMode: Bool
     @Published var gatewayReady: Bool = false
@@ -189,8 +195,8 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.15"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "45"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.16"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "46"
         return "\(short) (\(build))"
     }
 
@@ -223,6 +229,7 @@ final class AppState: ObservableObject {
         let storedDefault = defaults.string(forKey: "aril.defaultModel") ?? "openai/gpt-4.1"
         defaultModel = storedDefault
         selectedModel = defaults.string(forKey: "aril.lastModel") ?? storedDefault
+        modelCatalog = Self.loadModelCatalog()
         gatewayURL = defaults.string(forKey: "aril.gatewayURL") ?? "http://127.0.0.1:8741"
         soloMode = defaults.object(forKey: "aril.soloMode") as? Bool ?? true
         userDisplayName = defaults.string(forKey: "aril.userDisplayName") ?? ""
@@ -514,7 +521,7 @@ final class AppState: ObservableObject {
         var ids = Set(routingProfile.selectedModels)
         ids.insert(defaultModel)
         ids.insert(selectedModel)
-        for model in Self.modelCatalog { ids.insert(model) }
+        for model in modelCatalog { ids.insert(model) }
         for models in RoutingProfile.recommendations.values {
             for model in models { ids.insert(model) }
         }
@@ -1005,6 +1012,27 @@ final class AppState: ObservableObject {
         selectedModel = model
         routeMode = .manual
         UserDefaults.standard.set(model, forKey: "aril.lastModel")
+    }
+
+    /// Insert `model` at the top of the Manual shortlist. Caps at `maxModelCatalogSize`
+    /// by dropping the oldest (last) entry when a new id is added.
+    func promoteModelToCatalog(_ model: String) {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var next = modelCatalog.filter { $0 != trimmed }
+        next.insert(trimmed, at: 0)
+        if next.count > Self.maxModelCatalogSize {
+            next = Array(next.prefix(Self.maxModelCatalogSize))
+        }
+        modelCatalog = next
+        saveModelCatalog()
+        Task { await refreshModelPricing(forceRefresh: false, focusing: trimmed) }
+    }
+
+    /// Select from the full OpenRouter catalog: promote into the shortlist, then lock Manual.
+    func selectModelFromCatalog(_ model: String) {
+        promoteModelToCatalog(model)
+        selectModel(model)
     }
 
     func setDefaultModel(_ model: String) {
@@ -2004,6 +2032,26 @@ final class AppState: ObservableObject {
               let profile = try? JSONDecoder().decode(RoutingProfile.self, from: data)
         else { return .default }
         return profile
+    }
+
+    private static func loadModelCatalog() -> [String] {
+        if let saved = UserDefaults.standard.stringArray(forKey: "aril.modelCatalog") {
+            let cleaned = saved
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            var unique: [String] = []
+            for id in cleaned where !unique.contains(id) {
+                unique.append(id)
+            }
+            if !unique.isEmpty {
+                return Array(unique.prefix(maxModelCatalogSize))
+            }
+        }
+        return factoryModelCatalog
+    }
+
+    private func saveModelCatalog() {
+        UserDefaults.standard.set(modelCatalog, forKey: "aril.modelCatalog")
     }
 
     private func ensureSession() {

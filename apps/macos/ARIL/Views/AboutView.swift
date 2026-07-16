@@ -73,6 +73,10 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.16", changes: [
+            "Manual mode model menu: searchable Other… from the full OpenRouter catalog (pins up to 8)",
+            "Other… model browser: filter by Coding, Security, Reasoning, and other Preferences categories",
+        ]),
         ChangelogEntry(version: "0.3.15", changes: [
             "Developer ID signed and notarized builds — installs without Gatekeeper workarounds",
             "Automated notarized releases via GitHub Actions",
