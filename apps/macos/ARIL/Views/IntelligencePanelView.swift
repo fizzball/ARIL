@@ -4,7 +4,35 @@ struct IntelligencePanelView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
 
+    /// Cap the panel so a long analysis (metrics + alternatives) never pushes the
+    /// prompt entry bar off the bottom of the window; overflow scrolls internally.
+    private let maxPanelHeight: CGFloat = 320
+    @State private var contentHeight: CGFloat = 0
+
     var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            panelContent
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: IntelligencePanelHeightKey.self,
+                            value: geo.size.height
+                        )
+                    }
+                )
+        }
+        .frame(height: min(contentHeight, maxPanelHeight))
+        .onPreferenceChange(IntelligencePanelHeightKey.self) { contentHeight = $0 }
+        .background(theme.palette.analysisFill)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(theme.palette.accent.opacity(0.55), lineWidth: 1.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.4 : 0.1), radius: 10, y: 3)
+    }
+
+    private var panelContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("Intelligence", systemImage: "point.3.connected.trianglepath.dotted")
@@ -87,13 +115,7 @@ struct IntelligencePanelView: View {
             }
         }
         .padding(14)
-        .background(theme.palette.analysisFill)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(theme.palette.accent.opacity(0.55), lineWidth: 1.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.4 : 0.1), radius: 10, y: 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -292,5 +314,12 @@ struct IntelligencePanelView: View {
             help += " Prompts above the cache threshold may be cache-eligible."
         }
         return help
+    }
+}
+
+private struct IntelligencePanelHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

@@ -73,6 +73,10 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3.29", changes: [
+            "Intelligence panel scrolls within a capped height so it no longer hides the prompt entry bar",
+            "Remove the orphaned Model costs view (superseded by Model popularity)",
+        ]),
         ChangelogEntry(version: "0.3.28", changes: [
             "Recycle outdated Solo gateway when weekly rankings API is missing (fixes Model popularity 404)",
         ]),
