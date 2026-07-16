@@ -53,20 +53,23 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          generate_release_notes: false
           files: |
             dist/ARIL-*.dmg
           body: |
-            ## Install (macOS 14+)
+            ## Requirements
+
+            - **Apple Silicon Mac** (M-series) with **macOS 14** (Sonoma) or newer
+            - An [OpenRouter](https://openrouter.ai/keys) API key (`sk-or-v1-…`) with a small credit balance — add a few dollars at [openrouter.ai](https://openrouter.ai) before your first chat
+
+            ## Install
 
             1. Download **ARIL-*.dmg**
             2. Open the disk image and drag **ARIL** into **Applications**
             3. Launch ARIL (Solo mode starts the bundled gateway)
-            4. Open **Preferences → Gateway** and paste your [OpenRouter](https://openrouter.ai/keys) API key
-
-            See [docs/INSTALL.md](https://github.com/fizzball/ARIL/blob/main/docs/INSTALL.md) for details.
+            4. Open **Preferences → General** and paste your OpenRouter API key
 
             > First launch may show a Gatekeeper prompt for unsigned/ad-hoc builds.
-            > Prefer a notarized build when Developer ID secrets are configured.
+            > Right-click **ARIL → Open** if macOS blocks the app.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

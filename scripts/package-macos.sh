@@ -81,34 +81,101 @@ if [[ -z "$APP_SRC" || ! -d "$APP_SRC" ]]; then
   exit 1
 fi
 
-rm -rf "$DIST/ARIL.app"
+APP_TMP="$DIST/ARIL-tmp.app"
+APP_CLEAN="$DIST/ARIL-clean.app"
+rm -rf "$DIST/ARIL.app" "$APP_TMP" "$APP_CLEAN"
 # ditto avoids AppleDouble / resource-fork detritus that breaks codesign.
-ditto --norsrc --noextattr --noqtn "$APP_SRC" "$DIST/ARIL.app"
+ditto --norsrc --noextattr --noqtn "$APP_SRC" "$APP_TMP"
 
-RESOURCES="$DIST/ARIL.app/Contents/Resources"
+RESOURCES="$APP_TMP/Contents/Resources"
 mkdir -p "$RESOURCES/aril-gateway"
 ditto --norsrc --noextattr --noqtn "$DIST/aril-gateway" "$RESOURCES/aril-gateway"
 chmod +x "$RESOURCES/aril-gateway/aril-gateway"
+GATEWAY_BIN="$RESOURCES/aril-gateway/aril-gateway"
+GATEWAY_DIR="$RESOURCES/aril-gateway"
 
 # Never ship developer runtime data / secrets inside the app bundle.
-cleanse_tree "$DIST/ARIL.app"
-verify_clean_tree "$DIST/ARIL.app" "dist/ARIL.app"
+cleanse_tree "$APP_TMP"
+verify_clean_tree "$APP_TMP" "dist/ARIL.app"
 
 # Strip remaining provenance / quarantine xattrs (macOS 15+).
 if command -v xattr >/dev/null 2>&1; then
-  xattr -cr "$DIST/ARIL.app" 2>/dev/null || true
-  find "$DIST/ARIL.app" -print0 | xargs -0 xattr -c 2>/dev/null || true
+  xattr -cr "$APP_TMP" 2>/dev/null || true
+  find "$APP_TMP" -print0 | xargs -0 xattr -c 2>/dev/null || true
+  xattr -d com.apple.FinderInfo "$APP_TMP" 2>/dev/null || true
+  xattr -dr com.apple.FinderInfo "$APP_TMP" 2>/dev/null || true
 fi
-find "$DIST/ARIL.app" \( -name '._*' -o -name '.DS_Store' \) -delete 2>/dev/null || true
+find "$APP_TMP" \( -name '._*' -o -name '.DS_Store' \) -delete 2>/dev/null || true
+
+# Sign every nested Mach-O payload inside the embedded gateway before the launcher.
+echo "-> Codesigning embedded gateway payloads (identity: ${SIGN_IDENTITY})..."
+GATEWAY_DIR="$GATEWAY_DIR" SIGN_IDENTITY="$SIGN_IDENTITY" python3 - <<'PY'
+import os
+import subprocess
+from pathlib import Path
+
+gateway_dir = Path(os.environ["GATEWAY_DIR"])
+sign_identity = os.environ["SIGN_IDENTITY"]
+
+def is_macho(path: Path) -> bool:
+    proc = subprocess.run(["file", str(path)], capture_output=True, text=True)
+    return "Mach-O" in proc.stdout
+
+targets = []
+for path in gateway_dir.rglob("*"):
+    if not path.is_file():
+        continue
+    if path == gateway_dir / "aril-gateway":
+        continue
+    if is_macho(path):
+        targets.append(path)
+
+for path in sorted(targets):
+    if sign_identity == "-":
+        cmd = ["codesign", "--force", "--sign", "-", str(path)]
+    else:
+        cmd = ["codesign", "--force", "--options", "runtime", "--sign", sign_identity, str(path)]
+    subprocess.run(cmd, check=True)
+PY
+
+echo "-> Codesigning embedded gateway launcher (identity: ${SIGN_IDENTITY})..."
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  codesign --force --sign - "$GATEWAY_BIN"
+else
+  codesign --force --options runtime --sign "$SIGN_IDENTITY" "$GATEWAY_BIN"
+fi
+
+# macOS can reintroduce provenance metadata during nested signing; scrub once more
+# before signing the outer app bundle or codesign rejects the bundle as detritus.
+if command -v xattr >/dev/null 2>&1; then
+  xattr -cr "$APP_TMP" 2>/dev/null || true
+  find "$APP_TMP" -print0 | xargs -0 xattr -c 2>/dev/null || true
+  xattr -d com.apple.FinderInfo "$APP_TMP" 2>/dev/null || true
+  xattr -dr com.apple.FinderInfo "$APP_TMP" 2>/dev/null || true
+fi
+
+# Re-copy into a fresh bundle after nested signing; on newer macOS builds this is
+# more reliable than in-place xattr deletion for stripping provenance metadata.
+ditto --norsrc --noextattr --noqtn "$APP_TMP" "$APP_CLEAN"
+rm -rf "$APP_TMP"
+
+if command -v xattr >/dev/null 2>&1; then
+  xattr -cr "$APP_CLEAN" 2>/dev/null || true
+  find "$APP_CLEAN" -print0 | xargs -0 xattr -c 2>/dev/null || true
+  xattr -d com.apple.FinderInfo "$APP_CLEAN" 2>/dev/null || true
+  xattr -dr com.apple.FinderInfo "$APP_CLEAN" 2>/dev/null || true
+fi
 
 echo "-> Codesigning app (identity: ${SIGN_IDENTITY})..."
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
-  codesign --force --deep --sign - "$DIST/ARIL.app"
+  codesign --force --deep --sign - "$APP_CLEAN"
 else
-  codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$DIST/ARIL.app"
+  codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP_CLEAN"
 fi
 
-codesign --verify --verbose=2 "$DIST/ARIL.app" || true
+codesign --verify --verbose=2 "$APP_CLEAN" || true
+
+mv "$APP_CLEAN" "$DIST/ARIL.app"
 
 # Remove superseded local DMGs when version bumps.
 rm -f "$DIST"/ARIL-*.dmg 2>/dev/null || true

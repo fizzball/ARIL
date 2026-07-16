@@ -2,15 +2,15 @@
 
 **Adaptive Routing Intelligent Layer** — a macOS AI chat client with a local Solo gateway that grades prompts, classifies intent, suggests rewrites, and routes requests to the best model for accuracy, cost, tokens, and latency.
 
-## Install (macOS 14+)
+## Install (macOS 14+, Apple Silicon)
 
-End users: download the DMG from [Releases](https://github.com/fizzball/ARIL/releases) — no Python or Xcode required.
+End users: download the DMG from [Releases](https://github.com/fizzball/ARIL/releases) — no Python or Xcode required. You need an [OpenRouter](https://openrouter.ai/keys) API key and a small credit balance.
 
 **→ Full steps: [docs/INSTALL.md](docs/INSTALL.md)**
 
 1. Download `ARIL-<version>.dmg`
 2. Drag **ARIL** to Applications and open it
-3. Preferences → Gateway → paste your [OpenRouter](https://openrouter.ai/keys) API key
+3. Preferences → General → paste your OpenRouter API key
 
 ## Develop
 

@@ -4,8 +4,8 @@ ARIL is a native **macOS 14+** chat client. Solo mode runs a bundled local gatew
 
 ## Requirements
 
-- macOS 14 (Sonoma) or newer (Apple Silicon or Intel)
-- An [OpenRouter](https://openrouter.ai/keys) API key (`sk-or-v1-…`)
+- **Apple Silicon Mac** (M-series) with **macOS 14** (Sonoma) or newer
+- An [OpenRouter](https://openrouter.ai/keys) API key (`sk-or-v1-…`) with a small credit balance — add a few dollars at [openrouter.ai](https://openrouter.ai) before your first chat
 
 ## Install from GitHub Releases
 
@@ -13,7 +13,7 @@ ARIL is a native **macOS 14+** chat client. Solo mode runs a bundled local gatew
 2. Download **`ARIL-<version>.dmg`**
 3. Open the DMG and drag **ARIL** into **Applications**
 4. Launch **ARIL** from Applications (or Spotlight)
-5. Open **ARIL → Preferences → Gateway**
+5. Open **ARIL → Preferences → General**
 6. Paste your OpenRouter API key and save
 7. Keep **Solo mode** enabled (default) so the local gateway starts automatically
 
@@ -50,7 +50,7 @@ Notarized builds (when published) open without this step.
 | Symptom | What to try |
 |--------|-------------|
 | “Gateway offline” / “Starting gateway…” | Wait a few seconds; check Preferences Solo message; relaunch ARIL |
-| “API key required” | Preferences → Gateway → set OpenRouter key |
+| “API key required” | Preferences → General → set OpenRouter key |
 | Port 8741 in use | Quit other ARIL/gateway processes; relaunch |
 | Empty chat after reinstall | History lives in Application Support — restore that folder if you backed it up |
 
