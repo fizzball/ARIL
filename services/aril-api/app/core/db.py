@@ -356,12 +356,15 @@ def delete_store_record(record_id: str) -> str | None:
         return None
 
 
-def delete_all_store_records() -> dict[str, int]:
-    """Delete all FIFO store rows (keeps win aggregates + meta)."""
+def delete_all_store_records(include_wins: bool = False) -> dict[str, int]:
+    """Delete all FIFO store rows. Also clears Prefer win aggregates when requested."""
     conn = connect()
     with _LOCK:
         deleted: dict[str, int] = {}
-        for table in _FIFO_TABLES:
+        tables = list(_FIFO_TABLES)
+        if include_wins:
+            tables += ["category_wins", "fingerprint_wins"]
+        for table in tables:
             deleted[table] = int(conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"])
             conn.execute(f"DELETE FROM {table}")
         conn.commit()

@@ -73,6 +73,15 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.0", changes: [
+            "New: ARIL-managed Nmap security scanner over MCP — enable it in Preferences → MCP and use nmap in Auto/Manual chat",
+            "New: ARIL-managed Semgrep code scanner over MCP — static analysis of files, folders, or inline code snippets (auto/security rulesets or your own YAML rule)",
+            "ARIL generates the bearer token, writes a localhost-only config, and launches each server so token + config never drift",
+            "Detects whether nmap / semgrep are installed and prompts `brew install nmap` / `brew install semgrep` when missing",
+            "Live scans: nmap and semgrep progress now stream into the reply as the scan runs",
+            "Slash commands with a live `/` palette: /status (gateway, OpenRouter latency + credits, Nmap, code scan, MCP, latest release), /nmap and /codescan (example scanner prompts; flagged when the server is disabled), /clear, and /help",
+            "Prompt history: press ↑ / ↓ in the prompt box to recall your last 10 prompts",
+        ]),
         ChangelogEntry(version: "0.3.29", changes: [
             "Intelligence panel scrolls within a capped height so it no longer hides the prompt entry bar",
             "Remove the orphaned Model costs view (superseded by Model popularity)",

@@ -599,7 +599,7 @@ struct SettingsView: View {
                     get: { state.mcpEnabled },
                     set: { state.setMCPEnabled($0) }
                 ))
-                Text("Enabled remote servers are available as tools in Auto/Manual chat. Judge mode does not use MCP. Playwright/stdio is deferred.")
+                Text("Enabled servers are available as tools in Auto/Manual chat. Judge mode does not use MCP. The Nmap Scanner (local) is managed by ARIL — enable it to run a local, token-authenticated nmap server. Playwright/stdio is deferred.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 let ready = state.mcpServers.filter(\.isReady).count
@@ -640,6 +640,13 @@ struct SettingsView: View {
                                 .padding(.vertical, 2)
                                 .background(Color.secondary.opacity(0.2))
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
+                        } else if server.isManaged {
+                            Text("Managed")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.18))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
                         } else if server.isPreset {
                             Text("Preset")
                                 .font(.caption2)
@@ -665,7 +672,9 @@ struct SettingsView: View {
                 .help(server.isDeferred ? "Playwright requires local Node — coming later" : "Enable this server")
             }
 
-            if !server.isDeferred, server.needsAPIKey {
+            if server.isManaged {
+                managedServerDetails(server)
+            } else if !server.isDeferred, server.needsAPIKey {
                 SecureField(
                     server.authStyle == .header
                         ? "API key (\(server.authHeaderName ?? "header"))"
@@ -685,10 +694,12 @@ struct SettingsView: View {
                     Link("Docs", destination: link)
                         .font(.caption)
                 }
-                Button("Edit") {
-                    mcpEditorTarget = .edit(server.id)
+                if !server.isManaged {
+                    Button("Edit") {
+                        mcpEditorTarget = .edit(server.id)
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
                 Button("Check") {
                     Task { await state.checkMCPServerConnection(id: server.id) }
                 }
@@ -709,6 +720,53 @@ struct SettingsView: View {
         }
         .padding(.vertical, 6)
         .opacity(state.mcpEnabled || server.isDeferred ? 1 : 0.55)
+    }
+
+    @ViewBuilder
+    private func managedServerDetails(_ server: MCPServerConfig) -> some View {
+        let isCode = server.presetId == MCPServerConfig.codescanPresetId
+        let toolName = isCode ? "semgrep" : "nmap"
+        let installHint = isCode ? "brew install semgrep" : "brew install nmap"
+        let blurb = isCode
+            ? "ARIL runs this server for you — it generates a bearer token, writes a localhost-only config, and launches semgrep over MCP for static code analysis (files, folders, or inline snippets). Enable it above to start; the token is stored in your Keychain."
+            : "ARIL runs this server for you — it generates a bearer token, writes a localhost-only config, and launches nmap over MCP. Enable it above to start; the token is stored in your Keychain."
+        let installed = isCode ? state.semgrepInstalled : state.nmapInstalled
+        let busy = isCode ? state.codeScanServerBusy : state.nmapServerBusy
+        let statusText = isCode ? state.codeScanServerStatus : state.nmapServerStatus
+
+        VStack(alignment: .leading, spacing: 4) {
+            Text(blurb)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Image(systemName: installed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(installed ? Color.green : Color.orange)
+                    .font(.caption)
+                if installed {
+                    Text("\(toolName) is installed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(toolName) not found — install with ")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        + Text(installHint)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                }
+                if busy {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            if !statusText.isEmpty {
+                Text(statusText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder

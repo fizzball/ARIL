@@ -170,8 +170,9 @@ final class ARILAPIClient {
         try validate(response, data: data)
     }
 
-    func deleteAllStoreRecords(baseURL: String) async throws -> StoreDeleteAllResponseDTO {
-        var req = URLRequest(url: try url(baseURL, path: "/v1/store/records"))
+    func deleteAllStoreRecords(baseURL: String, includeWins: Bool = false) async throws -> StoreDeleteAllResponseDTO {
+        let path = includeWins ? "/v1/store/records?include_wins=true" : "/v1/store/records"
+        var req = URLRequest(url: try url(baseURL, path: path))
         req.httpMethod = "DELETE"
         let (data, response) = try await session.data(for: req)
         try validate(response, data: data)
@@ -326,7 +327,7 @@ final class ARILAPIClient {
         baseURL: String,
         request: ChatRequest,
         onToken: @escaping @Sendable (String) -> Void,
-        onMCPStatus: (@Sendable (String, String, String) -> Void)? = nil
+        onMCPStatus: (@Sendable (String, String, String, String?) -> Void)? = nil
     ) async throws -> StreamDoneEvent {
         var req = URLRequest(url: try url(baseURL, path: "/v1/chat/stream"))
         req.httpMethod = "POST"
@@ -371,7 +372,8 @@ final class ARILAPIClient {
                     let server = obj["server"] as? String ?? "MCP"
                     let tool = obj["tool"] as? String ?? "tool"
                     let phase = obj["phase"] as? String ?? "calling"
-                    onMCPStatus?(server, tool, phase)
+                    let note = obj["note"] as? String
+                    onMCPStatus?(server, tool, phase, note)
                 }
             } else if name == "done" {
                 // Soft-decode so a trailing schema quirk doesn't kill a successful stream.

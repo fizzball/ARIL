@@ -105,6 +105,17 @@ struct ContentView: View {
         } message: {
             Text(state.budgetConfirmMessage ?? "")
         }
+        .alert(
+            "Reset ARIL?",
+            isPresented: $state.showResetConfirmation
+        ) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete everything", role: .destructive) {
+                Task { await state.performReset() }
+            }
+        } message: {
+            Text("This permanently deletes ALL chat sessions and every Learning / judged database entry. This cannot be undone.")
+        }
         .task {
             systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.

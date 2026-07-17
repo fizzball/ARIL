@@ -196,8 +196,24 @@ async def run_mcp_tool_rounds(
                 if session is None:
                     tool_content = f"No MCP session for server '{slug}'."
                 else:
+                    progress_cb = None
+                    if on_status is not None:
+                        async def progress_cb(  # noqa: E731
+                            note: str, _sl: str = server_label, _tn: str = tool_name
+                        ) -> None:
+                            await on_status(
+                                {
+                                    "server": _sl,
+                                    "tool": _tn,
+                                    "phase": "progress",
+                                    "note": note,
+                                }
+                            )
+
                     try:
-                        tool_content = await session.call_tool(tool_name, args)
+                        tool_content = await session.call_tool(
+                            tool_name, args, on_progress=progress_cb
+                        )
                     except RuntimeError as exc:
                         tool_content = f"Tool error: {exc}"
                 if on_status:

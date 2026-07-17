@@ -8,6 +8,63 @@ struct InputBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if state.slashMenuVisible {
+                slashCommandPalette
+            }
+            inputCard
+        }
+    }
+
+    private var slashCommandPalette: some View {
+        let commands = state.filteredSlashCommands
+        let selected = min(max(state.slashMenuIndex, 0), max(commands.count - 1, 0))
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(commands.enumerated()), id: \.element.id) { idx, cmd in
+                Button {
+                    state.slashMenuIndex = idx
+                    state.executeSelectedSlash()
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(cmd.id)
+                            .font(ARILTheme.bodyFont)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(theme.palette.accent)
+                        Text(cmd.summary)
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.textMuted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        idx == selected
+                            ? theme.palette.accent.opacity(0.16)
+                            : Color.clear
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if idx < commands.count - 1 {
+                    Divider().opacity(0.4)
+                }
+            }
+        }
+        .background(theme.palette.backgroundElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(theme.palette.hairline, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.35 : 0.10), radius: 12, y: 4)
+        .frame(maxWidth: 460, alignment: .leading)
+    }
+
+    private var inputCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Picker("Mode", selection: Binding(
                     get: { state.routeMode },
@@ -85,10 +142,47 @@ struct InputBarView: View {
                     .layoutPriority(1)
                     .focused($focused)
                     .onChange(of: state.draft) { _, _ in
+                        state.noteDraftEditedFromTyping()
+                        state.onDraftChangedForSlash()
                         state.schedulePreview()
                     }
+                    .onKeyPress(.upArrow) {
+                        if state.slashMenuVisible {
+                            state.slashMenuMove(-1)
+                            return .handled
+                        }
+                        // Shell-style history recall; leave multi-line editing alone.
+                        guard !state.draft.contains("\n") else { return .ignored }
+                        return state.recallPreviousPrompt() ? .handled : .ignored
+                    }
+                    .onKeyPress(.downArrow) {
+                        if state.slashMenuVisible {
+                            state.slashMenuMove(1)
+                            return .handled
+                        }
+                        guard !state.draft.contains("\n") else { return .ignored }
+                        return state.recallNextPrompt() ? .handled : .ignored
+                    }
+                    .onKeyPress(.tab) {
+                        if state.slashMenuVisible {
+                            state.insertSelectedSlash()
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.escape) {
+                        if state.slashMenuVisible {
+                            state.dismissSlashMenu()
+                            return .handled
+                        }
+                        return .ignored
+                    }
                     .onSubmit {
-                        state.send()
+                        if state.slashMenuVisible {
+                            state.executeSelectedSlash()
+                        } else {
+                            state.send()
+                        }
                     }
 
                 HStack(alignment: .bottom, spacing: 8) {

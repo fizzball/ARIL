@@ -37,10 +37,12 @@ def _norm_id(session_id: str | None) -> str:
 
 
 def _sanitize_message_dict(msg: dict) -> dict:
-    from app.providers.messages import sanitize_content_for_context
+    from app.providers.messages import persist_inline_images
 
     content = msg.get("content") or ""
-    cleaned = sanitize_content_for_context(content)
+    # Persist generated images to disk (file:// link) rather than dropping them, so
+    # they survive restarts. Non-image content is returned unchanged.
+    cleaned = persist_inline_images(content)
     if cleaned == content:
         return msg
     out = dict(msg)
@@ -185,15 +187,17 @@ def record_chat_turn(
     assistant_content: str,
 ) -> SessionDetail | None:
     """Append one user/assistant turn without replacing prior history."""
-    from app.providers.messages import sanitize_content_for_context
+    from app.providers.messages import persist_inline_images
 
     with _LOCK:
         _ensure_loaded()
         sid = _norm_id(session_id)
         if sid in _TOMBSTONES:
             return None
-        user_content = sanitize_content_for_context(user_content or "")
-        assistant_content = sanitize_content_for_context(assistant_content or "")
+        # Keep generated images by persisting them to disk (file:// link) rather than
+        # dropping to a placeholder, so they survive an app restart.
+        user_content = persist_inline_images(user_content or "")
+        assistant_content = persist_inline_images(assistant_content or "")
         row = _SESSIONS.get(sid) or {
             "title": title or "New session",
             "updated_at": _now(),

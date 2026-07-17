@@ -91,6 +91,130 @@ async def test_mcp_session_call_tool():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_call_tool_streams_sse_progress():
+    """SSE tool responses should surface progress notes and the final result."""
+    url = "https://nmap.local/mcp"
+
+    def init_response(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}},
+            headers={"mcp-session-id": "sess-1"},
+        )
+
+    sse_body = (
+        'event: progress\ndata: {"note": "Discovered open port 80/tcp"}\n\n'
+        'event: progress\ndata: {"note": "50.00% done"}\n\n'
+        'event: result\ndata: {"jsonrpc":"2.0","id":3,'
+        '"result":{"content":[{"type":"text","text":"scan summary"}]}}\n\n'
+    )
+    call_response = httpx.Response(
+        200, headers={"content-type": "text/event-stream"}, content=sse_body
+    )
+
+    respx.post(url).mock(
+        side_effect=[init_response, httpx.Response(200, json={}), call_response]
+    )
+
+    notes: list[str] = []
+
+    async def on_progress(note: str) -> None:
+        notes.append(note)
+
+    async with MCPSession(url=url, auth_style="none", label="Nmap", slug="nmap") as session:
+        text = await session.call_tool(
+            "nmap_quick_scan", {"target": "scanme.nmap.org"}, on_progress=on_progress
+        )
+
+    assert text == "scan summary"
+    assert "Discovered open port 80/tcp" in notes
+    assert "50.00% done" in notes
+
+
+@pytest.mark.asyncio
+async def test_nmap_scan_stream_frames():
+    """The nmap server's SSE generator emits progress then a JSON-RPC result."""
+    from app.nmap_mcp import server as nmap_server
+
+    class _FakeScanner:
+        def build_command(self, kind, *, target, ports, extra):
+            return ["nmap", "-x", target]
+
+        async def run_streaming(self, command):
+            yield ("progress", "Discovered open port 22/tcp on host")
+            yield ("progress", "43.00% done; ETC: 12:00")
+            yield ("result", "<nmaprun/>")
+
+        def summarize(self, xml_output):
+            return "SUMMARY"
+
+    frames = [
+        frame
+        async for frame in nmap_server._scan_stream(
+            _FakeScanner(), "nmap_quick_scan", {"target": "host"}, 7
+        )
+    ]
+    joined = "".join(frames)
+    assert "event: progress" in joined
+    assert "22/tcp" in joined
+    assert '"result"' in joined
+    assert "SUMMARY" in joined
+    # The last frame must be the JSON-RPC result (id echoed back).
+    assert '"id": 7' in frames[-1]
+
+
+@pytest.mark.asyncio
+async def test_codescan_scan_stream_frames():
+    """The codescan server's SSE generator emits progress then a JSON-RPC result."""
+    from app.codescan_mcp import server as code_server
+    from app.codescan_mcp.scanner import ScanPlan
+
+    class _FakeScanner:
+        def build_plan(self, kind, *, path=None, code=None, filename=None, rule=None, config=None):
+            return ScanPlan(command=["semgrep", "scan"], target_label="app.py")
+
+        async def run_streaming(self, command):
+            yield ("progress", "Scanning 1 file with 3 rules")
+            yield ("progress", "Ran 3 rules on 1 file: 1 finding")
+            yield ("result", '{"results": []}')
+
+        def summarize(self, json_output):
+            return "CODE-SUMMARY"
+
+    frames = [
+        frame
+        async for frame in code_server._scan_stream(
+            _FakeScanner(), "semgrep_scan", {"code": "x = 1", "filename": "app.py"}, 9
+        )
+    ]
+    joined = "".join(frames)
+    assert "event: progress" in joined
+    assert "Scanning 1 file" in joined
+    assert '"result"' in joined
+    assert "CODE-SUMMARY" in joined
+    # The last frame must be the JSON-RPC result (id echoed back).
+    assert '"id": 9' in frames[-1]
+
+
+@pytest.mark.asyncio
+async def test_codescan_scan_stream_reports_build_error():
+    """A missing path/code yields a single error result frame (no crash)."""
+    from app.codescan_mcp import server as code_server
+    from app.codescan_mcp.scanner import SemgrepScanner
+
+    frames = [
+        frame
+        async for frame in code_server._scan_stream(
+            SemgrepScanner(), "semgrep_scan", {}, 3
+        )
+    ]
+    joined = "".join(frames)
+    assert '"isError": true' in joined
+    assert '"id": 3' in frames[-1]
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_run_mcp_tool_rounds_executes_tool_then_answers():
     url = "https://mcp.example.com/mcp"
 

@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import CryptoKit
 import UniformTypeIdentifiers
 
 enum AnalysisStatus: Equatable {
@@ -86,6 +87,23 @@ final class AppState: ObservableObject {
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
+    /// Managed Nmap MCP server lifecycle mirrors (for the Preferences UI).
+    @Published var nmapServerRunning: Bool = false
+    @Published var nmapInstalled: Bool = false
+    @Published var nmapServerStatus: String = ""
+    @Published var nmapServerBusy: Bool = false
+    /// Managed Semgrep code-scan MCP server lifecycle mirrors (for the Preferences UI).
+    @Published var codeScanServerRunning: Bool = false
+    @Published var semgrepInstalled: Bool = false
+    @Published var codeScanServerStatus: String = ""
+    @Published var codeScanServerBusy: Bool = false
+    /// Shell-style prompt history (most recent last), recalled with ↑/↓ in the input bar.
+    @Published var promptHistory: [String] = AppState.loadPromptHistory()
+    static let promptHistoryLimit = 10
+    /// Index into `promptHistory` while browsing with ↑/↓; nil when not browsing.
+    private var historyNavIndex: Int?
+    /// Draft stashed when the user starts browsing history, restored on ↓ past newest.
+    private var historyStash: String = ""
     @Published var mcpCheckingServerID: UUID?
     /// When on, `systemPrompt` is sent as a system message on every chat/compare request.
     @Published var systemPromptEnabled: Bool = false
@@ -190,6 +208,8 @@ final class AppState: ObservableObject {
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
+    let nmapServerManager = NmapServerManager()
+    let codeScanServerManager = CodeScanServerManager()
     private var previewTask: Task<Void, Never>?
     private var sendTask: Task<Void, Never>?
     private var generationTimerTask: Task<Void, Never>?
@@ -665,8 +685,131 @@ final class AppState: ObservableObject {
     func setMCPServerEnabled(id: UUID, enabled: Bool) {
         guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
         if mcpServers[idx].isDeferred { return }
+        // Managed servers own their own process lifecycle; route by preset.
+        if mcpServers[idx].isManaged {
+            let presetId = mcpServers[idx].presetId
+            Task {
+                if presetId == MCPServerConfig.codescanPresetId {
+                    enabled ? await startCodeScanServer() : stopCodeScanServer()
+                } else {
+                    enabled ? await startNmapServer() : stopNmapServer()
+                }
+            }
+            return
+        }
         mcpServers[idx].enabled = enabled
         saveMCPServers()
+    }
+
+    /// Resolve a managed server token, preferring the copy already loaded into memory
+    /// (populated by `loadMCPServers`) so we don't hit the Keychain again. Falls back
+    /// to a Keychain read, and finally generates + persists a fresh token if absent.
+    private func ensureManagedToken(for id: UUID) -> String {
+        if let idx = mcpServers.firstIndex(where: { $0.id == id }) {
+            let inMemory = mcpServers[idx].apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !inMemory.isEmpty {
+                return inMemory
+            }
+        }
+        let existing = MCPKeychainStore.load(serverID: id)
+        if !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return existing
+        }
+        let token = NmapServerManager.generateToken()
+        MCPKeychainStore.save(serverID: id, apiKey: token)
+        return token
+    }
+
+    // MARK: - Managed Nmap MCP server
+
+    private var nmapPreset: MCPServerConfig? {
+        mcpServers.first(where: { $0.presetId == MCPServerConfig.nmapPresetId })
+    }
+
+    func refreshNmapInstalled() {
+        nmapInstalled = nmapServerManager.refreshNmapInstalled()
+    }
+
+    /// Generate/reuse a token, write config.json, launch the server, and wire the preset.
+    func startNmapServer() async {
+        guard let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.nmapPresetId })
+        else { return }
+        let id = mcpServers[idx].id
+        nmapServerBusy = true
+        defer { nmapServerBusy = false }
+
+        let token = ensureManagedToken(for: id)
+        let ok = await nmapServerManager.ensureRunning(token: token)
+        nmapServerRunning = ok
+        nmapInstalled = nmapServerManager.nmapInstalled
+        nmapServerStatus = nmapServerManager.lastMessage
+
+        if let latest = mcpServers.firstIndex(where: { $0.id == id }) {
+            mcpServers[latest].apiKey = token
+            mcpServers[latest].url = nmapServerManager.mcpURL
+            mcpServers[latest].enabled = ok
+            if !ok {
+                mcpServers[latest].lastCheckStatus = .failed
+                mcpServers[latest].lastCheckMessage = nmapServerManager.lastMessage
+            }
+            saveMCPServers()
+        }
+    }
+
+    func stopNmapServer() {
+        nmapServerManager.stop()
+        nmapServerRunning = false
+        nmapServerStatus = "Nmap MCP stopped"
+        if let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.nmapPresetId }) {
+            mcpServers[idx].enabled = false
+            saveMCPServers()
+        }
+    }
+
+    // MARK: - Managed Semgrep code-scan MCP server
+
+    private var codeScanPreset: MCPServerConfig? {
+        mcpServers.first(where: { $0.presetId == MCPServerConfig.codescanPresetId })
+    }
+
+    func refreshSemgrepInstalled() {
+        semgrepInstalled = codeScanServerManager.refreshSemgrepInstalled()
+    }
+
+    /// Generate/reuse a token, write config.json, launch the server, and wire the preset.
+    func startCodeScanServer() async {
+        guard let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.codescanPresetId })
+        else { return }
+        let id = mcpServers[idx].id
+        codeScanServerBusy = true
+        defer { codeScanServerBusy = false }
+
+        let token = ensureManagedToken(for: id)
+        let ok = await codeScanServerManager.ensureRunning(token: token)
+        codeScanServerRunning = ok
+        semgrepInstalled = codeScanServerManager.semgrepInstalled
+        codeScanServerStatus = codeScanServerManager.lastMessage
+
+        if let latest = mcpServers.firstIndex(where: { $0.id == id }) {
+            mcpServers[latest].apiKey = token
+            mcpServers[latest].url = codeScanServerManager.mcpURL
+            mcpServers[latest].enabled = ok
+            if !ok {
+                mcpServers[latest].lastCheckStatus = .failed
+                mcpServers[latest].lastCheckMessage = codeScanServerManager.lastMessage
+            }
+            saveMCPServers()
+        }
+    }
+
+    func stopCodeScanServer() {
+        codeScanServerManager.stop()
+        codeScanServerRunning = false
+        codeScanServerStatus = "Code Scan MCP stopped"
+        if let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.codescanPresetId }) {
+            mcpServers[idx].enabled = false
+            saveMCPServers()
+        }
     }
 
     func setMCPServerAPIKey(id: UUID, apiKey: String) {
@@ -821,6 +964,16 @@ final class AppState: ObservableObject {
             await refreshModelPricing(forceRefresh: true)
         } else {
             fillMissingPricingWithDefaults()
+        }
+        // Managed Nmap server: reflect nmap availability, resume if it was left on.
+        refreshNmapInstalled()
+        if mcpEnabled, let preset = nmapPreset, preset.enabled {
+            await startNmapServer()
+        }
+        // Managed Semgrep code-scan server: reflect availability, resume if left on.
+        refreshSemgrepInstalled()
+        if mcpEnabled, let preset = codeScanPreset, preset.enabled {
+            await startCodeScanServer()
         }
         objectWillChange.send()
     }
@@ -1378,9 +1531,17 @@ final class AppState: ObservableObject {
             if let existing = byID[session.id] {
                 if session.messages.count > existing.messages.count {
                     byID[session.id] = session
-                } else if session.messages.count == existing.messages.count,
-                          session.updatedAt > existing.updatedAt {
-                    byID[session.id] = session
+                } else if session.messages.count == existing.messages.count {
+                    // Prefer the copy with real content over one whose images were
+                    // dropped to a placeholder; fall back to the most recent update.
+                    let newPlaceholders = Self.placeholderCount(session)
+                    let oldPlaceholders = Self.placeholderCount(existing)
+                    if newPlaceholders < oldPlaceholders {
+                        byID[session.id] = session
+                    } else if newPlaceholders == oldPlaceholders,
+                              session.updatedAt > existing.updatedAt {
+                        byID[session.id] = session
+                    }
                 }
             } else {
                 byID[session.id] = session
@@ -1391,6 +1552,11 @@ final class AppState: ObservableObject {
             next.recomputeTotalCost()
             return next
         }
+    }
+
+    /// Count messages whose generated image was reduced to a lossy placeholder.
+    private static func placeholderCount(_ session: ChatSession) -> Int {
+        session.messages.reduce(0) { $0 + ($1.content.contains("omitted-from-context") ? 1 : 0) }
     }
 
     func selectModel(_ model: String) {
@@ -1471,6 +1637,19 @@ final class AppState: ObservableObject {
     func schedulePreview() {
         previewTask?.cancel()
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Slash commands own the `/` palette — never start the intelligence window
+        // for them (it otherwise competes with / suppresses the command menu).
+        if text.hasPrefix("/") {
+            showIntelligencePanel = false
+            preview = nil
+            pinnedFullAnalysisPrompt = ""
+            lastJudgementSkipPrompt = ""
+            analysisStatus = .idle
+            estimatedLatencyMs = nil
+            return
+        }
+
         guard text.count >= 3 else {
             showIntelligencePanel = false
             preview = nil
@@ -1607,7 +1786,427 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Prompt history (shell-style ↑/↓ recall)
+
+    private static func loadPromptHistory() -> [String] {
+        (UserDefaults.standard.array(forKey: "aril.promptHistory") as? [String]) ?? []
+    }
+
+    private func savePromptHistory() {
+        UserDefaults.standard.set(promptHistory, forKey: "aril.promptHistory")
+    }
+
+    /// Record a submitted prompt (dedupes consecutive repeats; caps at the limit).
+    func recordPromptHistory(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if promptHistory.last == trimmed {
+            // no-op: identical to the most recent entry
+        } else {
+            promptHistory.append(trimmed)
+            if promptHistory.count > Self.promptHistoryLimit {
+                promptHistory.removeFirst(promptHistory.count - Self.promptHistoryLimit)
+            }
+            savePromptHistory()
+        }
+        historyNavIndex = nil
+        historyStash = ""
+    }
+
+    /// ↑ — recall an older prompt. Returns true if the key was consumed.
+    func recallPreviousPrompt() -> Bool {
+        guard !promptHistory.isEmpty else { return false }
+        if let idx = historyNavIndex {
+            guard idx > 0 else { return true }
+            historyNavIndex = idx - 1
+        } else {
+            historyStash = draft
+            historyNavIndex = promptHistory.count - 1
+        }
+        if let idx = historyNavIndex { draft = promptHistory[idx] }
+        return true
+    }
+
+    /// ↓ — move toward newer prompts, restoring the stashed draft past the newest.
+    func recallNextPrompt() -> Bool {
+        guard let idx = historyNavIndex else { return false }
+        if idx < promptHistory.count - 1 {
+            historyNavIndex = idx + 1
+            draft = promptHistory[idx + 1]
+        } else {
+            historyNavIndex = nil
+            draft = historyStash
+            historyStash = ""
+        }
+        return true
+    }
+
+    /// Called when the draft changes from typing; drops history browsing if edited.
+    func noteDraftEditedFromTyping() {
+        guard let idx = historyNavIndex else { return }
+        if draft != promptHistory[idx] && draft != historyStash {
+            historyNavIndex = nil
+            historyStash = ""
+        }
+    }
+
+    // MARK: - Slash commands
+
+    /// One entry in the `/` command palette.
+    struct SlashCommand: Identifiable, Hashable {
+        let id: String       // canonical token, e.g. "/status"
+        let summary: String  // one-line description shown in the palette
+    }
+
+    /// Source of truth for the command palette (canonical commands + base summaries).
+    ///
+    /// `/nmap` and `/codescan` summaries are overridden at runtime by
+    /// `paletteCommands` to reflect whether their MCP server is enabled.
+    static let slashCommands: [SlashCommand] = [
+        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, Nmap, code scan, MCP, latest release"),
+        SlashCommand(id: "/nmap", summary: "Example Nmap prompts — port, host, and vuln scans"),
+        SlashCommand(id: "/codescan", summary: "Example Semgrep prompts — scan a path or inline code"),
+        SlashCommand(id: "/clear", summary: "Clear the current chat transcript"),
+        SlashCommand(id: "/reset", summary: "Delete ALL sessions and Learning entries (asks to confirm)"),
+        SlashCommand(id: "/exit", summary: "Quit ARIL"),
+        SlashCommand(id: "/help", summary: "Show the list of commands"),
+    ]
+
+    /// True when the master MCP switch is on and the managed Nmap preset is enabled.
+    var nmapServerEnabled: Bool {
+        mcpEnabled && (nmapPreset?.enabled ?? false)
+    }
+
+    /// True when the master MCP switch is on and the managed Semgrep preset is enabled.
+    var codeScanServerEnabled: Bool {
+        mcpEnabled && (codeScanPreset?.enabled ?? false)
+    }
+
+    /// Palette commands with runtime-computed summaries (server enabled/disabled state).
+    var paletteCommands: [SlashCommand] {
+        Self.slashCommands.map { command in
+            switch command.id {
+            case "/nmap":
+                return SlashCommand(
+                    id: command.id,
+                    summary: nmapServerEnabled
+                        ? command.summary
+                        : "Example Nmap prompts — ⚠︎ Nmap MCP server disabled"
+                )
+            case "/codescan":
+                return SlashCommand(
+                    id: command.id,
+                    summary: codeScanServerEnabled
+                        ? command.summary
+                        : "Example Semgrep prompts — ⚠︎ Code Scan MCP server disabled"
+                )
+            default:
+                return command
+            }
+        }
+    }
+
+    /// Highlighted row in the palette while it's open.
+    @Published var slashMenuIndex: Int = 0
+    /// True when the user dismissed the palette (Esc) without changing the draft.
+    @Published var slashMenuDismissed: Bool = false
+
+    /// Commands matching the current draft prefix (empty when the palette is inert).
+    var filteredSlashCommands: [SlashCommand] {
+        let q = draft.lowercased()
+        guard q.hasPrefix("/"), !q.contains(" "), !q.contains("\n") else { return [] }
+        if q == "/" { return paletteCommands }
+        return paletteCommands.filter { $0.id.hasPrefix(q) }
+    }
+
+    /// Whether the `/` command palette should be shown above the input bar.
+    var slashMenuVisible: Bool {
+        !slashMenuDismissed && !filteredSlashCommands.isEmpty
+    }
+
+    func slashMenuMove(_ delta: Int) {
+        let items = filteredSlashCommands
+        guard !items.isEmpty else { return }
+        slashMenuIndex = max(0, min(items.count - 1, slashMenuIndex + delta))
+    }
+
+    /// Run the highlighted command immediately.
+    func executeSelectedSlash() {
+        let items = filteredSlashCommands
+        guard items.indices.contains(slashMenuIndex) else { return }
+        let cmd = items[slashMenuIndex].id
+        slashMenuIndex = 0
+        slashMenuDismissed = false
+        draft = ""
+        _ = handleSlashCommand(cmd)
+    }
+
+    /// Insert the highlighted command (with a trailing space) without running it.
+    func insertSelectedSlash() {
+        let items = filteredSlashCommands
+        guard items.indices.contains(slashMenuIndex) else { return }
+        draft = items[slashMenuIndex].id + " "
+        slashMenuIndex = 0
+    }
+
+    func dismissSlashMenu() {
+        slashMenuDismissed = true
+    }
+
+    /// Keep the palette selection valid and re-arm it as the draft changes.
+    func onDraftChangedForSlash() {
+        slashMenuDismissed = false
+        if slashMenuIndex >= filteredSlashCommands.count {
+            slashMenuIndex = 0
+        }
+    }
+
+    /// Handle `/clear`, `/status`, `/help`. Returns true if `raw` was a known command.
+    func handleSlashCommand(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { return false }
+        let command = trimmed.split(separator: " ", maxSplits: 1).first.map { $0.lowercased() } ?? ""
+        switch command {
+        case "/clear", "/cls":
+            recordPromptHistory(trimmed)
+            draft = ""
+            clearCurrentTranscript()
+            return true
+        case "/status", "/health":
+            recordPromptHistory(trimmed)
+            draft = ""
+            Task { await runStatusCommand() }
+            return true
+        case "/help", "/?":
+            recordPromptHistory(trimmed)
+            draft = ""
+            appendLocalAssistantNote(slashHelpText)
+            return true
+        case "/nmap":
+            recordPromptHistory(trimmed)
+            draft = ""
+            appendLocalAssistantNote(nmapExamplesNote())
+            return true
+        case "/codescan", "/code":
+            recordPromptHistory(trimmed)
+            draft = ""
+            appendLocalAssistantNote(codeScanExamplesNote())
+            return true
+        case "/reset":
+            recordPromptHistory(trimmed)
+            draft = ""
+            showResetConfirmation = true
+            return true
+        case "/exit", "/quit":
+            recordPromptHistory(trimmed)
+            draft = ""
+            shutdown()
+            NSApplication.shared.terminate(nil)
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Backing flag for the `/reset` confirmation alert (presented by ContentView).
+    @Published var showResetConfirmation = false
+
+    /// Wipe every session and all Learning/judgement records. Destructive; only run
+    /// after the user confirms the `/reset` warning.
+    func performReset() async {
+        await deleteAllSessions()
+        await deleteAllStoreRecords(includeWins: true)
+        lastError = nil
+        appendLocalAssistantNote(
+            "**Reset complete** — all sessions and Learning entries were cleared."
+        )
+    }
+
+    private var slashHelpText: String {
+        var lines = ["**ARIL commands**", ""]
+        for command in paletteCommands {
+            lines.append("- `\(command.id)` — \(command.summary)")
+        }
+        lines.append("")
+        lines.append(
+            "Tip: type `/` for the command menu, or press ↑ / ↓ in the prompt box to recall recent prompts (last \(Self.promptHistoryLimit))."
+        )
+        return lines.joined(separator: "\n")
+    }
+
+    /// Example prompts for the managed Nmap MCP server (`/nmap`).
+    private func nmapExamplesNote() -> String {
+        var lines: [String] = ["**Nmap MCP — example prompts**", ""]
+        if !nmapServerEnabled {
+            lines.append(
+                "⚠︎ The Nmap MCP server is currently **disabled**. Enable **Nmap Scanner (local)** in Preferences → MCP (and turn on **Use MCP servers**) before running these."
+            )
+            lines.append("")
+        }
+        lines.append(contentsOf: [
+            "- use nmap mcp to scan tcp ports 1-100 on google.com",
+            "- use nmap mcp to do a quick scan of scanme.nmap.org",
+            "- use nmap mcp to scan host 4.4.4.4",
+            "- use nmap mcp to run a vuln scan on 127.0.0.1",
+            "- use nmap mcp to do a service/version scan of example.com on ports 80,443",
+            "",
+            "Copy one into the prompt box (edit the target) and send it.",
+        ])
+        return lines.joined(separator: "\n")
+    }
+
+    /// Example prompts for the managed Semgrep code-scan MCP server (`/codescan`).
+    private func codeScanExamplesNote() -> String {
+        var lines: [String] = ["**Code Scanner (Semgrep) MCP — example prompts**", ""]
+        if !codeScanServerEnabled {
+            lines.append(
+                "⚠︎ The Code Scan MCP server is currently **disabled**. Enable **Code Scanner (Semgrep, local)** in Preferences → MCP (and turn on **Use MCP servers**) before running these."
+            )
+            lines.append("")
+        }
+        lines.append(contentsOf: [
+            "- use the code scanner to run a security check on /path/to/project",
+            "- use semgrep mcp to scan this file: /path/to/app.py",
+            "- use the code scanner with the p/owasp-top-ten ruleset on /path/to/src",
+            "- use semgrep mcp to scan this code for vulnerabilities (filename app.py):\n    ```python\n    def run(x):\n        return eval(x)\n    ```",
+            "- use the code scanner with a custom rule to flag eval() calls in the snippet above",
+            "",
+            "Provide a path, or paste inline code with a filename so the language is detected.",
+        ])
+        return lines.joined(separator: "\n")
+    }
+
+    /// Clear the visible transcript for the current session (in place).
+    func clearCurrentTranscript() {
+        compareResults = []
+        compareRouteCategory = nil
+        preferredCompareModel = nil
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        lastError = nil
+        guard let sid = selectedSessionID else { return }
+        updateSession(sid) { session in
+            session.messages.removeAll()
+            session.totalCostUsd = 0
+        }
+    }
+
+    /// Append a local (non-billed) assistant note to the current session.
+    private func appendLocalAssistantNote(_ text: String) {
+        ensureSession()
+        guard let sid = selectedSessionID else { return }
+        updateSession(sid) { $0.messages.append(ChatMessage(role: .assistant, content: text)) }
+    }
+
+    /// Update the most recent assistant note in place (used to refresh `/status`).
+    private func updateLastAssistantNote(id: UUID, text: String) {
+        guard let sid = selectedSessionID,
+              let i = sessions.firstIndex(where: { $0.id == sid }),
+              let m = sessions[i].messages.firstIndex(where: { $0.id == id }) else { return }
+        var next = sessions
+        next[i].messages[m].content = text
+        sessions = next
+        saveLocalSessions()
+    }
+
+    /// Run `/status`: probe gateway, OpenRouter, Nmap, MCP, and the latest GitHub release.
+    func runStatusCommand() async {
+        ensureSession()
+        guard let sid = selectedSessionID else { return }
+        let noteID = ChatMessage(role: .assistant, content: "")
+        updateSession(sid) { $0.messages.append(ChatMessage(id: noteID.id, role: .assistant, content: "Running ARIL status check…")) }
+
+        var lines: [String] = ["### ARIL status", ""]
+
+        // Gateway
+        if let health = try? await client.health(baseURL: gatewayURL) {
+            let ver = health.version ?? "?"
+            let provider = health.chatProvider ?? "?"
+            lines.append("- **Gateway:** ✅ \(soloMode ? "Solo" : "Remote") · \(gatewayURL) · v\(ver) · provider \(provider)")
+        } else {
+            lines.append("- **Gateway:** ❌ not reachable at \(gatewayURL)")
+        }
+
+        // OpenRouter
+        if openRouterConfigured {
+            if let conn = try? await client.checkOpenRouterConnection(baseURL: gatewayURL) {
+                let latency = conn.latencyMs.map { "\($0) ms" } ?? "—"
+                let credits = conn.creditsRemaining.map { String(format: "$%.2f", $0) } ?? "unknown"
+                lines.append("- **OpenRouter:** \(conn.ready ? "✅ ready" : "⚠️ not ready") · latency \(latency) · credits \(credits)")
+            } else {
+                lines.append("- **OpenRouter:** ❌ connection check failed")
+            }
+        } else {
+            lines.append("- **OpenRouter:** ⚠️ no API key set (Preferences → General)")
+        }
+
+        // Nmap managed server
+        refreshNmapInstalled()
+        let nmapState = nmapServerRunning ? "✅ running on port \(nmapServerManager.port)" : "○ stopped"
+        let nmapBin = nmapInstalled ? "nmap installed" : "nmap missing (brew install nmap)"
+        lines.append("- **Nmap MCP:** \(nmapState) · \(nmapBin)")
+
+        // Semgrep managed code-scan server
+        refreshSemgrepInstalled()
+        let codeState = codeScanServerRunning ? "✅ running on port \(codeScanServerManager.port)" : "○ stopped"
+        let codeBin = semgrepInstalled ? "semgrep installed" : "semgrep missing (brew install semgrep)"
+        lines.append("- **Code Scan MCP:** \(codeState) · \(codeBin)")
+
+        // MCP servers
+        if mcpEnabled {
+            let ready = mcpServers.filter(\.isReady).count
+            let enabled = mcpServers.filter(\.enabled).count
+            lines.append("- **MCP servers:** on · \(ready) ready · \(enabled) enabled")
+        } else {
+            lines.append("- **MCP servers:** off")
+        }
+
+        // Latest release (GitHub)
+        let current = appVersion
+        if let latest = await fetchLatestReleaseTag() {
+            let latestClean = latest.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
+            if latestClean == current {
+                lines.append("- **Version:** ✅ \(current) (latest)")
+            } else {
+                lines.append("- **Version:** ⚠️ \(current) installed · latest is \(latestClean) — https://github.com/fizzball/ARIL/releases/latest")
+            }
+        } else {
+            lines.append("- **Version:** \(current) (latest release check unavailable)")
+        }
+
+        updateLastAssistantNote(id: noteID.id, text: lines.joined(separator: "\n"))
+    }
+
+    /// Current app marketing version (e.g. "0.4.0").
+    var appVersion: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
+    }
+
+    /// Fetch the latest ARIL release tag from GitHub (nil on any failure).
+    private func fetchLatestReleaseTag() async -> String? {
+        guard let url = URL(string: "https://api.github.com/repos/fizzball/ARIL/releases/latest") else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 6
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return obj["tag_name"] as? String
+        } catch {
+            return nil
+        }
+    }
+
     func send(promptOverride: String? = nil) {
+        // Intercept slash commands before starting a model turn.
+        if promptOverride == nil {
+            let raw = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.hasPrefix("/"), handleSlashCommand(raw) {
+                return
+            }
+        }
         sendTask?.cancel()
         // Stop idle analysis countdown / queued preview before we possibly skip it.
         previewTask?.cancel()
@@ -1683,6 +2282,10 @@ final class AppState: ObservableObject {
 
         let text = (promptOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
+
+        if !text.isEmpty {
+            recordPromptHistory(text)
+        }
 
         if promptOverride != nil {
             draft = text
@@ -1833,7 +2436,7 @@ final class AppState: ObservableObject {
                         self.sessions = next
                     }
                 },
-                onMCPStatus: { [weak self] server, tool, phase in
+                onMCPStatus: { [weak self] server, tool, phase, note in
                     Task { @MainActor in
                         guard let self,
                               let i = self.sessions.firstIndex(where: { $0.id == sid }),
@@ -1851,6 +2454,9 @@ final class AppState: ObservableObject {
                                 return "Asking model with MCP tools…\n"
                             case "calling":
                                 return "Using \(server) · \(tool)…\n"
+                            case "progress":
+                                let detail = (note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                return detail.isEmpty ? "" : "  ↳ \(detail)\n"
                             default:
                                 return ""
                             }
@@ -1866,6 +2472,8 @@ final class AppState: ObservableObject {
                 }
             )
             if Task.isCancelled { return }
+            // Persist any generated image to disk before it gets stripped from history.
+            persistInlineImages(sessionID: sid, assistantID: assistantID)
             let streamedText = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
             // Empty `done` (model returned nothing) — recover via non-stream once.
@@ -1929,6 +2537,7 @@ final class AppState: ObservableObject {
             }()
             if alreadyHasContent || streamTokens.sawTokens {
                 lastError = nil
+                persistInlineImages(sessionID: sid, assistantID: assistantID)
                 applyActualCost(
                     sessionID: sid,
                     assistantID: assistantID,
@@ -1959,6 +2568,7 @@ final class AppState: ObservableObject {
                         session.messages[m].content = response.message.content
                     }
                 }
+                persistInlineImages(sessionID: sid, assistantID: assistantID)
                 applyActualCost(
                     sessionID: sid,
                     assistantID: assistantID,
@@ -2171,6 +2781,76 @@ final class AppState: ObservableObject {
         return text
     }
 
+    /// On-disk home for generated images so they survive app restarts.
+    private var generatedImagesDir: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("ARIL/GeneratedImages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Write any inline base64 images in an assistant message to disk and rewrite the
+    /// stored content to reference stable `file://` URLs. Inline `data:` images are
+    /// stripped from both persisted history and model context, so persisting them as
+    /// files is what lets generated images survive a restart. Returns true if changed.
+    @discardableResult
+    func persistInlineImages(sessionID sid: UUID, assistantID: UUID) -> Bool {
+        guard let i = sessions.firstIndex(where: { $0.id == sid }),
+              let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+        else { return false }
+        let original = sessions[i].messages[m].content
+        let rewritten = Self.rewriteInlineImagesToFiles(original, directory: generatedImagesDir)
+        guard rewritten != original else { return false }
+        var next = sessions
+        next[i].messages[m].content = rewritten
+        sessions = next
+        return true
+    }
+
+    /// Replace `![alt](data:image/...;base64,...)` with file-backed links, writing the
+    /// decoded bytes into `directory`. Content without inline images is returned as-is.
+    static func rewriteInlineImagesToFiles(_ content: String, directory: URL) -> String {
+        guard content.contains("data:image/") else { return content }
+        guard let regex = try? NSRegularExpression(
+            pattern: #"!\[([^\]]*)\]\(data:image\/([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)\)"#,
+            options: [.caseInsensitive]
+        ) else { return content }
+        let ns = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return content }
+
+        let mutable = NSMutableString(string: content)
+        // Replace back-to-front so earlier match ranges stay valid after edits.
+        for match in matches.reversed() {
+            let altRange = match.range(at: 1)
+            let alt = altRange.location != NSNotFound ? ns.substring(with: altRange) : ""
+            let mime = ns.substring(with: match.range(at: 2)).lowercased()
+            let rawB64 = ns.substring(with: match.range(at: 3))
+            let b64 = rawB64.replacingOccurrences(of: #"\s"#, with: "", options: .regularExpression)
+            guard let data = Data(base64Encoded: b64, options: [.ignoreUnknownCharacters]), !data.isEmpty
+            else { continue }
+            let ext = imageExtension(forMime: mime)
+            // Content-address the file (sha256) so it matches the gateway's scheme and
+            // identical images never duplicate on disk.
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined().prefix(32)
+            let fileURL = directory.appendingPathComponent("img-\(digest).\(ext)")
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                guard (try? data.write(to: fileURL, options: .atomic)) != nil else { continue }
+            }
+            mutable.replaceCharacters(in: match.range, with: "![\(alt)](\(fileURL.absoluteString))")
+        }
+        return mutable as String
+    }
+
+    private static func imageExtension(forMime mime: String) -> String {
+        if mime.contains("jpeg") || mime.contains("jpg") { return "jpg" }
+        if mime.contains("gif") { return "gif" }
+        if mime.contains("webp") { return "webp" }
+        if mime.contains("heic") { return "heic" }
+        return "png"
+    }
+
     func preferCompareResult(_ result: CompareResultDTO) async {
         let prompt = lastUserPromptForPrefer
         let suggested = result.suggestedCategory
@@ -2309,9 +2989,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    func deleteAllStoreRecords() async {
+    func deleteAllStoreRecords(includeWins: Bool = false) async {
         do {
-            _ = try await client.deleteAllStoreRecords(baseURL: gatewayURL)
+            _ = try await client.deleteAllStoreRecords(baseURL: gatewayURL, includeWins: includeWins)
             storeRecords = []
             classifications = []
             categoryPreferWins = [:]
@@ -2515,6 +3195,8 @@ final class AppState: ObservableObject {
 
     func shutdown() {
         saveLocalSessions()
+        nmapServerManager.stop()
+        codeScanServerManager.stop()
         gatewayManager.stop()
     }
 

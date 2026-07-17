@@ -79,9 +79,30 @@ Live system metrics monitor displayed in the main toolbar.
 Configure remote MCP servers in **Preferences → MCP**:
 
 - Built-in presets (disabled by default): Agenty, AI Diagram Maker, Cloudflare Browser, DeepWiki, GitHub, Firecrawl
+- **Nmap Scanner (local)** and **Code Scanner (Semgrep, local)** — ARIL-*managed* MCP servers (see below)
 - Selective enable per server + master **Use MCP servers** toggle
 - API keys stored in Keychain; **Check connection** probes initialize + tools/list via the Solo gateway
 - **Add server…** for custom remote HTTP endpoints
 - **Playwright** is listed as deferred (local stdio / Node required later)
+
+### Managed Nmap security scanner (0.4.0)
+
+- Enable **Nmap Scanner (local)** and ARIL runs the whole thing for you — no manual setup:
+  - Generates a 256-bit bearer token once and stores it in the **Keychain**
+  - Writes a `config.json` (in Application Support) pinned to **127.0.0.1** with that token, so the token the server enforces and the token ARIL sends can never drift
+  - Launches the server from the bundled `aril-gateway` binary (the same frozen binary via a `nmap-mcp` subcommand — no extra Python dependencies)
+  - Health-checks the endpoint and only marks the server ready once it responds
+- Tools exposed to Auto/Manual chat: `nmap_quick_scan`, `nmap_full_scan`, `nmap_service_scan`, `nmap_vuln_scan` (NSE `vuln` category — CVEs/misconfigs), and `nmap_custom_scan`
+- Requires the `nmap` binary; ARIL detects it and prompts **`brew install nmap`** if missing (scans return an install hint rather than failing silently)
+- The scan runs locally on your Mac (your machine is the scan source) — only test targets you own or are authorized to test
+- Live scan progress streams over Streamable HTTP SSE (`-v --stats-every 2s`), so discovered ports and percent-complete lines flow into the reply as the scan runs
+
+### Managed Semgrep code scanner (0.4.0)
+
+- Enable **Code Scanner (Semgrep, local)** and ARIL manages it exactly like the Nmap server — token in Keychain, localhost-only `config.json`, launched via the bundled `aril-gateway code-mcp` subcommand (listens on **127.0.0.1:8743**), health-checked before it's marked ready
+- Scans **both on-disk paths and inline code snippets** (inline code is written to a temp dir and deleted after the scan; a `filename` argument drives language detection)
+- Tools exposed to Auto/Manual chat: `semgrep_scan` (default `auto` ruleset, override via `config` e.g. `p/owasp-top-ten`), `security_check` (`p/security-audit`), and `semgrep_scan_with_custom_rule` (bring-your-own YAML rule, no registry needed)
+- Requires the `semgrep` binary; ARIL detects it and prompts **`brew install semgrep`** (or `pipx install semgrep`) if missing
+- Findings are parsed from Semgrep JSON into a compact report per finding (`[SEVERITY] check_id`, `path:line — message`, plus CWE/OWASP tags); progress streams live over SSE
 - **Chat (Auto / Manual):** ready enabled servers are attached each turn; the Solo gateway lists tools, runs OpenRouter tool calls, and shows brief status in the assistant bubble (`Using DeepWiki · ask_question…`)
 - **Judge / Compare** does not use MCP tools

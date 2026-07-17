@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+
+ProgressCallback = Callable[[str], Awaitable[None]]
 
 _TIMEOUT = 15.0
 _CALL_TIMEOUT = 30.0
@@ -295,15 +298,103 @@ class MCPSession:
             return []
         return [t for t in tools if isinstance(t, dict)]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> str:
-        result = await self._rpc(
-            "tools/call",
-            {"name": name, "arguments": arguments or {}},
-        )
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> str:
+        """Invoke a tool. If the server streams SSE, forward progress notes live.
+
+        Works for both plain JSON responses (existing servers) and Streamable HTTP
+        SSE responses (e.g. the managed Nmap server) that emit `progress` frames
+        followed by a final JSON-RPC `result` frame.
+        """
+        if self._client is None:
+            raise RuntimeError(f"{self.label}: MCP session is not connected.")
+        body = {
+            "jsonrpc": "2.0",
+            "id": self._next_id(),
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments or {}},
+        }
+        # No overall read timeout: streamed scans can run for minutes between the
+        # connect and the final result frame; progress keeps the socket alive.
+        timeout = httpx.Timeout(_TIMEOUT, read=None, write=_TIMEOUT, pool=_TIMEOUT)
+        result: Any = None
+        try:
+            async with self._client.stream(
+                "POST", self.url, headers=self._headers, json=body, timeout=timeout
+            ) as resp:
+                if resp.status_code >= 400:
+                    detail = (await resp.aread()).decode("utf-8", "replace").strip()
+                    if len(detail) > 160:
+                        detail = detail[:157] + "…"
+                    raise RuntimeError(
+                        f"{self.label}: HTTP {resp.status_code} on tools/call"
+                        + (f": {detail}" if detail else ".")
+                    )
+                ctype = resp.headers.get("content-type", "").lower()
+                if "text/event-stream" in ctype:
+                    result = await self._consume_sse_tool(resp, on_progress)
+                else:
+                    raw = (await resp.aread()).decode("utf-8", "replace")
+                    payload = _parse_jsonrpc_payload(raw)
+                    if err := _rpc_error_message(payload):
+                        raise RuntimeError(f"{self.label}: {err}")
+                    result = payload.get("result") if isinstance(payload, dict) else None
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(f"{self.label}: MCP tools/call timed out.") from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(
+                f"{self.label}: MCP unreachable ({exc.__class__.__name__})."
+            ) from exc
+
         text = _tool_result_text(result)
         if len(text) > 80_000:
             text = text[:79_997] + "…"
         return text
+
+    async def _consume_sse_tool(
+        self, resp: httpx.Response, on_progress: ProgressCallback | None
+    ) -> Any:
+        """Parse an SSE tool response, invoking on_progress per `note` frame."""
+        data_lines: list[str] = []
+        result: Any = None
+
+        async def _flush() -> None:
+            nonlocal result
+            if not data_lines:
+                return
+            obj = None
+            try:
+                obj = json.loads("\n".join(data_lines))
+            except json.JSONDecodeError:
+                obj = None
+            if isinstance(obj, dict):
+                if "result" in obj:
+                    result = obj["result"]
+                elif "error" in obj:
+                    err = _rpc_error_message(obj)
+                    if err:
+                        raise RuntimeError(f"{self.label}: {err}")
+                elif "note" in obj and on_progress is not None:
+                    note = str(obj["note"]).strip()
+                    if note:
+                        await on_progress(note)
+
+        async for raw in resp.aiter_lines():
+            line = raw.rstrip("\r")
+            if line == "":
+                await _flush()
+                data_lines = []
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+        await _flush()
+        return result
 
 
 async def check_remote_mcp(

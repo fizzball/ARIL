@@ -186,7 +186,10 @@ async def _complete_cached(
         model,
     )
     msg_dicts = _msg_dicts(messages)
-    mcp_specs = _mcp_specs(mcp_servers)
+    # Image-generation models (e.g. google/gemini-2.5-flash-image) have no endpoint
+    # that supports tool-calling; attaching MCP tools makes OpenRouter reject the
+    # route with 404 "No endpoints found". Image turns don't need tools, so skip them.
+    mcp_specs = [] if generate_image else _mcp_specs(mcp_servers)
     # Don't cache web search, multimodal, image generation, or MCP tool turns
     cacheable = (
         use_cache
@@ -477,7 +480,9 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
     async def event_generator():
         stream_started = time.perf_counter()
-        mcp_specs = _mcp_specs(req.mcp_servers)
+        # Skip MCP tools for image generation: the image model has no tool-capable
+        # endpoint, so attaching tools makes OpenRouter 404 "No endpoints found".
+        mcp_specs = [] if generate_image else _mcp_specs(req.mcp_servers)
         # Cache short-circuit for large prompts (skip when web/attachments/image-gen/MCP)
         if (
             req.use_cache
@@ -728,11 +733,13 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 },
             )
         # Client still received the full streamed content (including images) above.
+        # Pass the full text so the session store can persist generated images to disk
+        # (as file:// links) instead of dropping them to a placeholder.
         session_store.record_chat_turn(
             session_id,
             title=last_user[:42] if last_user else "New session",
             user_content=last_user,
-            assistant_content=stored_full,
+            assistant_content=full,
         )
         meta["cost_usd"] = resolve_cost_usd(
             str(meta.get("model") or model),
@@ -985,8 +992,9 @@ async def store_records_delete(record_id: str) -> dict:
 
 
 @router.delete("/store/records", response_model=StoreDeleteAllResponse)
-async def store_records_delete_all() -> StoreDeleteAllResponse:
-    deleted = local_db.delete_all_store_records()
+async def store_records_delete_all(include_wins: bool = False) -> StoreDeleteAllResponse:
+    # include_wins also zeroes Category/Fingerprint Prefer win aggregates (used by /reset).
+    deleted = local_db.delete_all_store_records(include_wins=include_wins)
     return StoreDeleteAllResponse(ok=True, deleted=deleted)
 
 

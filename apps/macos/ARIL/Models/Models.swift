@@ -444,6 +444,21 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
 
     var isPreset: Bool { presetId != nil }
 
+    /// Stable preset id for the ARIL-managed local Nmap MCP server.
+    static let nmapPresetId = "nmap-local"
+
+    /// Stable preset id for the ARIL-managed local Semgrep code-scan MCP server.
+    static let codescanPresetId = "codescan-local"
+
+    /// Preset ids whose lifecycle (process + token + config) ARIL manages itself.
+    static let managedPresetIds: Set<String> = [nmapPresetId, codescanPresetId]
+
+    /// True for presets whose lifecycle (process + token + config) ARIL manages itself.
+    var isManaged: Bool {
+        guard let presetId else { return false }
+        return MCPServerConfig.managedPresetIds.contains(presetId)
+    }
+
     var needsAPIKey: Bool {
         switch authStyle {
         case .none: return false
@@ -468,83 +483,33 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
         return leaf.isEmpty ? "Untitled MCP server" : leaf
     }
 
-    /// Built-in remote HTTP presets (disabled by default). Playwright is deferred.
+    /// Built-in presets (disabled by default).
+    ///
+    /// Only the ARIL-managed local Nmap scanner ships for now. Remote presets were
+    /// removed pending a per-server architecture review; they'll be re-added
+    /// selectively. Removing an entry here drops any previously-persisted copy on the
+    /// next launch (see `AppState.loadMCPServers`), so no migration is needed.
     static func builtInPresets() -> [MCPServerConfig] {
         [
             MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111101")!,
-                name: "Agenty",
-                url: "https://api.agenty.ai/mcp",
+                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111108")!,
+                name: "Nmap Scanner (local)",
+                url: "http://127.0.0.1:8742/mcp",
                 enabled: false,
-                presetId: "agenty",
+                presetId: nmapPresetId,
                 authStyle: .bearer,
-                docsURL: "https://mcpservers.org/servers/agenty-mcp",
+                docsURL: "https://github.com/wzfukui/nmap-mcp-http",
                 isEditable: false
             ),
             MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111102")!,
-                name: "AI Diagram Maker",
-                url: "https://mcp.aidiagrammaker.com/mcp",
+                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111109")!,
+                name: "Code Scanner (Semgrep, local)",
+                url: "http://127.0.0.1:8743/mcp",
                 enabled: false,
-                presetId: "ai-diagram-maker",
-                authStyle: .header,
-                authHeaderName: "X-ADM-API-Key",
-                docsURL: "https://mcpservers.org/servers/erajasekar/ai-diagram-maker-mcp",
-                isEditable: false
-            ),
-            MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111103")!,
-                name: "Cloudflare Browser",
-                url: "https://browser.mcp.cloudflare.com/mcp",
-                enabled: false,
-                presetId: "cloudflare-browser",
+                presetId: codescanPresetId,
                 authStyle: .bearer,
-                docsURL: "https://mcpservers.org/servers/cloudflare/mcp-server-cloudflare",
+                docsURL: "https://github.com/semgrep/semgrep",
                 isEditable: false
-            ),
-            MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111104")!,
-                name: "DeepWiki",
-                url: "https://mcp.deepwiki.com/mcp",
-                enabled: false,
-                presetId: "deepwiki",
-                authStyle: .none,
-                docsURL: "https://mcpservers.org/servers/devin/deepwiki",
-                isEditable: false
-            ),
-            MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111105")!,
-                name: "GitHub",
-                url: "https://api.githubcopilot.com/mcp/",
-                enabled: false,
-                presetId: "github",
-                authStyle: .bearer,
-                docsURL: "https://mcpservers.org/servers/github-mcp-server",
-                isEditable: false
-            ),
-            MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111106")!,
-                name: "Firecrawl",
-                url: "https://mcp.firecrawl.dev/v2/mcp",
-                enabled: false,
-                presetId: "firecrawl",
-                authStyle: .bearer,
-                docsURL: "https://mcpservers.org/servers/firecrawl-mcp-server",
-                isEditable: false
-            ),
-            MCPServerConfig(
-                id: UUID(uuidString: "A1111111-1111-4111-8111-111111111107")!,
-                name: "Playwright",
-                transport: .stdio,
-                url: "",
-                enabled: false,
-                presetId: "playwright",
-                authStyle: .none,
-                docsURL: "https://mcpservers.org/servers/playwright-mcp-server",
-                isEditable: false,
-                isDeferred: true,
-                lastCheckStatus: .deferred,
-                lastCheckMessage: "Coming soon — requires local Node (stdio)."
             ),
         ]
     }

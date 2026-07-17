@@ -99,6 +99,36 @@ def test_store_delete_one_and_all(client: TestClient):
     assert client.get("/v1/store/records").json() == []
 
 
+def test_delete_all_include_wins_zeroes_prefer_wins(client: TestClient):
+    from app.core import db as store
+
+    r = client.post(
+        "/v1/feedback/prefer",
+        json={
+            "prompt": "prefer win token gammazeta for coding tasks with extra words",
+            "model": "openai/gpt-4.1",
+            "category": "coding",
+        },
+    )
+    assert r.status_code == 200
+
+    def _total(table: str) -> int:
+        conn = store.connect()
+        return int(conn.execute(f"SELECT COALESCE(SUM(wins), 0) AS c FROM {table}").fetchone()["c"])
+
+    assert _total("category_wins") >= 1
+
+    # Default wipe keeps win aggregates (Learning "Delete all store records").
+    assert client.delete("/v1/store/records").status_code == 200
+    assert _total("category_wins") >= 1
+
+    # /reset path: include_wins=true zeroes Category + Fingerprint Prefer wins.
+    wipe = client.delete("/v1/store/records?include_wins=true")
+    assert wipe.status_code == 200
+    assert _total("category_wins") == 0
+    assert _total("fingerprint_wins") == 0
+
+
 def test_store_retention_patch(client: TestClient):
     r = client.patch("/v1/store/retention", json={"retention": 10})
     assert r.status_code == 200
