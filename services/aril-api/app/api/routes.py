@@ -24,6 +24,7 @@ from app.core.schemas import (
     CompareRequest,
     CompareResponse,
     CompareResult,
+    ContextLimitsResponse,
     ModelPricingResponse,
     OpenRouterCatalogResponse,
     OpenRouterConnectionStatus,
@@ -52,7 +53,11 @@ from app.core.schemas import (
     StoreStatus,
 )
 from app.providers.base import ProviderMessage, ProviderResult, get_chat_provider
-from app.providers.messages import attachments_to_provider_messages, sanitize_content_for_context
+from app.providers.messages import (
+    attachments_to_provider_messages,
+    context_limits,
+    sanitize_content_for_context,
+)
 from app.routing.pipeline import (
     CATEGORY_RECOMMENDATIONS,
     DEFAULT_PROFILE,
@@ -1163,3 +1168,14 @@ async def list_models() -> dict:
 @router.get("/meta/token-estimate")
 async def token_estimate(text: str) -> dict:
     return {"estimated_tokens": estimate_tokens(text)}
+
+
+@router.get("/meta/limits", response_model=ContextLimitsResponse)
+async def context_limits_endpoint() -> ContextLimitsResponse:
+    """Expose the authoritative context-window budgets used to trim chat context."""
+    limits = context_limits()
+    return ContextLimitsResponse(
+        max_total_chars=limits["max_total_chars"],
+        max_message_chars=limits["max_message_chars"],
+        cache_token_threshold=settings.aril_cache_token_threshold,
+    )

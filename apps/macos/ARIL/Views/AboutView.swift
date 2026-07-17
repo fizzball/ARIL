@@ -73,6 +73,12 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.1", changes: [
+            "Sidebar shows a per-session context-usage bar; warns before a session hits the model context limit with the option to start a new session",
+            "Context limits are read from the gateway (/v1/meta/limits) so the client stays in sync",
+            "Starts each launch on a fresh session by default to reduce context exhaustion; opt into reopening your last session in Preferences → Startup",
+            "New sessions you never send a prompt into are discarded on quit; sidebar header renamed to 'Recent Sessions'",
+        ]),
         ChangelogEntry(version: "0.4.0", changes: [
             "New: ARIL-managed Nmap security scanner over MCP — enable it in Preferences → MCP and use nmap in Auto/Manual chat",
             "New: ARIL-managed Semgrep code scanner over MCP — static analysis of files, folders, or inline code snippets (auto/security rulesets or your own YAML rule)",

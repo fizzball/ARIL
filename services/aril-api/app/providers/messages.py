@@ -85,6 +85,14 @@ _MAX_MESSAGE_CHARS = 24_000
 _MAX_TOTAL_CHARS = 96_000  # ~24k tokens rough; leave headroom for system/plugins
 
 
+def context_limits() -> dict[str, int]:
+    """Single source of truth for the context character budgets (exposed to clients)."""
+    return {
+        "max_total_chars": _MAX_TOTAL_CHARS,
+        "max_message_chars": _MAX_MESSAGE_CHARS,
+    }
+
+
 def sanitize_content_for_context(content: str) -> str:
     """Strip embedded base64 images / huge blobs that blow up chat context."""
     if not content:

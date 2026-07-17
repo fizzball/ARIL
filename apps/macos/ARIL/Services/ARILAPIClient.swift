@@ -44,6 +44,13 @@ final class ARILAPIClient {
         return try decode(data)
     }
 
+    func contextLimits(baseURL: String) async throws -> ContextLimitsDTO {
+        let url = try url(baseURL, path: "/v1/meta/limits")
+        let (data, response) = try await session.data(from: url)
+        try validate(response, data: data)
+        return try decode(data)
+    }
+
     func preview(baseURL: String, request: PreviewRequest) async throws -> PreviewResponse {
         try await post(baseURL, path: "/v1/preview", body: request)
     }

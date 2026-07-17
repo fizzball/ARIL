@@ -106,6 +106,25 @@ struct ContentView: View {
             Text(state.budgetConfirmMessage ?? "")
         }
         .alert(
+            "Context window almost full",
+            isPresented: Binding(
+                get: { state.contextLimitMessage != nil },
+                set: { if !$0 { state.respondToContextLimit(.cancel) } }
+            )
+        ) {
+            Button("Start New Session") {
+                state.respondToContextLimit(.newSession)
+            }
+            Button("Continue") {
+                state.respondToContextLimit(.proceed)
+            }
+            Button("Cancel", role: .cancel) {
+                state.respondToContextLimit(.cancel)
+            }
+        } message: {
+            Text(state.contextLimitMessage ?? "")
+        }
+        .alert(
             "Reset ARIL?",
             isPresented: $state.showResetConfirmation
         ) {

@@ -44,6 +44,13 @@ enum ToolPanel: String, Identifiable, Equatable {
     static let flyoutWidth: CGFloat = 560
 }
 
+/// Outcome of the context-window warning dialog.
+enum ContextLimitDecision {
+    case proceed
+    case newSession
+    case cancel
+}
+
 @MainActor
 final class AppState: ObservableObject {
     /// Built-in starter models for the Manual-mode picker (before Other… picks).
@@ -84,6 +91,8 @@ final class AppState: ObservableObject {
     @Published var skipAnalysisOnJudgement: Bool = true
     /// When on, show ARIL in the macOS menu bar (Preferences).
     @Published var showInMenuBar: Bool = false
+    /// When on, reopen the most recent session on launch instead of starting fresh (Preferences).
+    @Published var openLastSessionOnStartup: Bool = false
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
@@ -201,6 +210,8 @@ final class AppState: ObservableObject {
     @Published var dailySpendUsd: Double = 0
     /// Soft-confirm dialog message; nil when no prompt is showing.
     @Published var budgetConfirmMessage: String?
+    /// Context-window limit dialog message; nil when no prompt is showing.
+    @Published var contextLimitMessage: String?
     @Published var categoryPreferWins: [String: [String: Int]] = [:]
     @Published var fingerprintPreferWins: [String: [String: Int]] = [:]
     @Published var evalLog: [EvalLogEntry] = []
@@ -219,6 +230,9 @@ final class AppState: ObservableObject {
     private var budgetConfirmContinuation: CheckedContinuation<Bool, Never>?
     /// Skip budget UI while Learning → Run Auto eval is driving sends.
     private var budgetBypassForEval: Bool = false
+    private var contextLimitContinuation: CheckedContinuation<ContextLimitDecision, Never>?
+    /// Sessions where the user chose "Continue" past the context warning — don't nag again.
+    private var contextWarnAcknowledged: Set<UUID> = []
 
     var selectedSession: ChatSession? {
         sessions.first { $0.id == selectedSessionID }
@@ -236,7 +250,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.29"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.1"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "52"
         return "\(short) (\(build))"
     }
@@ -285,6 +299,7 @@ final class AppState: ObservableObject {
         skipAnalysisOnJudgement =
             defaults.object(forKey: "aril.skipAnalysisOnJudgement") as? Bool ?? true
         showInMenuBar = defaults.object(forKey: "aril.showInMenuBar") as? Bool ?? false
+        openLastSessionOnStartup = defaults.object(forKey: "aril.openLastSessionOnStartup") as? Bool ?? false
         mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
         mcpServers = Self.loadMCPServers()
         systemPromptEnabled = defaults.object(forKey: "aril.systemPromptEnabled") as? Bool ?? false
@@ -342,6 +357,11 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(enabled, forKey: "aril.showInMenuBar")
     }
 
+    func setOpenLastSessionOnStartup(_ enabled: Bool) {
+        openLastSessionOnStartup = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.openLastSessionOnStartup")
+    }
+
     func setBudgetEnabled(_ enabled: Bool) {
         budgetEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "aril.budget.enabled")
@@ -371,6 +391,23 @@ final class AppState: ObservableObject {
         return await withCheckedContinuation { continuation in
             budgetConfirmContinuation = continuation
             budgetConfirmMessage = message
+        }
+    }
+
+    func respondToContextLimit(_ decision: ContextLimitDecision) {
+        contextLimitMessage = nil
+        let cont = contextLimitContinuation
+        contextLimitContinuation = nil
+        cont?.resume(returning: decision)
+    }
+
+    private func requestContextLimitConfirmation(message: String) async -> ContextLimitDecision {
+        if contextLimitContinuation != nil {
+            respondToContextLimit(.cancel)
+        }
+        return await withCheckedContinuation { continuation in
+            contextLimitContinuation = continuation
+            contextLimitMessage = message
         }
     }
 
@@ -522,6 +559,60 @@ final class AppState: ObservableObject {
     }
 
     /// Returns false when send should abort (hard block or user cancelled soft confirm).
+    /// Pull the gateway's authoritative context budgets so the client indicator and
+    /// the send-time gate always match what the server actually trims to.
+    func refreshContextLimits() async {
+        guard let limits = try? await client.contextLimits(baseURL: gatewayURL) else { return }
+        if limits.maxTotalChars > 0 {
+            ChatSession.maxContextChars = limits.maxTotalChars
+        }
+        if limits.maxMessageChars > 0 {
+            ChatSession.maxMessageChars = limits.maxMessageChars
+        }
+        // Republish so sidebar indicators recompute against the fresh budget.
+        objectWillChange.send()
+    }
+
+    /// Warn when the upcoming turn would reach the model context budget. Returns false
+    /// to abort the current send (either cancelled, or diverted to a new session).
+    private func passContextGate(newUserText: String) async -> Bool {
+        guard let sid = selectedSessionID,
+              let session = sessions.first(where: { $0.id == sid })
+        else { return true }
+        if contextWarnAcknowledged.contains(sid) { return true }
+
+        var projected = session.contextChars
+        projected += min(Self.sanitizeContentForAPI(newUserText).count, ChatSession.maxMessageChars)
+        if systemPromptEnabled {
+            let sp = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sp.isEmpty { projected += sp.count }
+        }
+
+        guard projected >= ChatSession.maxContextChars else { return true }
+
+        let pct = Int((Double(projected) / Double(ChatSession.maxContextChars) * 100).rounded())
+        let limit = ChatSession.maxContextChars.formatted()
+        let message = """
+        This session is at ~\(pct)% of the model context limit (\(limit) characters).
+
+        Start a new session for the best results, or continue — the oldest messages will be dropped to fit the window.
+        """
+        let decision = await requestContextLimitConfirmation(message: message)
+        switch decision {
+        case .proceed:
+            contextWarnAcknowledged.insert(sid)
+            return true
+        case .newSession:
+            let carriedAttachments = pendingAttachments
+            createSession()
+            draft = newUserText
+            pendingAttachments = carriedAttachments
+            return false
+        case .cancel:
+            return false
+        }
+    }
+
     private func passBudgetGate() async -> Bool {
         if budgetBypassForEval || !budgetEnabled { return true }
         let estimate = estimateOutgoingCostUsd()
@@ -954,9 +1045,14 @@ final class AppState: ObservableObject {
             gatewayURL = gatewayManager.baseURL
         }
         await refreshHealth(reloadSessionsOnReady: false)
+        await refreshContextLimits()
         await loadSessions(retryCount: 8)
         reconcileSelection()
-        // Do not auto-create an empty session — count stays 0 until the user starts one.
+        // Default: start each launch on a fresh session to minimise context exhaustion.
+        // Users can opt into reopening the most recent session via Preferences.
+        if !openLastSessionOnStartup {
+            createSession()
+        }
         saveLocalSessions()
         // Always keep default rates available; overlay live OpenRouter pricing only when a key is set.
         applyDefaultModelPricing()
@@ -2319,6 +2415,11 @@ final class AppState: ObservableObject {
             return
         }
 
+        // Context-window gate — warn near the 96k char limit before mutating the session.
+        if !(await passContextGate(newUserText: text)) {
+            return
+        }
+
         ensureSession()
         guard let sid = selectedSessionID else { return }
 
@@ -2729,7 +2830,7 @@ final class AppState: ObservableObject {
     }
 
     /// Drop embedded base64 images / huge blobs from outbound context (UI keeps originals).
-    static func sanitizeContentForAPI(_ content: String) -> String {
+    nonisolated static func sanitizeContentForAPI(_ content: String) -> String {
         guard !content.isEmpty else { return content }
         var text = ChatMessage.stripActualCostFooter(content)
         text = sanitizeBulkyPayloads(text, truncateAt: 24_000, truncationMarker: "\n\n…[truncated for model context]")
@@ -2737,12 +2838,12 @@ final class AppState: ObservableObject {
     }
 
     /// Persist a slim copy of history while keeping actual-cost footers for session totals.
-    static func sanitizeContentForStorage(_ content: String) -> String {
+    nonisolated static func sanitizeContentForStorage(_ content: String) -> String {
         guard !content.isEmpty else { return content }
         return sanitizeBulkyPayloads(content, truncateAt: 48_000, truncationMarker: "\n\n…[truncated for storage]")
     }
 
-    private static func sanitizeBulkyPayloads(
+    nonisolated private static func sanitizeBulkyPayloads(
         _ content: String,
         truncateAt maxChars: Int,
         truncationMarker: String
@@ -3194,6 +3295,13 @@ final class AppState: ObservableObject {
     }
 
     func shutdown() {
+        // Discard any sessions the user started but never sent a prompt into.
+        if sessions.contains(where: { $0.messages.isEmpty }) {
+            sessions.removeAll { $0.messages.isEmpty }
+            if let sel = selectedSessionID, !sessions.contains(where: { $0.id == sel }) {
+                selectedSessionID = sessions.first?.id
+            }
+        }
         saveLocalSessions()
         nmapServerManager.stop()
         codeScanServerManager.stop()
@@ -3307,6 +3415,8 @@ final class AppState: ObservableObject {
         guard let session = selectedSession else { return }
         // Never re-upsert a locally deleted session id.
         if deletedSessionIDs.contains(session.id) { return }
+        // Don't persist a brand-new session that has no messages yet — it is discarded on exit.
+        if session.messages.isEmpty { return }
         saveLocalSessions()
         let payload = SessionUpsertDTO(
             id: session.id.uuidString.lowercased(),

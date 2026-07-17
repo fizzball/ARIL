@@ -181,6 +181,36 @@ struct ChatSession: Identifiable, Hashable, Codable {
     var totalCostLabel: String {
         String(format: "$%.4f", totalCostUsd)
     }
+
+    /// Total character budget the gateway allows for context before it drops the
+    /// oldest turns. Seeded from `_MAX_TOTAL_CHARS` in the gateway and refreshed from
+    /// `/v1/meta/limits` so the client never drifts from the server's authoritative value.
+    static var maxContextChars = 96_000
+    /// Per-message cap the gateway applies before summing. Mirrors `_MAX_MESSAGE_CHARS`;
+    /// refreshed from `/v1/meta/limits`.
+    static var maxMessageChars = 24_000
+
+    /// Approximate characters of model context this session sends on its next turn,
+    /// matching the gateway's sanitize (base64 images stripped) + per-message cap.
+    /// Falls back to a cheap count for plain-text messages to stay light during streaming.
+    var contextChars: Int {
+        messages.reduce(0) { acc, message in
+            let content = message.content
+            let counted: Int
+            if content.contains("data:image") {
+                counted = min(AppState.sanitizeContentForAPI(content).count, Self.maxMessageChars)
+            } else {
+                counted = min(content.count, Self.maxMessageChars)
+            }
+            return acc + counted
+        }
+    }
+
+    /// Fraction of the context budget in use (0...1).
+    var contextFraction: Double {
+        guard Self.maxContextChars > 0 else { return 0 }
+        return min(1.0, Double(contextChars) / Double(Self.maxContextChars))
+    }
 }
 
 struct ChatMessage: Identifiable, Hashable, Codable {

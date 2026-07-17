@@ -109,6 +109,14 @@ class CacheInsight(BaseModel):
     estimated_savings_pct: float | None = None
 
 
+class ContextLimitsResponse(BaseModel):
+    """Authoritative context-window budgets so clients don't hardcode them."""
+
+    max_total_chars: int
+    max_message_chars: int
+    cache_token_threshold: int
+
+
 class PreviewRequest(BaseModel):
     prompt: str = Field(min_length=1)
     temperature: float | None = Field(default=None, ge=0, le=2)

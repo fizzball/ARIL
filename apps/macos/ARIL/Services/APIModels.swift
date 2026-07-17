@@ -16,6 +16,18 @@ struct HealthResponse: Codable {
     }
 }
 
+struct ContextLimitsDTO: Codable {
+    let maxTotalChars: Int
+    let maxMessageChars: Int
+    let cacheTokenThreshold: Int
+
+    enum CodingKeys: String, CodingKey {
+        case maxTotalChars = "max_total_chars"
+        case maxMessageChars = "max_message_chars"
+        case cacheTokenThreshold = "cache_token_threshold"
+    }
+}
+
 struct APIRoutingProfile: Codable, Equatable {
     var coding: String
     var security: String

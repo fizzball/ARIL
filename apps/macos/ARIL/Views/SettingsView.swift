@@ -165,6 +165,19 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Startup") {
+                Toggle(
+                    "Open last session on startup",
+                    isOn: Binding(
+                        get: { state.openLastSessionOnStartup },
+                        set: { state.setOpenLastSessionOnStartup($0) }
+                    )
+                )
+                Text("When off (default), ARIL opens a fresh session each launch to reduce context exhaustion. When on, it reopens your most recent session. Empty sessions you never send a prompt into are discarded on quit.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Menu bar") {
                 Toggle(
                     "Show ARIL in the menu bar",

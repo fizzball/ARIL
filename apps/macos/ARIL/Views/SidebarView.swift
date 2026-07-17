@@ -43,7 +43,7 @@ struct SidebarView: View {
                 .padding(.bottom, 12)
 
             HStack {
-                Text("SESSIONS")
+                Text("Recent Sessions")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.textMuted)
                 Spacer()
@@ -116,7 +116,7 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(live?.title ?? "Session")
                     .font(ARILTheme.bodyFont)
                     .foregroundStyle(theme.palette.text)
@@ -129,6 +129,19 @@ private struct SessionRow: View {
                         .monospacedDigit()
                 }
                 .font(ARILTheme.captionFont)
+
+                if let live, !live.messages.isEmpty {
+                    let fraction = live.contextFraction
+                    let color = contextColor(fraction)
+                    HStack(spacing: 6) {
+                        ContextUsageBar(fraction: fraction, color: color)
+                        Text("\(Int((fraction * 100).rounded()))%")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(color)
+                            .monospacedDigit()
+                    }
+                    .help("Approx. model context used: \(live.contextChars.formatted()) / \(ChatSession.maxContextChars.formatted()) characters")
+                }
             }
             Spacer(minLength: 4)
             if hovering {
@@ -151,5 +164,31 @@ private struct SessionRow: View {
         guard let live else { return "Empty · " }
         if live.messages.isEmpty { return "Empty · " }
         return "\(live.messages.count) messages · "
+    }
+
+    private func contextColor(_ fraction: Double) -> Color {
+        if fraction >= 0.9 { return theme.palette.danger }
+        if fraction >= 0.75 { return theme.palette.preferredHighlight }
+        return theme.palette.textMuted.opacity(0.9)
+    }
+}
+
+/// Thin capacity bar showing how full a session's model context window is.
+private struct ContextUsageBar: View {
+    @EnvironmentObject private var theme: ThemeStore
+    let fraction: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(theme.palette.textMuted.opacity(0.18))
+                Capsule()
+                    .fill(color)
+                    .frame(width: max(2, geo.size.width * CGFloat(min(1, max(0, fraction)))))
+            }
+        }
+        .frame(height: 3)
     }
 }
