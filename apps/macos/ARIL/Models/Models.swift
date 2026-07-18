@@ -248,6 +248,52 @@ struct ChatSession: Identifiable, Hashable, Codable {
         }
         return nil
     }
+
+    /// Collapse duplicated turns (common after gateway append + client upsert races).
+    mutating func deduplicateMessages() {
+        messages = Self.deduplicatedMessages(messages)
+    }
+
+    /// Prefer the richer of two near-identical messages (e.g. keep `file://` image over empty cost footer).
+    static func deduplicatedMessages(_ messages: [ChatMessage]) -> [ChatMessage] {
+        var out: [ChatMessage] = []
+        for msg in messages {
+            if let last = out.last,
+               last.role == msg.role,
+               ChatMessage.normalizedForDedupe(last.content) == ChatMessage.normalizedForDedupe(msg.content) {
+                if ChatMessage.contentRichness(msg.content) > ChatMessage.contentRichness(last.content) {
+                    out[out.count - 1] = msg
+                }
+                continue
+            }
+
+            // Drop a repeated user→assistant pair that already appears immediately before.
+            if msg.role == .assistant,
+               out.count >= 3,
+               out[out.count - 1].role == .user,
+               out[out.count - 2].role == .assistant,
+               out[out.count - 3].role == .user {
+                let dupUser = out[out.count - 1]
+                let prevAssistant = out[out.count - 2]
+                let prevUser = out[out.count - 3]
+                let sameUser = ChatMessage.normalizedForDedupe(dupUser.content)
+                    == ChatMessage.normalizedForDedupe(prevUser.content)
+                let sameAssistant = ChatMessage.normalizedForDedupe(msg.content)
+                    == ChatMessage.normalizedForDedupe(prevAssistant.content)
+                if sameUser && sameAssistant {
+                    // Keep the richer assistant of the two; drop the duplicate user.
+                    if ChatMessage.contentRichness(msg.content) > ChatMessage.contentRichness(prevAssistant.content) {
+                        out[out.count - 2] = msg
+                    }
+                    out.removeLast()
+                    continue
+                }
+            }
+
+            out.append(msg)
+        }
+        return out
+    }
 }
 
 struct ChatMessage: Identifiable, Hashable, Codable {
@@ -392,6 +438,44 @@ struct ChatMessage: Identifiable, Hashable, Codable {
     /// Body text without a trailing cost footer (for colored rendering).
     var bodyWithoutCostFooter: String {
         Self.stripActualCostFooter(content)
+    }
+
+    /// Stable comparison key for history dedupe (ignores cost footers / image URL variance).
+    static func normalizedForDedupe(_ content: String) -> String {
+        var text = stripActualCostFooter(content)
+        if let fileImg = try? NSRegularExpression(
+            pattern: #"!\[[^\]]*\]\(file://[^)]+\)"#,
+            options: [.caseInsensitive]
+        ) {
+            text = fileImg.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "![img](file)"
+            )
+        }
+        if let dataImg = try? NSRegularExpression(
+            pattern: #"!\[[^\]]*\]\(data:image\/[^)]+\)"#,
+            options: [.caseInsensitive]
+        ) {
+            text = dataImg.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "![img](data)"
+            )
+        }
+        text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Prefer messages that still carry real image payloads / body text.
+    static func contentRichness(_ content: String) -> Int {
+        let body = stripActualCostFooter(content).trimmingCharacters(in: .whitespacesAndNewlines)
+        if body.isEmpty { return 0 }
+        var score = min(body.count, 50_000)
+        if content.contains("file://") { score += 100_000 }
+        if content.contains("data:image") { score += 40_000 }
+        if body.lowercased().contains("<svg") { score += 20_000 }
+        return score
     }
 
     /// Display label for a trailing cost footer, if present.

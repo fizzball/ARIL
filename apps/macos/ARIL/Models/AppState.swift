@@ -170,6 +170,12 @@ final class AppState: ObservableObject {
     @Published var preferredCompareModel: String?
     @Published var pendingAttachments: [PendingAttachment] = []
     @Published var webSearchEnabled: Bool = false
+    /// Bumped to request MessageListView scroll to the latest message.
+    @Published var scrollMessagesToBottomToken: Int = 0
+
+    func requestScrollMessagesToBottom() {
+        scrollMessagesToBottomToken &+= 1
+    }
     @Published var userDisplayName: String
     @Published var showRoutingAnalysis: Bool = false
     @Published var showExchangeLog: Bool = false
@@ -257,7 +263,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.3"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.4"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "52"
         return "\(short) (\(build))"
     }
@@ -1711,34 +1717,42 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Prefer the richer copy of each session id (more messages / newer update).
+    /// Prefer the richer copy of each session id (more unique messages / fewer placeholders / real images).
     private static func mergeSessions(local: [ChatSession], remote: [ChatSession]) -> [ChatSession] {
         var byID: [UUID: ChatSession] = [:]
         for session in local + remote {
+            var candidate = session
+            candidate.deduplicateMessages()
             if let existing = byID[session.id] {
-                if session.messages.count > existing.messages.count {
-                    byID[session.id] = session
-                } else if session.messages.count == existing.messages.count {
-                    // Prefer the copy with real content over one whose images were
-                    // dropped to a placeholder; fall back to the most recent update.
-                    let newPlaceholders = Self.placeholderCount(session)
-                    let oldPlaceholders = Self.placeholderCount(existing)
-                    if newPlaceholders < oldPlaceholders {
-                        byID[session.id] = session
-                    } else if newPlaceholders == oldPlaceholders,
-                              session.updatedAt > existing.updatedAt {
-                        byID[session.id] = session
-                    }
-                }
+                byID[session.id] = preferredSession(existing, candidate)
             } else {
-                byID[session.id] = session
+                byID[session.id] = candidate
             }
         }
         return Array(byID.values).map { session in
             var next = session
+            next.deduplicateMessages()
             next.recomputeTotalCost()
             return next
         }
+    }
+
+    /// Choose the better of two already-deduped sessions for the same id.
+    private static func preferredSession(_ a: ChatSession, _ b: ChatSession) -> ChatSession {
+        if b.messages.count != a.messages.count {
+            return b.messages.count > a.messages.count ? b : a
+        }
+        let aPlace = placeholderCount(a)
+        let bPlace = placeholderCount(b)
+        if aPlace != bPlace {
+            return bPlace < aPlace ? b : a
+        }
+        let aRich = a.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
+        let bRich = b.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
+        if aRich != bRich {
+            return bRich > aRich ? b : a
+        }
+        return b.updatedAt > a.updatedAt ? b : a
     }
 
     /// Count messages whose generated image was reduced to a lossy placeholder.
@@ -3603,10 +3617,23 @@ final class AppState: ObservableObject {
         } else {
             reconcileSelection()
         }
+        // Persist deduped history so the next launch doesn't rehydrate duplicates.
+        saveLocalSessions()
     }
 
     private func saveLocalSessions() {
-        let cache = LocalSessionsCache(selectedSessionID: selectedSessionID, sessions: sessions)
+        var cleaned = sessions
+        for i in cleaned.indices {
+            cleaned[i].deduplicateMessages()
+            cleaned[i].recomputeTotalCost()
+        }
+        let beforeCounts = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.messages.count) })
+        let afterCounts = Dictionary(uniqueKeysWithValues: cleaned.map { ($0.id, $0.messages.count) })
+        if beforeCounts != afterCounts {
+            sessions = cleaned
+            noteSessionsChanged()
+        }
+        let cache = LocalSessionsCache(selectedSessionID: selectedSessionID, sessions: cleaned)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .deferredToDate
         encoder.outputFormatting = [.sortedKeys]
@@ -3625,11 +3652,18 @@ final class AppState: ObservableObject {
     }
 
     private func persistSelectedSession() async {
-        guard let session = selectedSession else { return }
+        guard var session = selectedSession else { return }
         // Never re-upsert a locally deleted session id.
         if deletedSessionIDs.contains(session.id) { return }
         // Don't persist a brand-new session that has no messages yet — it is discarded on exit.
         if session.messages.isEmpty { return }
+        session.deduplicateMessages()
+        if let i = sessions.firstIndex(where: { $0.id == session.id }),
+           sessions[i].messages.count != session.messages.count {
+            var next = sessions
+            next[i] = session
+            sessions = next
+        }
         saveLocalSessions()
         let payload = SessionUpsertDTO(
             id: session.id.uuidString.lowercased(),

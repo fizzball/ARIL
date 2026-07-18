@@ -92,6 +92,22 @@ struct InputBarView: View {
                 .toggleStyle(.checkbox)
                 .help("Enable OpenRouter live web search for this send")
 
+                Button {
+                    state.requestScrollMessagesToBottom()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(theme.palette.accentStrong)
+                            .frame(width: 28, height: 28)
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(theme.palette.background)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Scroll to the latest message")
+                .accessibilityLabel("Scroll to bottom")
+
                 Spacer()
             }
 

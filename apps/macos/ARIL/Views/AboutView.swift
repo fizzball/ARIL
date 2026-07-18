@@ -73,6 +73,10 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.4", changes: [
+            "Session history no longer duplicates image turns on launch — client and gateway dedupe restored transcripts",
+            "Toolbar scroll-to-bottom button (↓) next to Web jumps to the latest message",
+        ]),
         ChangelogEntry(version: "0.4.3", changes: [
             "Mermaid diagrams render reliably in-chat (classic WebKit loader); models are told ARIL can display diagrams so they stop pointing at mermaid.live",
             "Sidebar search matches session titles and message content, with highlighted hits and a short matching snippet",

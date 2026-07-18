@@ -50,6 +50,9 @@ struct MessageListView: View {
             .onChange(of: state.showIntelligencePanel) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
+            .onChange(of: state.scrollMessagesToBottomToken) { _, _ in
+                scrollToBottom(proxy: proxy, animated: true)
+            }
         }
     }
 
