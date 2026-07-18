@@ -73,6 +73,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.5", changes: [
+            "Preferences → Appearance: System theme follows macOS light/dark/Auto, plus Ocean, Graphite, Sand, Dusk, and Midnight",
+            "Title-bar ARIL wordmark cycles subtle colour, typeface, and flourish animations every minute",
+            "Scroll-to-bottom control recentered in the prompt toolbar",
+        ]),
         ChangelogEntry(version: "0.4.4", changes: [
             "Session history no longer duplicates image turns on launch — client and gateway dedupe restored transcripts",
             "Toolbar scroll-to-bottom button (↓) next to Web jumps to the latest message",

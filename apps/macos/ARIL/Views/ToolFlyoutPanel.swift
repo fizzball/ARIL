@@ -21,7 +21,7 @@ struct ToolFlyoutPanel: View {
         .frame(width: ToolPanel.flyoutWidth)
         .frame(maxHeight: .infinity)
         .background(theme.palette.backgroundElevated)
-        .preferredColorScheme(theme.palette.colorScheme)
+        .preferredColorScheme(theme.preferredColorScheme)
         .overlay(alignment: .leading) {
             Rectangle()
                 .fill(theme.palette.hairline)

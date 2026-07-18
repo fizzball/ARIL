@@ -65,32 +65,36 @@ struct InputBarView: View {
 
     private var inputCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Picker("Mode", selection: Binding(
-                    get: { state.routeMode },
-                    set: { state.changeRouteMode(to: $0) }
-                )) {
-                    ForEach(RouteMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
+            ZStack {
+                HStack(spacing: 10) {
+                    Picker("Mode", selection: Binding(
+                        get: { state.routeMode },
+                        set: { state.changeRouteMode(to: $0) }
+                    )) {
+                        ForEach(RouteMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 260)
-                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge classifies the prompt and compares 3 models with the same capability.")
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 260)
+                    .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge classifies the prompt and compares 3 models with the same capability.")
 
-                if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
-                    Text(cat.label.uppercased())
-                        .font(ARILTheme.captionFont)
-                        .foregroundStyle(theme.palette.accent)
-                        .help("Detected prompt category")
-                }
+                    if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
+                        Text(cat.label.uppercased())
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.accent)
+                            .help("Detected prompt category")
+                    }
 
-                Toggle(isOn: $state.webSearchEnabled) {
-                    Text("Web")
-                        .font(ARILTheme.captionFont)
+                    Toggle(isOn: $state.webSearchEnabled) {
+                        Text("Web")
+                            .font(ARILTheme.captionFont)
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("Enable OpenRouter live web search for this send")
+
+                    Spacer(minLength: 0)
                 }
-                .toggleStyle(.checkbox)
-                .help("Enable OpenRouter live web search for this send")
 
                 Button {
                     state.requestScrollMessagesToBottom()
@@ -107,8 +111,6 @@ struct InputBarView: View {
                 .buttonStyle(.plain)
                 .help("Scroll to the latest message")
                 .accessibilityLabel("Scroll to bottom")
-
-                Spacer()
             }
 
             if !state.pendingAttachments.isEmpty {

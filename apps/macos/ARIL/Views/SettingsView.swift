@@ -32,27 +32,28 @@ struct SettingsView: View {
         }
         .frame(width: 720, height: 700)
         .background(theme.palette.backgroundElevated)
-        .preferredColorScheme(theme.palette.colorScheme)
+        .preferredColorScheme(theme.preferredColorScheme)
         .navigationTitle("Preferences")
         .task {
-            Self.applyWindowChrome(colorScheme: theme.palette.colorScheme)
+            Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
             await state.refreshDatabaseStatus()
         }
         .onAppear {
-            Self.applyWindowChrome(colorScheme: theme.palette.colorScheme)
+            Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
             Task { await state.refreshDatabaseStatus() }
         }
         .onChange(of: theme.option) { _, _ in
-            Self.applyWindowChrome(colorScheme: theme.palette.colorScheme)
+            Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
         }
     }
 
     /// Title + NSAppearance so the Settings window matches the app theme (not system white).
-    private static func applyWindowChrome(colorScheme: ColorScheme) {
+    /// `nil` colorScheme (System theme) clears the override so the window follows macOS.
+    private static func applyWindowChrome(colorScheme: ColorScheme?) {
         DispatchQueue.main.async {
-            let appearance = NSAppearance(
-                named: colorScheme == .dark ? .darkAqua : .aqua
-            )
+            let appearance: NSAppearance? = colorScheme.map {
+                NSAppearance(named: $0 == .dark ? .darkAqua : .aqua)!
+            }
             for window in NSApplication.shared.windows {
                 let title = window.title
                 if title == "Settings"
@@ -829,7 +830,7 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
-                Text("Noir, Slate, Light, and Forest. Applies across the whole client.")
+                Text("System follows macOS light, dark, and Auto. Other options lock a fixed palette. Applies across the whole client.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -1,15 +1,35 @@
 import SwiftUI
+import AppKit
 import Combine
 
 enum AppThemeOption: String, CaseIterable, Identifiable, Codable {
+    case system
     case noir, slate, light, forest
+    case ocean, graphite, sand, dusk, midnight
+
     var id: String { rawValue }
+
     var label: String {
         switch self {
+        case .system: return "System"
         case .noir: return "Noir"
         case .slate: return "Slate"
         case .light: return "Light"
         case .forest: return "Forest"
+        case .ocean: return "Ocean"
+        case .graphite: return "Graphite"
+        case .sand: return "Sand"
+        case .dusk: return "Dusk"
+        case .midnight: return "Midnight"
+        }
+    }
+
+    /// Fixed light/dark for named themes; `nil` means follow macOS.
+    var fixedColorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light, .sand: return .light
+        case .noir, .slate, .forest, .ocean, .graphite, .dusk, .midnight: return .dark
         }
     }
 }
@@ -34,8 +54,10 @@ struct ThemePalette {
     let costFooter: Color
     let colorScheme: ColorScheme
 
-    static func palette(for option: AppThemeOption) -> ThemePalette {
+    static func palette(for option: AppThemeOption, systemIsDark: Bool) -> ThemePalette {
         switch option {
+        case .system:
+            return systemIsDark ? graphitePalette : sandPalette
         case .noir:
             return ThemePalette(
                 background: Color(red: 0.09, green: 0.07, blue: 0.06),
@@ -108,7 +130,107 @@ struct ThemePalette {
                 costFooter: Color(red: 0.85, green: 0.75, blue: 0.35),
                 colorScheme: .dark
             )
+        case .ocean:
+            return ThemePalette(
+                background: Color(red: 0.06, green: 0.11, blue: 0.16),
+                backgroundElevated: Color(red: 0.09, green: 0.15, blue: 0.21),
+                analysisFill: Color(red: 0.10, green: 0.28, blue: 0.36),
+                sidebar: Color(red: 0.04, green: 0.08, blue: 0.12),
+                text: Color(red: 0.88, green: 0.94, blue: 0.96),
+                assistantText: Color(red: 0.55, green: 0.85, blue: 0.90),
+                textMuted: Color(red: 0.55, green: 0.68, blue: 0.74),
+                accent: Color(red: 0.25, green: 0.72, blue: 0.78),
+                accentStrong: Color(red: 0.35, green: 0.85, blue: 0.88),
+                hairline: Color.white.opacity(0.09),
+                inputFill: Color(red: 0.08, green: 0.13, blue: 0.18),
+                danger: Color(red: 0.90, green: 0.42, blue: 0.40),
+                preferredHighlight: Color(red: 0.95, green: 0.72, blue: 0.35),
+                costFooter: Color(red: 0.95, green: 0.72, blue: 0.35),
+                colorScheme: .dark
+            )
+        case .graphite:
+            return graphitePalette
+        case .sand:
+            return sandPalette
+        case .dusk:
+            return ThemePalette(
+                background: Color(red: 0.10, green: 0.08, blue: 0.14),
+                backgroundElevated: Color(red: 0.14, green: 0.11, blue: 0.19),
+                analysisFill: Color(red: 0.22, green: 0.16, blue: 0.30),
+                sidebar: Color(red: 0.07, green: 0.06, blue: 0.11),
+                text: Color(red: 0.92, green: 0.90, blue: 0.96),
+                assistantText: Color(red: 0.78, green: 0.72, blue: 0.92),
+                textMuted: Color(red: 0.68, green: 0.64, blue: 0.76),
+                accent: Color(red: 0.72, green: 0.55, blue: 0.88),
+                accentStrong: Color(red: 0.82, green: 0.65, blue: 0.95),
+                hairline: Color.white.opacity(0.09),
+                inputFill: Color(red: 0.12, green: 0.10, blue: 0.17),
+                danger: Color(red: 0.88, green: 0.40, blue: 0.45),
+                preferredHighlight: Color(red: 0.95, green: 0.70, blue: 0.45),
+                costFooter: Color(red: 0.95, green: 0.70, blue: 0.45),
+                colorScheme: .dark
+            )
+        case .midnight:
+            return ThemePalette(
+                background: Color(red: 0.04, green: 0.06, blue: 0.12),
+                backgroundElevated: Color(red: 0.07, green: 0.10, blue: 0.18),
+                analysisFill: Color(red: 0.10, green: 0.18, blue: 0.36),
+                sidebar: Color(red: 0.03, green: 0.04, blue: 0.09),
+                text: Color(red: 0.90, green: 0.93, blue: 0.98),
+                assistantText: Color(red: 0.60, green: 0.75, blue: 0.95),
+                textMuted: Color(red: 0.55, green: 0.62, blue: 0.75),
+                accent: Color(red: 0.40, green: 0.58, blue: 0.95),
+                accentStrong: Color(red: 0.50, green: 0.68, blue: 1.0),
+                hairline: Color.white.opacity(0.10),
+                inputFill: Color(red: 0.06, green: 0.09, blue: 0.16),
+                danger: Color(red: 0.90, green: 0.38, blue: 0.42),
+                preferredHighlight: Color(red: 0.35, green: 0.85, blue: 0.75),
+                costFooter: Color(red: 0.35, green: 0.85, blue: 0.75),
+                colorScheme: .dark
+            )
         }
+    }
+
+    /// Neutral dark used by Graphite and System (when macOS is dark).
+    private static var graphitePalette: ThemePalette {
+        ThemePalette(
+            background: Color(red: 0.11, green: 0.11, blue: 0.12),
+            backgroundElevated: Color(red: 0.16, green: 0.16, blue: 0.17),
+            analysisFill: Color(red: 0.20, green: 0.22, blue: 0.26),
+            sidebar: Color(red: 0.08, green: 0.08, blue: 0.09),
+            text: Color(red: 0.92, green: 0.92, blue: 0.93),
+            assistantText: Color(red: 0.72, green: 0.78, blue: 0.86),
+            textMuted: Color(red: 0.62, green: 0.62, blue: 0.66),
+            accent: Color(red: 0.55, green: 0.62, blue: 0.72),
+            accentStrong: Color(red: 0.68, green: 0.74, blue: 0.84),
+            hairline: Color.white.opacity(0.10),
+            inputFill: Color(red: 0.14, green: 0.14, blue: 0.15),
+            danger: Color(red: 0.88, green: 0.40, blue: 0.38),
+            preferredHighlight: Color(red: 0.55, green: 0.78, blue: 0.70),
+            costFooter: Color(red: 0.55, green: 0.78, blue: 0.70),
+            colorScheme: .dark
+        )
+    }
+
+    /// Warm light used by Sand and System (when macOS is light).
+    private static var sandPalette: ThemePalette {
+        ThemePalette(
+            background: Color(red: 0.97, green: 0.96, blue: 0.93),
+            backgroundElevated: Color(red: 1.0, green: 0.99, blue: 0.97),
+            analysisFill: Color(red: 0.90, green: 0.88, blue: 0.80),
+            sidebar: Color(red: 0.94, green: 0.93, blue: 0.90),
+            text: Color(red: 0.18, green: 0.16, blue: 0.14),
+            assistantText: Color(red: 0.22, green: 0.34, blue: 0.42),
+            textMuted: Color(red: 0.45, green: 0.42, blue: 0.38),
+            accent: Color(red: 0.55, green: 0.40, blue: 0.22),
+            accentStrong: Color(red: 0.65, green: 0.48, blue: 0.26),
+            hairline: Color.black.opacity(0.08),
+            inputFill: Color(red: 0.99, green: 0.98, blue: 0.96),
+            danger: Color(red: 0.78, green: 0.22, blue: 0.18),
+            preferredHighlight: Color(red: 0.20, green: 0.48, blue: 0.40),
+            costFooter: Color(red: 0.18, green: 0.45, blue: 0.38),
+            colorScheme: .light
+        )
     }
 }
 
@@ -117,16 +239,38 @@ final class ThemeStore: ObservableObject {
     @Published var option: AppThemeOption {
         didSet {
             UserDefaults.standard.set(option.rawValue, forKey: "aril.theme")
-            palette = ThemePalette.palette(for: option)
+            refreshPalette()
         }
     }
     @Published private(set) var palette: ThemePalette
+
+    /// `nil` when Theme is System — SwiftUI / windows follow macOS light·dark·auto.
+    var preferredColorScheme: ColorScheme? { option.fixedColorScheme }
+
+    private var appearanceObservation: NSKeyValueObservation?
 
     init() {
         let raw = UserDefaults.standard.string(forKey: "aril.theme") ?? AppThemeOption.noir.rawValue
         let opt = AppThemeOption(rawValue: raw) ?? .noir
         option = opt
-        palette = ThemePalette.palette(for: opt)
+        palette = ThemePalette.palette(for: opt, systemIsDark: Self.macOSIsDark)
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.refreshPalette()
+            }
+        }
+    }
+
+    deinit {
+        appearanceObservation?.invalidate()
+    }
+
+    func refreshPalette() {
+        palette = ThemePalette.palette(for: option, systemIsDark: Self.macOSIsDark)
+    }
+
+    static var macOSIsDark: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 }
 

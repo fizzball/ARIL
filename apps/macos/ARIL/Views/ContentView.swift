@@ -45,8 +45,12 @@ struct ContentView: View {
             }
         }
         .background(theme.palette.background)
+        .background(WindowTitleVisibilityHidden())
         .animation(.easeInOut(duration: 0.22), value: state.activeToolPanel)
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                ARILTitleWordmarkView()
+            }
             ToolbarItem(placement: .principal) {
                 SystemMetricsTitleView(metrics: systemMetrics)
             }
@@ -88,7 +92,7 @@ struct ContentView: View {
                 .help("Quit ARIL")
             }
         }
-        .preferredColorScheme(theme.palette.colorScheme)
+        .preferredColorScheme(theme.preferredColorScheme)
         .alert(
             "Budget warning",
             isPresented: Binding(

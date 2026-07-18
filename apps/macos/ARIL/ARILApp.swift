@@ -43,7 +43,7 @@ struct ARILApp: App {
             SettingsView()
                 .environmentObject(appState)
                 .environmentObject(theme)
-                .preferredColorScheme(theme.palette.colorScheme)
+                .preferredColorScheme(theme.preferredColorScheme)
         }
     }
 }
