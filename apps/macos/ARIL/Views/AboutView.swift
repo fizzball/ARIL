@@ -73,13 +73,15 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.2", changes: [
+            "Assistant replies render Mermaid, SVG, and ASCII diagrams in-chat (fenced mermaid/svg/ascii blocks, inline SVG, SVG image links)",
+            "Slash command `/update` checks GitHub for a newer release and can download the DMG into /Applications (relaunch)",
+        ]),
         ChangelogEntry(version: "0.4.1", changes: [
             "Sidebar shows a per-session context-usage bar; warns before a session hits the model context limit with the option to start a new session",
             "Context limits are read from the gateway (/v1/meta/limits) so the client stays in sync",
             "Starts each launch on a fresh session by default to reduce context exhaustion; opt into reopening your last session in Preferences → Startup",
             "New sessions you never send a prompt into are discarded on quit; sidebar header renamed to 'Recent Sessions'",
-            "Assistant replies render Mermaid, SVG, and ASCII diagrams in-chat (fenced mermaid/svg/ascii blocks, inline SVG, SVG image links)",
-            "Slash command `/update` checks GitHub for a newer release and can download the DMG into /Applications (relaunch)",
             "Judge panels fill the chat width/height evenly and blank the transcript while comparing, so cards stay readable",
             "Reply cost footer shows OpenRouter in/out token counts: tokens used N / M: cost = $…",
             "Status footer health-polls gateway, database, and OpenRouter every 20s (with wake-on-failure) so idle no longer leaves them stuck red",
