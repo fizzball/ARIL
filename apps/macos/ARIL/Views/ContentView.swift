@@ -135,6 +135,22 @@ struct ContentView: View {
         } message: {
             Text("This permanently deletes ALL chat sessions and every Learning / judged database entry. This cannot be undone.")
         }
+        .alert(
+            "Upgrade ARIL?",
+            isPresented: Binding(
+                get: { state.updateConfirmMessage != nil },
+                set: { if !$0 { state.respondToUpdateConfirm(false) } }
+            )
+        ) {
+            Button("Not now", role: .cancel) {
+                state.respondToUpdateConfirm(false)
+            }
+            Button("Upgrade") {
+                state.respondToUpdateConfirm(true)
+            }
+        } message: {
+            Text(state.updateConfirmMessage ?? "")
+        }
         .task {
             systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.

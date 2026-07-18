@@ -184,73 +184,7 @@ private struct MessageBubble: View {
     }
 }
 
-/// Renders assistant text plus embedded markdown images (`![alt](url)`), including data URLs.
-private struct AssistantMarkdownContent: View {
-    let content: String
-    let textColor: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(MessageContentParser.segments(from: content).enumerated()), id: \.offset) { _, segment in
-                switch segment {
-                case .text(let text):
-                    Text(text)
-                        .font(ARILTheme.bodyFont)
-                        .foregroundStyle(textColor)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                case .image(let urlString, let alt):
-                    MarkdownImageView(urlString: urlString, alt: alt)
-                }
-            }
-        }
-    }
-}
-
-private enum MessageSegment {
-    case text(String)
-    case image(url: String, alt: String)
-}
-
-private enum MessageContentParser {
-    private static let imagePattern = try! NSRegularExpression(
-        pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#,
-        options: []
-    )
-
-    static func segments(from content: String) -> [MessageSegment] {
-        let ns = content as NSString
-        let matches = imagePattern.matches(in: content, range: NSRange(location: 0, length: ns.length))
-        guard !matches.isEmpty else {
-            return content.isEmpty ? [] : [.text(content)]
-        }
-
-        var out: [MessageSegment] = []
-        var cursor = 0
-        for match in matches {
-            if match.range.location > cursor {
-                let before = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !before.isEmpty {
-                    out.append(.text(before))
-                }
-            }
-            let alt = ns.substring(with: match.range(at: 1))
-            let url = ns.substring(with: match.range(at: 2))
-            out.append(.image(url: url, alt: alt))
-            cursor = match.range.location + match.range.length
-        }
-        if cursor < ns.length {
-            let after = ns.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !after.isEmpty {
-                out.append(.text(after))
-            }
-        }
-        return out
-    }
-}
-
-private struct MarkdownImageView: View {
+struct MarkdownImageView: View {
     @EnvironmentObject private var theme: ThemeStore
     let urlString: String
     let alt: String

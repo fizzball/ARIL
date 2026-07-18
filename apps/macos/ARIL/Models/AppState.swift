@@ -2045,6 +2045,7 @@ final class AppState: ObservableObject {
     /// `paletteCommands` to reflect whether their MCP server is enabled.
     static let slashCommands: [SlashCommand] = [
         SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, Nmap, code scan, MCP, latest release"),
+        SlashCommand(id: "/update", summary: "Check for a newer ARIL release and install it to /Applications"),
         SlashCommand(id: "/nmap", summary: "Example Nmap prompts — port, host, and vuln scans"),
         SlashCommand(id: "/codescan", summary: "Example Semgrep prompts — scan a path or inline code"),
         SlashCommand(id: "/clear", summary: "Clear the current chat transcript"),
@@ -2158,6 +2159,11 @@ final class AppState: ObservableObject {
             draft = ""
             Task { await runStatusCommand() }
             return true
+        case "/update", "/upgrade":
+            recordPromptHistory(trimmed)
+            draft = ""
+            Task { await runUpdateCommand() }
+            return true
         case "/help", "/?":
             recordPromptHistory(trimmed)
             draft = ""
@@ -2191,6 +2197,15 @@ final class AppState: ObservableObject {
 
     /// Backing flag for the `/reset` confirmation alert (presented by ContentView).
     @Published var showResetConfirmation = false
+
+    /// `/update` confirmation — non-nil message shows the upgrade alert.
+    @Published var updateConfirmMessage: String?
+    /// Pending release waiting on the upgrade alert.
+    private var pendingUpdateRelease: AppUpdateService.LatestRelease?
+    /// True while download/install is in progress (disables re-entry).
+    @Published var isUpdatingApp = false
+    /// Note id for in-place progress updates during `/update`.
+    private var updateNoteID: UUID?
 
     /// Wipe every session and all Learning/judgement records. Destructive; only run
     /// after the user confirms the `/reset` warning.
@@ -2346,17 +2361,116 @@ final class AppState: ObservableObject {
         // Latest release (GitHub)
         let current = appVersion
         if let latest = await fetchLatestReleaseTag() {
-            let latestClean = latest.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-            if latestClean == current {
+            let latestClean = latest.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+            if AppUpdateService.isNewer(latestClean, than: current) {
+                lines.append("- **Version:** ⚠️ \(current) installed · latest is \(latestClean) — run `/update` or https://github.com/fizzball/ARIL/releases/latest")
+            } else if AppUpdateService.compareVersions(latestClean, current) == .orderedSame {
                 lines.append("- **Version:** ✅ \(current) (latest)")
             } else {
-                lines.append("- **Version:** ⚠️ \(current) installed · latest is \(latestClean) — https://github.com/fizzball/ARIL/releases/latest")
+                // Running newer than published (dev / local build).
+                lines.append("- **Version:** \(current) (ahead of published \(latestClean))")
             }
         } else {
             lines.append("- **Version:** \(current) (latest release check unavailable)")
         }
 
         updateLastAssistantNote(id: noteID.id, text: lines.joined(separator: "\n"))
+    }
+
+    /// `/update`: check GitHub for a newer DMG and prompt to install into `/Applications`.
+    func runUpdateCommand() async {
+        if isUpdatingApp {
+            appendLocalAssistantNote("An update is already in progress.")
+            return
+        }
+        ensureSession()
+        guard let sid = selectedSessionID else { return }
+        let note = ChatMessage(role: .assistant, content: "Checking GitHub for the latest ARIL release…")
+        updateNoteID = note.id
+        updateSession(sid) { $0.messages.append(note) }
+
+        let current = appVersion
+        do {
+            let release = try await AppUpdateService.fetchLatestRelease()
+            if !AppUpdateService.isNewer(release.version, than: current) {
+                let text: String
+                if AppUpdateService.compareVersions(release.version, current) == .orderedSame {
+                    text = "**ARIL update**\n\nYou’re on **\(current)** — that’s the latest release."
+                } else {
+                    text = "**ARIL update**\n\nYou’re on **\(current)**, which is newer than the latest published release (**\(release.version)**). No install needed."
+                }
+                updateLastAssistantNote(id: note.id, text: text)
+                updateNoteID = nil
+                return
+            }
+            updateLastAssistantNote(
+                id: note.id,
+                text: "**ARIL update**\n\nVersion **\(release.version)** is available (you have **\(current)**).\n\nConfirm in the dialog to download \(release.dmgName) and install it to `/Applications`."
+            )
+            pendingUpdateRelease = release
+            updateConfirmMessage =
+                "ARIL \(release.version) is available (you have \(current)).\n\nDownload \(release.dmgName) and replace /Applications/ARIL.app? ARIL will quit and relaunch when the install finishes."
+        } catch {
+            updateLastAssistantNote(
+                id: note.id,
+                text: "**ARIL update**\n\nCould not check for updates: \(error.localizedDescription)\n\nReleases: https://github.com/fizzball/ARIL/releases/latest"
+            )
+            updateNoteID = nil
+        }
+    }
+
+    func respondToUpdateConfirm(_ upgrade: Bool) {
+        updateConfirmMessage = nil
+        if upgrade {
+            guard let release = pendingUpdateRelease else { return }
+            pendingUpdateRelease = nil
+            Task { await performAppUpdate(release: release) }
+            return
+        }
+        // Ignore dismiss-after-accept (alert binding may fire false after Upgrade).
+        guard pendingUpdateRelease != nil else { return }
+        pendingUpdateRelease = nil
+        if let id = updateNoteID {
+            updateLastAssistantNote(id: id, text: "**ARIL update**\n\nUpgrade cancelled.")
+        }
+        updateNoteID = nil
+    }
+
+    private func performAppUpdate(release: AppUpdateService.LatestRelease) async {
+        isUpdatingApp = true
+        let noteID = updateNoteID
+        do {
+            try await AppUpdateService.downloadAndScheduleInstall(release: release) { [weak self] message in
+                guard let self, let noteID else { return }
+                self.updateLastAssistantNote(
+                    id: noteID,
+                    text: "**ARIL update** → \(release.version)\n\n\(message)"
+                )
+            }
+            if let noteID {
+                updateLastAssistantNote(
+                    id: noteID,
+                    text: "**ARIL update** → \(release.version)\n\nInstaller started. Quitting so `/Applications/ARIL.app` can be replaced…"
+                )
+            }
+            updateNoteID = nil
+            isUpdatingApp = false
+            shutdown()
+            NSApplication.shared.terminate(nil)
+        } catch {
+            isUpdatingApp = false
+            let msg = error.localizedDescription
+            if let noteID {
+                updateLastAssistantNote(
+                    id: noteID,
+                    text: "**ARIL update** failed\n\n\(msg)\n\nYou can install manually from https://github.com/fizzball/ARIL/releases/latest"
+                )
+            } else {
+                appendLocalAssistantNote("**ARIL update** failed: \(msg)")
+            }
+            updateNoteID = nil
+            lastError = msg
+        }
     }
 
     /// Current app marketing version (e.g. "0.4.0").
@@ -2366,18 +2480,7 @@ final class AppState: ObservableObject {
 
     /// Fetch the latest ARIL release tag from GitHub (nil on any failure).
     private func fetchLatestReleaseTag() async -> String? {
-        guard let url = URL(string: "https://api.github.com/repos/fizzball/ARIL/releases/latest") else { return nil }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 6
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        do {
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-            return obj["tag_name"] as? String
-        } catch {
-            return nil
-        }
+        (try? await AppUpdateService.fetchLatestRelease())?.tag
     }
 
     func send(promptOverride: String? = nil) {

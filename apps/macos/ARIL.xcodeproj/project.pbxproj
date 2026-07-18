@@ -20,6 +20,7 @@
 		5893D8DC9ED804F866D51509 /* MCPServerEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3DA2E4C5C4C7C19C7831175 /* MCPServerEditorView.swift */; };
 		5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */; };
 		647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */; };
+		6AD417ABCEA0AEBEA62851B6 /* MessageDiagramSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C722DD5096194447CF6AFD /* MessageDiagramSupport.swift */; };
 		6D5BCBB207619C3C148D2E07 /* NmapServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1043C54877BC10229B71AC9 /* NmapServerManager.swift */; };
 		78671E9ACB7E7353C329A250 /* SystemMetricsTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */; };
 		7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */; };
@@ -27,6 +28,7 @@
 		822BC840B98AADC146B3C60B /* OpenRouterModelBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */; };
 		8733524BC8975581135E1ECD /* ToolFlyoutPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C74640C08B47F41FFFDDC233 /* ToolFlyoutPanel.swift */; };
 		8CC21960279B31457BD24A9C /* ARILAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */; };
+		8EFF02DB35D2995E3A97E9B0 /* AppUpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8725868E4D67650FF71D364A /* AppUpdateService.swift */; };
 		90AE6789C0D39645F031E68E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 275830288881563C30E79654 /* Assets.xcassets */; };
 		9252747744954B4396BEC2B4 /* ARILGhostMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117873442667CB37A568D620 /* ARILGhostMark.swift */; };
 		9604DF986EC8D4EFE0888373 /* EmptyHeroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */; };
@@ -62,6 +64,7 @@
 		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterModelBrowserView.swift; sourceTree = "<group>"; };
 		796899604D33C1CBC8518B48 /* ARILTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILTheme.swift; sourceTree = "<group>"; };
+		8725868E4D67650FF71D364A /* AppUpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateService.swift; sourceTree = "<group>"; };
 		9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusFooterView.swift; sourceTree = "<group>"; };
 		9ECDA663B4CC8289E453914E /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILAPIClient.swift; sourceTree = "<group>"; };
@@ -81,6 +84,7 @@
 		F569C76A392C4EAF2B396EB7 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogAnalysisView.swift; sourceTree = "<group>"; };
 		F5C79A42AE9A3AF0E679ED90 /* EmptyHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyHeroView.swift; sourceTree = "<group>"; };
+		F6C722DD5096194447CF6AFD /* MessageDiagramSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageDiagramSupport.swift; sourceTree = "<group>"; };
 		F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBarView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -114,6 +118,7 @@
 			isa = PBXGroup;
 			children = (
 				464CC3D69B6588E73D3EF50F /* APIModels.swift */,
+				8725868E4D67650FF71D364A /* AppUpdateService.swift */,
 				A90E1ABAD8C8DA97F3329ACE /* ARILAPIClient.swift */,
 				0443347766BFCB9819E1A606 /* CodeScanServerManager.swift */,
 				48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */,
@@ -140,6 +145,7 @@
 				32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */,
 				F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */,
 				D3DA2E4C5C4C7C19C7831175 /* MCPServerEditorView.swift */,
+				F6C722DD5096194447CF6AFD /* MessageDiagramSupport.swift */,
 				1416251B652DE7DE8C09313A /* MessageListView.swift */,
 				F160030F13576729A8C964D0 /* ModelPopularityView.swift */,
 				750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */,
@@ -259,6 +265,7 @@
 				C587B43D4CB59922264CEB43 /* ARILTheme.swift in Sources */,
 				3F2352DCF92B7652FD578D2C /* AboutView.swift in Sources */,
 				17A3C70916F018539718B02E /* AppState.swift in Sources */,
+				8EFF02DB35D2995E3A97E9B0 /* AppUpdateService.swift in Sources */,
 				C9EEFE93AA37F8AEA8B378A6 /* ChatDetailView.swift in Sources */,
 				CEAD334C360E68FB903205A6 /* CodeScanServerManager.swift in Sources */,
 				E5676938CCEC2F485B4CC994 /* CompareResultsView.swift in Sources */,
@@ -272,6 +279,7 @@
 				7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */,
 				F774A3387117939F173AD06C /* MCPKeychainStore.swift in Sources */,
 				5893D8DC9ED804F866D51509 /* MCPServerEditorView.swift in Sources */,
+				6AD417ABCEA0AEBEA62851B6 /* MessageDiagramSupport.swift in Sources */,
 				D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */,
 				80D522E4978591C865C52D27 /* ModelPopularityView.swift in Sources */,
 				EF19B318BFD33393131FB656 /* Models.swift in Sources */,
