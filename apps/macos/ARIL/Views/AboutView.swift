@@ -73,6 +73,10 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.3", changes: [
+            "Mermaid diagrams render reliably in-chat (classic WebKit loader); models are told ARIL can display diagrams so they stop pointing at mermaid.live",
+            "Sidebar search matches session titles and message content, with highlighted hits and a short matching snippet",
+        ]),
         ChangelogEntry(version: "0.4.2", changes: [
             "Assistant replies render Mermaid, SVG, and ASCII diagrams in-chat (fenced mermaid/svg/ascii blocks, inline SVG, SVG image links)",
             "Slash command `/update` checks GitHub for a newer release and can download the DMG into /Applications (relaunch)",

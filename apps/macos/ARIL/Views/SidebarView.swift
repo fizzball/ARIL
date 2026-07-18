@@ -8,7 +8,7 @@ struct SidebarView: View {
     private var filtered: [ChatSession] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return state.sessions }
-        return state.sessions.filter { $0.title.localizedCaseInsensitiveContains(q) }
+        return state.sessions.filter { $0.matchesSearch(q) }
     }
 
     var body: some View {
@@ -34,7 +34,7 @@ struct SidebarView: View {
             .padding(.top, 12)
             .padding(.bottom, 10)
 
-            TextField("Search sessions…", text: $query)
+            TextField("Search sessions & content…", text: $query)
                 .textFieldStyle(.plain)
                 .padding(8)
                 .background(theme.palette.inputFill)
@@ -47,7 +47,9 @@ struct SidebarView: View {
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.textMuted)
                 Spacer()
-                Text("\(state.sessions.count)")
+                Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                     ? "\(state.sessions.count)"
+                     : "\(filtered.count)/\(state.sessions.count)")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.textMuted)
                     .monospacedDigit()
@@ -67,16 +69,17 @@ struct SidebarView: View {
                             .padding(.vertical, 8)
                     } else {
                         ForEach(filtered, id: \.id) { session in
-                            SessionRow(sessionID: session.id)
+                            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                            SessionRow(sessionID: session.id, searchQuery: q)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(
-                                            state.selectedSessionID == session.id
-                                                ? theme.palette.accent.opacity(0.18)
-                                                : Color.clear
-                                        )
+                                        .fill(rowBackground(for: session.id, query: q))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(contentMatchHighlight(for: session, query: q), lineWidth: 1)
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
@@ -102,12 +105,36 @@ struct SidebarView: View {
             state.selectedSessionID = ids.first
         }
     }
+
+    private func rowBackground(for id: UUID, query: String) -> Color {
+        if state.selectedSessionID == id {
+            return theme.palette.accent.opacity(0.18)
+        }
+        guard !query.isEmpty,
+              let session = state.sessions.first(where: { $0.id == id }),
+              session.matchesSearch(query) else {
+            return Color.clear
+        }
+        return theme.palette.preferredHighlight.opacity(0.10)
+    }
+
+    private func contentMatchHighlight(for session: ChatSession, query: String) -> Color {
+        guard !query.isEmpty, state.selectedSessionID != session.id else { return .clear }
+        // Ring when the hit is in message body (not only the title).
+        if session.title.localizedCaseInsensitiveContains(query) { return .clear }
+        if session.messagesContain(query) {
+            return theme.palette.preferredHighlight.opacity(0.55)
+        }
+        return .clear
+    }
 }
 
 private struct SessionRow: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
     let sessionID: UUID
+    /// Active sidebar search text (empty when not filtering).
+    var searchQuery: String = ""
     @State private var hovering = false
 
     private var live: ChatSession? {
@@ -117,7 +144,7 @@ private struct SessionRow: View {
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(live?.title ?? "Session")
+                titleLabel
                     .font(ARILTheme.bodyFont)
                     .foregroundStyle(theme.palette.text)
                     .lineLimit(1)
@@ -129,6 +156,14 @@ private struct SessionRow: View {
                         .monospacedDigit()
                 }
                 .font(ARILTheme.captionFont)
+
+                if let snippet = matchSnippet {
+                    Text(snippet)
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.palette.preferredHighlight)
+                        .lineLimit(2)
+                        .help(snippet)
+                }
 
                 if let live, !live.messages.isEmpty {
                     let fraction = live.contextFraction
@@ -158,6 +193,16 @@ private struct SessionRow: View {
         }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder
+    private var titleLabel: some View {
+        Text(live?.title ?? "Session")
+    }
+
+    private var matchSnippet: String? {
+        guard !searchQuery.isEmpty, let live else { return nil }
+        return live.searchSnippet(for: searchQuery)
     }
 
     private var subtitlePrefix: String {

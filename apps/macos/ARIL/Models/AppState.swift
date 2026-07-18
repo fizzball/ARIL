@@ -257,7 +257,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.2"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.3"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "52"
         return "\(short) (\(build))"
     }
@@ -590,9 +590,8 @@ final class AppState: ObservableObject {
 
         var projected = session.contextChars
         projected += min(Self.sanitizeContentForAPI(newUserText).count, ChatSession.maxMessageChars)
-        if systemPromptEnabled {
-            let sp = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sp.isEmpty { projected += sp.count }
+        if let system = activeSystemPromptForAPI {
+            projected += system.count
         }
 
         guard projected >= ChatSession.maxContextChars else { return true }
@@ -712,11 +711,19 @@ final class AppState: ObservableObject {
         Self.estimateTokens(systemPrompt)
     }
 
+    /// Always-on note so models emit Mermaid fences instead of “I can’t render diagrams”.
+    static let platformCapabilityNote = """
+        ARIL renders Mermaid, SVG, and ASCII diagrams directly in this chat UI. When the user asks for a diagram or flowchart, emit a complete fenced code block (for example ```mermaid … ```). Do not say you cannot display graphics, and do not tell the user to paste into mermaid.live, VS Code, or other external tools.
+        """
+
     /// System prompt text to send with preview/chat when the feature is enabled.
     var activeSystemPromptForAPI: String? {
-        guard systemPromptEnabled else { return nil }
-        let trimmed = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        var parts: [String] = [Self.platformCapabilityNote]
+        if systemPromptEnabled {
+            let trimmed = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { parts.append(trimmed) }
+        }
+        return parts.joined(separator: "\n\n")
     }
 
     /// Build API messages for a send, injecting the global system prompt when enabled.
@@ -727,10 +734,9 @@ final class AppState: ObservableObject {
         }
         // Prefer a single leading system turn (Claude.md-style); drop any stored system noise.
         out.removeAll { $0.role == "system" }
-        guard systemPromptEnabled else { return out }
-        let prompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return out }
-        out.insert(APIChatMessage(role: "system", content: prompt), at: 0)
+        if let system = activeSystemPromptForAPI {
+            out.insert(APIChatMessage(role: "system", content: system), at: 0)
+        }
         return out
     }
 

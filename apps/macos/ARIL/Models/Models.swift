@@ -211,6 +211,43 @@ struct ChatSession: Identifiable, Hashable, Codable {
         guard Self.maxContextChars > 0 else { return 0 }
         return min(1.0, Double(contextChars) / Double(Self.maxContextChars))
     }
+
+    /// Title or any message body matches `query` (case-insensitive).
+    func matchesSearch(_ query: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return true }
+        if title.localizedCaseInsensitiveContains(q) { return true }
+        return messagesContain(q)
+    }
+
+    func messagesContain(_ query: String) -> Bool {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return false }
+        return messages.contains { message in
+            let body = ChatMessage.stripActualCostFooter(message.content)
+            return body.localizedCaseInsensitiveContains(q)
+        }
+    }
+
+    /// Short excerpt around the first content hit for sidebar display.
+    func searchSnippet(for query: String, radius: Int = 42) -> String? {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return nil }
+        for message in messages {
+            let body = ChatMessage.stripActualCostFooter(message.content)
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let range = body.range(of: q, options: .caseInsensitive) else { continue }
+            let start = body.index(range.lowerBound, offsetBy: -radius, limitedBy: body.startIndex) ?? body.startIndex
+            let end = body.index(range.upperBound, offsetBy: radius, limitedBy: body.endIndex) ?? body.endIndex
+            var snippet = String(body[start..<end])
+            if start > body.startIndex { snippet = "…" + snippet }
+            if end < body.endIndex { snippet += "…" }
+            let who = message.role == .user ? "You" : "ARIL"
+            return "\(who): \(snippet)"
+        }
+        return nil
+    }
 }
 
 struct ChatMessage: Identifiable, Hashable, Codable {

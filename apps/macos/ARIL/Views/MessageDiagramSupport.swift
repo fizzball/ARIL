@@ -18,9 +18,9 @@ enum MessageContentParser {
         options: []
     )
 
-    /// Complete fenced block: optional language on the opening fence.
+    /// Complete fenced block; tolerates indent and CRLF (common in model output).
     private static let fencePattern = try! NSRegularExpression(
-        pattern: #"```([^\n`]*)\n([\s\S]*?)```"#,
+        pattern: #"(?m)^[ \t]*```([^\n`]*)\r?\n([\s\S]*?)^[ \t]*```[ \t]*$"#,
         options: []
     )
 
@@ -57,23 +57,37 @@ enum MessageContentParser {
         }
 
         // 1) Complete fenced code blocks (mermaid / svg / ascii / auto-detect).
-        for match in fencePattern.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
-            guard match.numberOfRanges >= 3 else { continue }
-            let full = match.range
-            guard claim(full) else { continue }
-            let lang = ns.substring(with: match.range(at: 1))
+        func considerFence(full: NSRange, langRange: NSRange, bodyRange: NSRange) {
+            guard claim(full) else { return }
+            let lang = ns.substring(with: langRange)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            let body = ns.substring(with: match.range(at: 2))
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
-            guard !body.isEmpty else { continue }
-
+            let body = ns.substring(with: bodyRange)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\n\r"))
+            guard !body.isEmpty else {
+                claimed.remove(integersIn: full.location ..< (full.location + full.length))
+                return
+            }
             if let kind = classifyFence(lang: lang, body: body) {
                 hits.append(Hit(range: full, segment: kind))
             } else {
-                // Leave ordinary code fences as plain text (including the fences).
                 claimed.remove(integersIn: full.location ..< (full.location + full.length))
             }
+        }
+
+        for match in fencePattern.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
+            guard match.numberOfRanges >= 3 else { continue }
+            considerFence(full: match.range, langRange: match.range(at: 1), bodyRange: match.range(at: 2))
+        }
+
+        // Fallback: fences not at line start (some models indent or wrap oddly).
+        let looseFence = try! NSRegularExpression(
+            pattern: #"```([^\n`]*)\r?\n([\s\S]*?)```"#,
+            options: []
+        )
+        for match in looseFence.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
+            guard match.numberOfRanges >= 3 else { continue }
+            considerFence(full: match.range, langRange: match.range(at: 1), bodyRange: match.range(at: 2))
         }
 
         // 2) Inline <svg>…</svg> not already inside a claimed fence.
@@ -426,6 +440,8 @@ enum MermaidHTMLBuilder {
         let theme = dark ? "dark" : "default"
         let bg = dark ? "#1a1a1a" : "#ffffff"
         let fg = dark ? "#e8e8e8" : "#1a1a1a"
+        // Use the classic UMD build (not ES modules). `loadHTMLString` + `import`
+        // from a CDN reliably fails with a null/opaque origin in WKWebView.
         return """
         <!DOCTYPE html>
         <html>
@@ -435,38 +451,69 @@ enum MermaidHTMLBuilder {
         <style>
           html, body { margin: 0; padding: 8px; background: \(bg); color: \(fg);
             font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }
-          #wrap { width: 100%; }
-          .mermaid { display: flex; justify-content: center; }
+          #wrap { width: 100%; display: flex; justify-content: center; }
+          #wrap svg { max-width: 100%; height: auto; }
           .err { color: #c44; font: 12px/1.4 -apple-system, sans-serif; padding: 8px; white-space: pre-wrap; }
         </style>
-        <script type="module">
-          import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-          const source = \(escaped);
-          mermaid.initialize({
-            startOnLoad: false,
-            theme: "\(theme)",
-            securityLevel: "strict",
-            fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif"
-          });
-          const root = document.getElementById("wrap");
-          try {
-            const id = "mmd-" + Math.random().toString(36).slice(2);
-            const { svg } = await mermaid.render(id, source);
-            root.innerHTML = svg;
-          } catch (e) {
-            root.innerHTML = '<div class="err">Mermaid render failed: ' +
-              String(e && e.message ? e.message : e) + '</div>';
-            window.webkit?.messageHandlers?.arilDiagram?.postMessage({
-              error: String(e && e.message ? e.message : e), height: 80
-            });
+        <script>
+          function report(h, err) {
+            const payload = { height: h || 120 };
+            if (err) payload.error = err;
+            try { window.webkit.messageHandlers.arilDiagram.postMessage(payload); } catch (_) {}
           }
-          requestAnimationFrame(() => {
-            const h = Math.ceil(document.documentElement.scrollHeight || document.body.scrollHeight || 160);
-            window.webkit?.messageHandlers?.arilDiagram?.postMessage({ height: h });
-          });
+          function fail(msg) {
+            var wrap = document.getElementById("wrap");
+            if (wrap) wrap.innerHTML = '<div class="err">' + msg + '</div>';
+            report(80, msg);
+          }
+        </script>
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
+                onerror="fail('Could not load Mermaid library (network required).')"></script>
+        <script>
+          const source = \(escaped);
+          function measure() {
+            const wrap = document.getElementById("wrap");
+            const h = Math.ceil(
+              Math.max(
+                document.documentElement.scrollHeight || 0,
+                document.body.scrollHeight || 0,
+                wrap ? wrap.scrollHeight : 0
+              ) || 160
+            );
+            report(h);
+          }
+          async function run() {
+            if (typeof mermaid === "undefined") {
+              fail("Mermaid library did not load.");
+              return;
+            }
+            try {
+              mermaid.initialize({
+                startOnLoad: false,
+                theme: "\(theme)",
+                securityLevel: "strict",
+                fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif"
+              });
+              const id = "mmd-" + Math.random().toString(36).slice(2);
+              const out = await mermaid.render(id, source);
+              document.getElementById("wrap").innerHTML = out.svg || out;
+              requestAnimationFrame(function () {
+                measure();
+                setTimeout(measure, 80);
+                setTimeout(measure, 300);
+              });
+            } catch (e) {
+              fail("Mermaid render failed: " + (e && e.message ? e.message : e));
+            }
+          }
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", run);
+          } else {
+            run();
+          }
         </script>
         </head>
-        <body><div id="wrap" class="mermaid"></div></body>
+        <body><div id="wrap"></div></body>
         </html>
         """
     }
@@ -537,6 +584,8 @@ struct DiagramWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = true
+        // Allow CDN scripts when loading from a file:// staging document.
+        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
         let uc = config.userContentController
         uc.add(context.coordinator.handler, name: "arilDiagram")
         let web = WKWebView(frame: .zero, configuration: config)
@@ -548,7 +597,7 @@ struct DiagramWebView: NSViewRepresentable {
         }
         #endif
         context.coordinator.webView = web
-        web.loadHTMLString(html, baseURL: URL(string: "https://cdn.jsdelivr.net"))
+        context.coordinator.load(html: html, into: web)
         return web
     }
 
@@ -556,7 +605,7 @@ struct DiagramWebView: NSViewRepresentable {
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             errorText = nil
-            webView.loadHTMLString(html, baseURL: URL(string: "https://cdn.jsdelivr.net"))
+            context.coordinator.load(html: html, into: webView)
         }
     }
 
@@ -570,6 +619,7 @@ struct DiagramWebView: NSViewRepresentable {
         var webView: WKWebView?
         private var heightBinding: Binding<CGFloat>
         private var errorBinding: Binding<String?>
+        private var stagingDir: URL?
 
         init(height: Binding<CGFloat>, errorText: Binding<String?>) {
             heightBinding = height
@@ -589,12 +639,32 @@ struct DiagramWebView: NSViewRepresentable {
             }
         }
 
+        /// Stage HTML on disk and load via `file://` so `<script src=https…>` works reliably
+        /// (unlike `loadHTMLString`, which often blocks or breaks CDN / module loads).
+        func load(html: String, into webView: WKWebView) {
+            lastHTML = html
+            do {
+                let dir = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("aril-diagram-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let file = dir.appendingPathComponent("diagram.html")
+                try html.write(to: file, atomically: true, encoding: .utf8)
+                if let old = stagingDir {
+                    try? FileManager.default.removeItem(at: old)
+                }
+                stagingDir = dir
+                webView.loadFileURL(file, allowingReadAccessTo: dir)
+            } catch {
+                // Fallback — may still fail to pull Mermaid from the CDN.
+                webView.loadHTMLString(html, baseURL: URL(string: "https://cdn.jsdelivr.net/"))
+            }
+        }
+
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
-            // Allow initial document + CDN module scripts; block top-level link clicks out.
             if navigationAction.navigationType == .linkActivated {
                 decisionHandler(.cancel)
                 return
