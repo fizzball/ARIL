@@ -23,26 +23,29 @@ struct CompareResultsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(judgeBanner)
                 .font(ARILTheme.captionFont)
                 .foregroundStyle(theme.palette.accent)
-                .padding(.horizontal, 28)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(results) { result in
-                        CompareCard(
-                            result: result,
-                            breakdown: scores[result.model] ?? .zero,
-                            isBestES: bestESModels.contains(result.model)
-                        )
-                    }
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(results) { result in
+                    CompareCard(
+                        result: result,
+                        breakdown: scores[result.model] ?? .zero,
+                        isBestES: bestESModels.contains(result.model)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 8)
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(theme.palette.background)
     }
 }
 
@@ -115,12 +118,15 @@ private struct CompareCard: View {
                         .foregroundStyle(theme.palette.text)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
                 }
-                .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 180, alignment: .top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(theme.palette.background.opacity(0.35))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(theme.palette.hairline, lineWidth: 1)
                 )
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Response category")
@@ -172,7 +178,7 @@ private struct CompareCard: View {
             .disabled(result.error != nil || result.content.isEmpty)
         }
         .padding(12)
-        .frame(width: 300, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(theme.palette.backgroundElevated)
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)

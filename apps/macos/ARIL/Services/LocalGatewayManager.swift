@@ -119,6 +119,8 @@ final class LocalGatewayManager: ObservableObject {
         proc.arguments = launch.arguments
         proc.currentDirectoryURL = launch.workingDirectory
         proc.environment = gatewayEnvironment()
+        // Prefer staying responsive under App Nap / idle throttling.
+        proc.qualityOfService = .userInitiated
 
         do {
             try proc.run()

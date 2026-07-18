@@ -233,6 +233,13 @@ final class AppState: ObservableObject {
     private var contextLimitContinuation: CheckedContinuation<ContextLimitDecision, Never>?
     /// Sessions where the user chose "Continue" past the context warning — don't nag again.
     private var contextWarnAcknowledged: Set<UUID> = []
+    /// Periodic footer health probe (gateway / database / OpenRouter).
+    private var healthPollTask: Task<Void, Never>?
+    /// Consecutive failed health probes before flipping footer indicators red.
+    private var healthFailStreak = 0
+    /// Keep the Solo gateway process from App Nap while ARIL is open.
+    private var gatewayActivity: NSObjectProtocol?
+    private var becomeActiveObserver: NSObjectProtocol?
 
     var selectedSession: ChatSession? {
         sessions.first { $0.id == selectedSessionID }
@@ -1071,6 +1078,8 @@ final class AppState: ObservableObject {
         if mcpEnabled, let preset = codeScanPreset, preset.enabled {
             await startCodeScanServer()
         }
+        beginGatewayActivity()
+        startHealthPolling()
         objectWillChange.send()
     }
 
@@ -1337,6 +1346,7 @@ final class AppState: ObservableObject {
         let wasReady = gatewayReady
         do {
             let health = try await client.health(baseURL: gatewayURL)
+            healthFailStreak = 0
             gatewayReady = health.status == "ok"
             chatProvider = health.chatProvider ?? "unknown"
             openRouterConfigured = health.openrouterConfigured == true
@@ -1357,12 +1367,87 @@ final class AppState: ObservableObject {
                 saveLocalSessions()
             }
         } catch {
+            // Solo: try waking / restarting the local gateway before declaring offline.
+            if soloMode {
+                await gatewayManager.ensureRunning()
+                gatewayURL = gatewayManager.baseURL
+                if let health = try? await client.health(baseURL: gatewayURL), health.status == "ok" {
+                    healthFailStreak = 0
+                    gatewayReady = true
+                    chatProvider = health.chatProvider ?? "unknown"
+                    openRouterConfigured = health.openrouterConfigured == true
+                    gatewayStatus = health.gateway == "ready" ? "Gateway ready" : health.status
+                    await refreshOpenRouterKeyStatus()
+                    await refreshOpenRouterStatus()
+                    await refreshDatabaseStatus()
+                    if reloadSessionsOnReady, !wasReady {
+                        await loadSessions(retryCount: 5)
+                        reconcileSelection()
+                        saveLocalSessions()
+                    }
+                    return
+                }
+            }
+            healthFailStreak += 1
+            // Require two consecutive failures so a single idle blip doesn't flash red.
+            guard healthFailStreak >= 2 || !wasReady else { return }
             gatewayReady = false
             gatewayStatus = soloMode ? "Starting gateway…" : "Gateway offline"
             chatProvider = "offline"
             openRouterConfigured = false
             markOpenRouterUnavailable(reason: "Gateway offline")
             markDatabaseUnavailable(reason: "Gateway offline")
+        }
+    }
+
+    /// Poll gateway / database / OpenRouter so the status footer stays fresh while idle.
+    private func startHealthPolling() {
+        healthPollTask?.cancel()
+        healthPollTask = Task { [weak self] in
+            // Initial delay so bootstrap's own refresh settles first.
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refreshHealth(reloadSessionsOnReady: false)
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+        if becomeActiveObserver == nil {
+            becomeActiveObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    await self?.refreshHealth(reloadSessionsOnReady: false)
+                }
+            }
+        }
+    }
+
+    private func stopHealthPolling() {
+        healthPollTask?.cancel()
+        healthPollTask = nil
+        if let becomeActiveObserver {
+            NotificationCenter.default.removeObserver(becomeActiveObserver)
+            self.becomeActiveObserver = nil
+        }
+        endGatewayActivity()
+    }
+
+    /// Discourage App Nap from suspending the Solo gateway while ARIL is open.
+    private func beginGatewayActivity() {
+        guard gatewayActivity == nil else { return }
+        gatewayActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Keep Solo gateway responsive for status and chat"
+        )
+    }
+
+    private func endGatewayActivity() {
+        if let gatewayActivity {
+            ProcessInfo.processInfo.endActivity(gatewayActivity)
+            self.gatewayActivity = nil
         }
     }
 
@@ -2823,7 +2908,13 @@ final class AppState: ObservableObject {
             guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
             let body = session.messages[m].content
             guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            session.messages[m].content = ChatMessage.withActualCostFooter(body, costUsd: cost, model: model)
+            session.messages[m].content = ChatMessage.withActualCostFooter(
+                body,
+                costUsd: cost,
+                model: model,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens
+            )
             session.recomputeTotalCost()
         }
         accrueDailySpend(cost)
@@ -2872,8 +2963,14 @@ final class AppState: ObservableObject {
         if text.count > maxChars {
             // Preserve a trailing actual-cost footer when truncating.
             let model = ChatMessage.actualModelLeaf(from: text)
+            let tokens = ChatMessage.actualTokenCounts(from: text)
             let footer = ChatMessage.actualCostUsd(from: text).map {
-                ChatMessage.formatActualCostFooter($0, model: model)
+                ChatMessage.formatActualCostFooter(
+                    $0,
+                    model: model,
+                    inputTokens: tokens?.input,
+                    outputTokens: tokens?.output
+                )
             } ?? ""
             let budget = max(0, maxChars - footer.count - truncationMarker.count)
             let keep = text.prefix(budget)
@@ -2984,7 +3081,13 @@ final class AppState: ObservableObject {
                 session.messages.append(
                     ChatMessage(
                         role: .assistant,
-                        content: ChatMessage.withActualCostFooter(result.content, costUsd: cost, model: result.model)
+                        content: ChatMessage.withActualCostFooter(
+                            result.content,
+                            costUsd: cost,
+                            model: result.model,
+                            inputTokens: result.inputTokens,
+                            outputTokens: result.outputTokens
+                        )
                     )
                 )
                 session.recomputeTotalCost()
@@ -3295,6 +3398,7 @@ final class AppState: ObservableObject {
     }
 
     func shutdown() {
+        stopHealthPolling()
         // Discard any sessions the user started but never sent a prompt into.
         if sessions.contains(where: { $0.messages.isEmpty }) {
             sessions.removeAll { $0.messages.isEmpty }

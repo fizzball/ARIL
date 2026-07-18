@@ -103,7 +103,7 @@ struct AboutView: View {
         ]),
         ChangelogEntry(version: "0.3.25", changes: [
             "Budget prefs: Session/Daily × Soft/Hard grid with $0.50 steppers (default Off)",
-            "Reply footer: total (in+out) token cost",
+            "Reply footer: tokens used in/out + cost",
         ]),
         ChangelogEntry(version: "0.3.24", changes: [
             "Show real model id in reply cost footer; gateway tells the model its OpenRouter id (stops false Claude claims)",

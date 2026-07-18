@@ -228,8 +228,13 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         self.content = content
     }
 
-    static func formatActualCostFooter(_ costUsd: Double, model: String? = nil) -> String {
-        let cost = String(format: "total (in+out) token cost = $%.4f", max(0, costUsd))
+    static func formatActualCostFooter(
+        _ costUsd: Double,
+        model: String? = nil,
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil
+    ) -> String {
+        let cost = formatActualCostBody(costUsd, inputTokens: inputTokens, outputTokens: outputTokens)
         if let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let leaf = model.split(separator: "/").last.map(String.init) ?? model
             return "\n\n[ \(leaf) · \(cost) ]"
@@ -237,8 +242,13 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         return "\n\n[ \(cost) ]"
     }
 
-    static func formatActualCostLabel(_ costUsd: Double, model: String? = nil) -> String {
-        let cost = String(format: "total (in+out) token cost = $%.4f", max(0, costUsd))
+    static func formatActualCostLabel(
+        _ costUsd: Double,
+        model: String? = nil,
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil
+    ) -> String {
+        let cost = formatActualCostBody(costUsd, inputTokens: inputTokens, outputTokens: outputTokens)
         if let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let leaf = model.split(separator: "/").last.map(String.init) ?? model
             return "[ \(leaf) · \(cost) ]"
@@ -246,9 +256,25 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         return "[ \(cost) ]"
     }
 
+    private static func formatActualCostBody(
+        _ costUsd: Double,
+        inputTokens: Int?,
+        outputTokens: Int?
+    ) -> String {
+        let dollars = String(format: "$%.4f", max(0, costUsd))
+        if let inputTokens, let outputTokens {
+            return "tokens used \(inputTokens) / \(outputTokens): cost = \(dollars)"
+        }
+        return "tokens used — / —: cost = \(dollars)"
+    }
+
+    /// Matches a trailing reply cost footer (current + legacy formats).
+    private static let actualCostFooterPattern =
+        #"\n*\n?\s*(?:\[\s*(?:[^\]·]+·\s*)?(?:tokens used\s+(?:\d+|—)\s*/\s*(?:\d+|—):\s*cost\s*=\s*\$[0-9.]+|total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+)\s*\]|-->\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+\s*<--|\{actual cost = \$[0-9.]+\})\s*"#
+
     static func stripActualCostFooter(_ content: String) -> String {
         guard let range = content.range(
-            of: #"\n*\n?\s*(?:\[\s*(?:[^\]·]+·\s*)?total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+\s*\]|-->\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+\s*<--|\{actual cost = \$[0-9.]+\})\s*"#,
+            of: actualCostFooterPattern,
             options: .regularExpression
         ) else {
             return content
@@ -261,7 +287,7 @@ struct ChatMessage: Identifiable, Hashable, Codable {
 
     static func actualCostUsd(from content: String) -> Double? {
         guard let regex = try? NSRegularExpression(
-            pattern: #"(?:\[\s*(?:[^\]·]+·\s*)?total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$([0-9.]+)\s*\]|-->\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$([0-9.]+)\s*<--|\{actual cost = \$([0-9.]+)\})"#,
+            pattern: #"(?:\[\s*(?:[^\]·]+·\s*)?(?:tokens used\s+(?:\d+|—)\s*/\s*(?:\d+|—):\s*cost\s*=\s*\$([0-9.]+)|total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$([0-9.]+))\s*\]|-->\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$([0-9.]+)\s*<--|\{actual cost = \$([0-9.]+)\})"#,
             options: []
         ) else { return nil }
         let ns = content as NSString
@@ -275,10 +301,29 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         return nil
     }
 
-    /// Leaf model id from a trailing `[ model · total … token cost = $… ]` footer, if present.
+    /// Input / output token counts from a trailing cost footer, when present.
+    static func actualTokenCounts(from content: String) -> (input: Int, output: Int)? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"tokens used\s+(\d+)\s*/\s*(\d+):\s*cost\s*=\s*\$[0-9.]+"#,
+            options: []
+        ) else { return nil }
+        let ns = content as NSString
+        guard let last = regex.matches(in: content, range: NSRange(location: 0, length: ns.length)).last,
+              last.numberOfRanges > 2
+        else { return nil }
+        let inRange = last.range(at: 1)
+        let outRange = last.range(at: 2)
+        guard inRange.location != NSNotFound, outRange.location != NSNotFound,
+              let input = Int(ns.substring(with: inRange)),
+              let output = Int(ns.substring(with: outRange))
+        else { return nil }
+        return (input, output)
+    }
+
+    /// Leaf model id from a trailing `[ model · … cost = $… ]` footer, if present.
     static func actualModelLeaf(from content: String) -> String? {
         guard let regex = try? NSRegularExpression(
-            pattern: #"\[\s*([^\]·]+?)\s*·\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+\s*\]"#,
+            pattern: #"\[\s*([^\]·]+?)\s*·\s*(?:tokens used|total)"#,
             options: []
         ) else { return nil }
         let ns = content as NSString
@@ -291,8 +336,20 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         return leaf.isEmpty ? nil : leaf
     }
 
-    static func withActualCostFooter(_ content: String, costUsd: Double, model: String? = nil) -> String {
-        stripActualCostFooter(content) + formatActualCostFooter(costUsd, model: model)
+    static func withActualCostFooter(
+        _ content: String,
+        costUsd: Double,
+        model: String? = nil,
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil
+    ) -> String {
+        stripActualCostFooter(content)
+            + formatActualCostFooter(
+                costUsd,
+                model: model,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens
+            )
     }
 
     /// Body text without a trailing cost footer (for colored rendering).
@@ -303,7 +360,13 @@ struct ChatMessage: Identifiable, Hashable, Codable {
     /// Display label for a trailing cost footer, if present.
     var costFooterLabel: String? {
         guard let cost = Self.actualCostUsd(from: content) else { return nil }
-        return Self.formatActualCostLabel(cost, model: Self.actualModelLeaf(from: content))
+        let tokens = Self.actualTokenCounts(from: content)
+        return Self.formatActualCostLabel(
+            cost,
+            model: Self.actualModelLeaf(from: content),
+            inputTokens: tokens?.input,
+            outputTokens: tokens?.output
+        )
     }
 }
 

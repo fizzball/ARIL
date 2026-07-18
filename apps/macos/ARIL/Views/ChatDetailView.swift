@@ -14,7 +14,13 @@ struct ChatDetailView: View {
             BackgroundTexture(accent: theme.palette.accent)
 
             VStack(spacing: 0) {
-                if isEmpty && state.compareResults.isEmpty {
+                if !state.compareResults.isEmpty {
+                    // Judge mode: fill the chat area and blank the transcript behind it.
+                    CompareResultsView(results: state.compareResults)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
+                        .transition(.opacity)
+                } else if isEmpty {
                     EmptyHeroView()
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
@@ -22,14 +28,9 @@ struct ChatDetailView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                         .transition(.opacity)
-                    if !state.compareResults.isEmpty {
-                        CompareResultsView(results: state.compareResults)
-                            .frame(maxHeight: 320)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
                 }
 
-                if state.showIntelligencePanel {
+                if state.showIntelligencePanel, state.compareResults.isEmpty {
                     IntelligencePanelView()
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .padding(.horizontal, 24)
