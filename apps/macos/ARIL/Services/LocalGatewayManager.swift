@@ -225,13 +225,44 @@ final class LocalGatewayManager: ObservableObject {
         env["ARIL_ENV"] = "production"
         env["ARIL_HOST"] = "127.0.0.1"
         env["ARIL_PORT"] = "\(port)"
-        env["ARIL_DATA_DIR"] = applicationSupportDataDir().path
+        let dataDir = applicationSupportDataDir()
+        env["ARIL_DATA_DIR"] = dataDir.path
 
-        if let key = UserDefaults.standard.string(forKey: "aril.openRouterAPIKey"),
-           !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let key = resolvedOpenRouterAPIKey(dataDir: dataDir) {
             env["OPENROUTER_API_KEY"] = key
         }
         return env
+    }
+
+    /// Prefer UserDefaults; if missing (e.g. older OAuth saves), recover from Application Support `.env`.
+    private func resolvedOpenRouterAPIKey(dataDir: URL) -> String? {
+        if let key = UserDefaults.standard.string(forKey: "aril.openRouterAPIKey"),
+           !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return key
+        }
+        guard let recovered = Self.readOpenRouterKey(fromEnvFile: dataDir.appendingPathComponent(".env")),
+              !recovered.isEmpty
+        else { return nil }
+        UserDefaults.standard.set(recovered, forKey: "aril.openRouterAPIKey")
+        return recovered
+    }
+
+    private static func readOpenRouterKey(fromEnvFile url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+            guard line.hasPrefix("OPENROUTER_API_KEY=") else { continue }
+            var value = String(line.dropFirst("OPENROUTER_API_KEY=".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if (value.hasPrefix("\"") && value.hasSuffix("\""))
+                || (value.hasPrefix("'") && value.hasSuffix("'"))
+            {
+                value = String(value.dropFirst().dropLast())
+            }
+            return value.isEmpty ? nil : value
+        }
+        return nil
     }
 
     private func applicationSupportDataDir() -> URL {

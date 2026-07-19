@@ -18,7 +18,7 @@ struct ContentView: View {
                     if state.gatewayReady && !state.openRouterConfigured {
                         HStack(spacing: 10) {
                             Image(systemName: "key.fill")
-                            Text("OpenRouter API key required — add it in Preferences to enable live models.")
+                            Text("OpenRouter subscription required — connect in Preferences → Subscription to enable live models.")
                                 .font(ARILTheme.captionFont)
                             Spacer()
                             Button("Open Preferences") {
@@ -54,42 +54,46 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 SystemMetricsTitleView(metrics: systemMetrics)
             }
-            ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     state.openToolPanel(.learning)
                 } label: {
                     Image(systemName: "brain")
                 }
-                .help("Learning — stored judgements and classifications")
-
+                .hoverHelpBubble("Learning", detail: "Stored judgements and classifications")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     state.openToolPanel(.modelPopularity)
                 } label: {
                     Image(systemName: "chart.bar.fill")
                 }
-                .help("Model popularity — OpenRouter weekly rankings")
-
+                .hoverHelpBubble("Model popularity", detail: "OpenRouter weekly rankings by token volume")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    state.openToolPanel(.logAnalysis)
+                } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                }
+                .hoverHelpBubble("Log analysis", detail: "Recent OpenRouter API transactions")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     openSettings()
                 } label: {
                     Image(systemName: "gearshape")
                 }
-                .help("Preferences")
-
-                Button {
-                    state.openToolPanel(.about)
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .help("About ARIL")
-
+                .hoverHelpBubble("Preferences", detail: "Gateway, subscription, models, and appearance")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     state.shutdown()
                     NSApplication.shared.terminate(nil)
                 } label: {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
                 }
-                .help("Quit ARIL")
+                .hoverHelpBubble("Quit ARIL")
             }
         }
         .preferredColorScheme(theme.preferredColorScheme)
@@ -159,6 +163,9 @@ struct ContentView: View {
             systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.
             await state.refreshHealth(reloadSessionsOnReady: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .arilOpenPreferences)) { _ in
+            openSettings()
         }
         .onDisappear {
             systemMetrics.stop()

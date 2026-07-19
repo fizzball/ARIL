@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// Compact “ARIL” mark for the window title bar. Every ~60s it crossfades into a
-/// random resting style (colour / typeface / tracking), with a short flourish.
+/// Compact “ARIL” mark for the window title bar. Click opens About. Every ~60s it
+/// crossfades into a random resting style (colour / typeface / tracking), with a short flourish.
 struct ARILTitleWordmarkView: View {
+    @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -21,20 +22,26 @@ struct ARILTitleWordmarkView: View {
     private let cycleSeconds: UInt64 = 60
 
     var body: some View {
-        ZStack {
-            wordmark
-                .scaleEffect(scale)
-                .opacity(opacity)
-                .shadow(color: look.resolvedColor(theme.palette).opacity(glow), radius: glow > 0 ? 6 : 0)
+        Button {
+            state.openToolPanel(.about)
+        } label: {
+            ZStack {
+                wordmark
+                    .scaleEffect(scale)
+                    .opacity(opacity)
+                    .shadow(color: look.resolvedColor(theme.palette).opacity(glow), radius: glow > 0 ? 6 : 0)
 
-            if showSparkles {
-                sparkleLayer
-                    .allowsHitTesting(false)
+                if showSparkles {
+                    sparkleLayer
+                        .allowsHitTesting(false)
+                }
             }
+            .frame(minWidth: 52, minHeight: 18)
+            .contentShape(Rectangle())
         }
-        .frame(minWidth: 52, minHeight: 18)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("ARIL")
+        .buttonStyle(.plain)
+        .hoverHelpBubble("About ARIL", detail: "Version, changelog, and credits")
+        .accessibilityAddTraits(.isButton)
         .task { await runCycle() }
         .onAppear {
             look = .resting
@@ -258,23 +265,70 @@ private struct TitleLook: Equatable {
 
 /// Hides the native window title string so the custom wordmark can own that spot.
 struct WindowTitleVisibilityHidden: NSViewRepresentable {
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async {
-            Self.apply(to: view.window)
-        }
+        context.coordinator.attach(to: view)
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            Self.apply(to: nsView.window)
-        }
+        context.coordinator.attach(to: nsView)
     }
 
-    private static func apply(to window: NSWindow?) {
-        guard let window else { return }
-        window.titleVisibility = .hidden
-        window.title = "ARIL"
+    final class Coordinator {
+        private var observers: [NSObjectProtocol] = []
+        private weak var window: NSWindow?
+
+        func attach(to view: NSView) {
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.apply(to: view.window)
+                guard let window = view.window, window !== self.window else { return }
+                self.teardown()
+                self.window = window
+                let center = NotificationCenter.default
+                for name in [
+                    NSWindow.didBecomeKeyNotification,
+                    NSWindow.didBecomeMainNotification,
+                ] {
+                    let token = center.addObserver(
+                        forName: name,
+                        object: window,
+                        queue: .main
+                    ) { [weak self] _ in
+                        self?.apply(to: window)
+                    }
+                    self.observers.append(token)
+                }
+            }
+        }
+
+        private func teardown() {
+            let center = NotificationCenter.default
+            for token in observers {
+                center.removeObserver(token)
+            }
+            observers.removeAll()
+            window = nil
+        }
+
+        private func apply(to window: NSWindow?) {
+            guard let window else { return }
+            // Empty title + hidden visibility prevents a second "ARIL" next to the wordmark.
+            if window.titleVisibility != .hidden {
+                window.titleVisibility = .hidden
+            }
+            if !window.title.isEmpty {
+                window.title = ""
+            }
+        }
+
+        deinit {
+            teardown()
+        }
     }
 }

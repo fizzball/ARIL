@@ -37,6 +37,7 @@ _WEEKLY_RANKINGS_TTL_SECONDS = 900.0  # 15 minutes
 def _openrouter_headers() -> dict[str, str]:
     headers = {
         "Accept": "application/json",
+        "Accept-Encoding": "identity",
         "HTTP-Referer": settings.openrouter_site_url,
         "X-Title": settings.openrouter_app_name,
     }

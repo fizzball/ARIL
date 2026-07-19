@@ -110,7 +110,10 @@ async def check_connection() -> dict:
     }
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=_CHECK_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=_CHECK_TIMEOUT,
+            headers={"Accept-Encoding": "identity"},
+        ) as client:
             resp = await client.get(f"{base_url}/key", headers=headers)
             credits_resp = None
             if resp.status_code < 400:

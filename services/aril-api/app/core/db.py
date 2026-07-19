@@ -314,7 +314,7 @@ def list_store_records() -> list[dict[str, Any]]:
         for row in conn.execute(
             """
             SELECT id, session_id, prompt_snippet, fingerprint, model, category,
-                   cost_usd, cached, created_at
+                   input_tokens, output_tokens, cost_usd, cached, created_at
             FROM chat_transactions
             ORDER BY created_at DESC
             """
@@ -331,6 +331,8 @@ def list_store_records() -> list[dict[str, Any]]:
                     "category_overridden": None,
                     "cached": bool(row["cached"]),
                     "cost_usd": row["cost_usd"],
+                    "input_tokens": row["input_tokens"],
+                    "output_tokens": row["output_tokens"],
                     "session_id": row["session_id"],
                     "created_at": row["created_at"],
                     "updated_at": row["created_at"],

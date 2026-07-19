@@ -19,14 +19,14 @@ struct SettingsView: View {
         TabView {
             gatewayTab
                 .tabItem { Label("General", systemImage: "gearshape") }
+            subscriptionTab
+                .tabItem { Label("Subscription", systemImage: "creditcard") }
             systemPromptTab
                 .tabItem { Label("System Prompt", systemImage: "doc.plaintext") }
             routingTab
                 .tabItem { Label("Models", systemImage: "cpu") }
             mcpTab
                 .tabItem { Label("MCP", systemImage: "server.rack") }
-            logAnalysisTab
-                .tabItem { Label("Log Analysis", systemImage: "doc.text.magnifyingglass") }
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
@@ -37,18 +37,21 @@ struct SettingsView: View {
         .task {
             Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
             await state.refreshDatabaseStatus()
+            await state.refreshOpenRouterKeyStatus()
         }
         .onAppear {
             Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
-            Task { await state.refreshDatabaseStatus() }
+            Task {
+                await state.refreshDatabaseStatus()
+                await state.refreshOpenRouterKeyStatus()
+            }
         }
         .onChange(of: theme.option) { _, _ in
             Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
         }
     }
 
-    /// Title + NSAppearance so the Settings window matches the app theme (not system white).
-    /// `nil` colorScheme (System theme) clears the override so the window follows macOS.
+    /// Title + appearance, and keep Preferences on-screen (centered on the main window).
     private static func applyWindowChrome(colorScheme: ColorScheme?) {
         DispatchQueue.main.async {
             let appearance: NSAppearance? = colorScheme.map {
@@ -56,21 +59,70 @@ struct SettingsView: View {
             }
             for window in NSApplication.shared.windows {
                 let title = window.title
-                if title == "Settings"
+                guard title == "Settings"
                     || title == "ARIL Settings"
                     || title == "Preferences"
-                    || title.hasSuffix("Settings") {
-                    window.title = "Preferences"
-                    window.appearance = appearance
-                }
+                    || title.hasSuffix("Settings")
+                else { continue }
+                window.title = "Preferences"
+                window.appearance = appearance
+                Self.centerPreferencesWindow(window)
             }
         }
     }
 
-    private var gatewayTab: some View {
+    /// Center Preferences over the main ARIL window (or the visible screen) so it
+    /// cannot open off-screen on multi-display setups.
+    private static func centerPreferencesWindow(_ prefs: NSWindow) {
+        let host = NSApplication.shared.windows.first {
+            $0 !== prefs && $0.isVisible && $0.frame.width >= 800
+        }
+        let reference = host?.frame ?? prefs.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+        guard let reference else { return }
+        var frame = prefs.frame
+        frame.origin.x = reference.midX - frame.width / 2
+        frame.origin.y = reference.midY - frame.height / 2
+        let visible = prefs.screen?.visibleFrame
+            ?? host?.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+        if let visible {
+            frame.origin.x = min(max(frame.origin.x, visible.minX + 12), visible.maxX - frame.width - 12)
+            frame.origin.y = min(max(frame.origin.y, visible.minY + 12), visible.maxY - frame.height - 12)
+        }
+        prefs.setFrame(frame, display: true)
+    }
+
+    private var subscriptionTab: some View {
         Form {
-            Section("OpenRouter API key") {
-                Text("Required for live multi-model chat. Create a key at openrouter.ai/keys")
+            Section("Sign in with OpenRouter") {
+                Text("Existing OpenRouter users can authorize ARIL in the browser. A user-controlled API key is created for your account and stored locally — no copy/paste required.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    Task { await state.connectOpenRouterWithOAuth() }
+                } label: {
+                    if state.isOpenRouterOAuthInFlight {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Waiting for OpenRouter…")
+                        }
+                    } else {
+                        Label("Sign in with OpenRouter", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                }
+                .disabled(state.isOpenRouterOAuthInFlight)
+                .help("Opens your browser so you can authorize ARIL.")
+
+                if state.isOpenRouterOAuthInFlight {
+                    Button("Cancel sign-in", role: .cancel) {
+                        state.cancelOpenRouterOAuth()
+                    }
+                }
+            }
+
+            Section("API key") {
+                Text("Alternatively, paste a key from openrouter.ai/keys.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -82,7 +134,7 @@ struct SettingsView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
-                        Text("Configured")
+                        Text(state.openRouterAuthMethod == "oauth" ? "Connected via OpenRouter" : "Configured")
                             .foregroundStyle(theme.palette.accent)
                     }
                     HStack {
@@ -105,11 +157,9 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    // Spacer row to separate key actions from the next section
-                    Color.clear.frame(height: 12)
                 } else {
                     if !state.openRouterConfigured {
-                        Text("No API key configured — enter one to enable OpenRouter.")
+                        Text("No API key configured — sign in above or paste a key.")
                             .foregroundStyle(theme.palette.danger)
                     }
                     SecureField("sk-or-v1-…", text: $state.openRouterKeyDraft)
@@ -125,7 +175,6 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    Color.clear.frame(height: 12)
                 }
 
                 if let msg = state.openRouterKeyMessage {
@@ -135,6 +184,42 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Local guardrails") {
+                Text("Scans prompts on this Mac before they are sent. Sensitive Info redacts credit cards, SSNs, and confidentiality phrases; Prompt Injection blocks jailbreak-style prompts (OpenRouter pattern set).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Sensitive Info (redact)",
+                    isOn: Binding(
+                        get: { state.localGuardrailSensitiveInfo },
+                        set: { state.setLocalGuardrailSensitiveInfo($0) }
+                    )
+                )
+                .help("Locally redact credit-card numbers, SSN-like patterns, and phrases such as confidential / do not share.")
+
+                Toggle(
+                    "Prompt Injection (block)",
+                    isOn: Binding(
+                        get: { state.localGuardrailPromptInjection },
+                        set: { state.setLocalGuardrailPromptInjection($0) }
+                    )
+                )
+                .help("Block sends that match OpenRouter-style prompt-injection regexes.")
+
+                if let msg = state.localGuardrailStatusMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
+    private var gatewayTab: some View {
+        Form {
             Section("Gateway") {
                 Toggle("Solo mode (auto-start local gateway)", isOn: $state.soloMode)
                 Text("Release builds embed the gateway inside ARIL.app. Developer checkouts use services/aril-api (see docs/DEVELOPING.md).")
@@ -802,12 +887,6 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 4)
                     .stroke(color.opacity(0.4), lineWidth: 1)
             )
-    }
-
-    private var logAnalysisTab: some View {
-        LogAnalysisView(embeddedInPreferences: true)
-            .environmentObject(state)
-            .environmentObject(theme)
     }
 
     private var appearanceTab: some View {

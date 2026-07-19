@@ -71,6 +71,11 @@ struct StatusFooterView: View {
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.danger)
                     .lineLimit(1)
+            } else if let guardMsg = state.localGuardrailStatusMessage {
+                Text(guardMsg)
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.preferredHighlight)
+                    .lineLimit(1)
             } else if let latency = state.lastLatencyMs {
                 Text("Last \(latency)ms")
                     .font(ARILTheme.captionFont)

@@ -7,8 +7,7 @@ struct AboutView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 16) {
-                ARILGhostMark(color: theme.palette.accent, lineWidth: 2.2)
-                    .frame(width: 56, height: 56)
+                ARILLogoImage(size: 56)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("ARIL")
@@ -73,10 +72,20 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.6", changes: [
+            "New ARIL app icon and in-chat logo; waiting replies show a spinning gold arrow",
+            "Log Analysis moved to the toolbar; About opens from the ARIL title label",
+            "OpenRouter OAuth keys persist across relaunch (Application Support .env + UserDefaults)",
+            "Local guardrails in Preferences → Subscription (sensitive-info redact, prompt-injection block)",
+            "Assistant replies render Markdown/math legibly with real line breaks; streaming paints live again",
+        ]),
         ChangelogEntry(version: "0.4.5", changes: [
             "Preferences → Appearance: System theme follows macOS light/dark/Auto, plus Ocean, Graphite, Sand, Dusk, and Midnight",
             "Title-bar ARIL wordmark cycles subtle colour, typeface, and flourish animations every minute",
             "Scroll-to-bottom control recentered in the prompt toolbar",
+            "Preferences → Subscription: OpenRouter account connection (OAuth sign-in or paste API key)",
+            "Preferences opens as an in-window overlay so it stays inside the main ARIL frame",
+            "Sign in with OpenRouter (OAuth PKCE) provisions a user-controlled key without copy/paste",
         ]),
         ChangelogEntry(version: "0.4.4", changes: [
             "Session history no longer duplicates image turns on launch — client and gateway dedupe restored transcripts",

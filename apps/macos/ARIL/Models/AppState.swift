@@ -27,6 +27,7 @@ enum GenerationPhase: Equatable {
 /// Trailing flyout opened from the toolbar.
 enum ToolPanel: String, Identifiable, Equatable {
     case modelPopularity
+    case logAnalysis
     case learning
     case about
 
@@ -35,6 +36,7 @@ enum ToolPanel: String, Identifiable, Equatable {
     var title: String {
         switch self {
         case .modelPopularity: return "Model popularity"
+        case .logAnalysis: return "Log analysis"
         case .learning: return "Learning"
         case .about: return "About ARIL"
         }
@@ -42,6 +44,11 @@ enum ToolPanel: String, Identifiable, Equatable {
 
     /// Shared flyout width for every tools panel.
     static let flyoutWidth: CGFloat = 560
+}
+
+extension Notification.Name {
+    /// Posted by the menu bar / keyboard shortcut to open in-window Preferences.
+    static let arilOpenPreferences = Notification.Name("aril.openPreferences")
 }
 
 /// Outcome of the context-window warning dialog.
@@ -158,8 +165,15 @@ final class AppState: ObservableObject {
     @Published var generationElapsedMs: Int = 0
     @Published var routingProfile: RoutingProfile = AppState.loadRoutingProfile()
     @Published var showIntelligencePanel: Bool = false
-    /// Single trailing tools flyout (Preferences, Model Costs, Learning, About).
+    /// Single trailing tools flyout (Model Costs, Learning, About).
     @Published var activeToolPanel: ToolPanel?
+    /// In-window Preferences overlay (kept inside the main frame so it never opens off-screen).
+    @Published var showPreferences = false
+    /// OpenRouter OAuth PKCE ("Sign in with OpenRouter").
+    let openRouterOAuth = OpenRouterOAuthCoordinator()
+    @Published var isOpenRouterOAuthInFlight = false
+    /// How the current OpenRouter key was obtained (`oauth` / `manual`).
+    @Published var openRouterAuthMethod: String = UserDefaults.standard.string(forKey: "aril.openRouterAuthMethod") ?? ""
     @Published var lastError: String?
     @Published var compareResults: [CompareResultDTO] = []
     /// Prompt capability category used to pick the 3 Judge peer models.
@@ -196,6 +210,10 @@ final class AppState: ObservableObject {
     @Published var openRouterStatus: String = "OpenRouter not configured"
     @Published var openRouterCheckMessage: String?
     @Published var openRouterCreditsRemaining: Double?
+    @Published var localGuardrailSensitiveInfo: Bool = UserDefaults.standard.bool(forKey: "aril.localGuardrailSensitiveInfo")
+    @Published var localGuardrailPromptInjection: Bool = UserDefaults.standard.bool(forKey: "aril.localGuardrailPromptInjection")
+    /// Soft status after a successful redact-on-send (cleared on next send).
+    @Published var localGuardrailStatusMessage: String?
     /// OpenRouter USD / 1K token rates keyed by model id (used in Preferences + analysis).
     @Published var modelPricingByID: [String: ModelPricingDTO] = [:]
     @Published var isLoadingModelPricing: Bool = false
@@ -1092,6 +1110,8 @@ final class AppState: ObservableObject {
         }
         beginGatewayActivity()
         startHealthPolling()
+        // Quiet launch check — same path as `/update`, dialog only when behind.
+        Task { await checkForAppUpdateOnLaunch() }
         objectWillChange.send()
     }
 
@@ -1530,6 +1550,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    func setLocalGuardrailSensitiveInfo(_ enabled: Bool) {
+        localGuardrailSensitiveInfo = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.localGuardrailSensitiveInfo")
+        localGuardrailStatusMessage = nil
+    }
+
+    func setLocalGuardrailPromptInjection(_ enabled: Bool) {
+        localGuardrailPromptInjection = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.localGuardrailPromptInjection")
+        localGuardrailStatusMessage = nil
+    }
+
     /// Probe OpenRouter when a key is present (health refresh + footer).
     func refreshOpenRouterStatus() async {
         guard openRouterConfigured else {
@@ -1604,6 +1636,8 @@ final class AppState: ObservableObject {
             openRouterKeyDraft = ""
             isEditingOpenRouterKey = false
             openRouterKeyMessage = "API key saved."
+            openRouterAuthMethod = "manual"
+            UserDefaults.standard.set("manual", forKey: "aril.openRouterAuthMethod")
             openRouterStatus = "OpenRouter not ready"
             openRouterReady = false
             openRouterCreditsRemaining = nil
@@ -1627,6 +1661,8 @@ final class AppState: ObservableObject {
             openRouterKeyDraft = ""
             isEditingOpenRouterKey = true
             openRouterKeyMessage = "API key cleared. Add a key to use live models."
+            openRouterAuthMethod = ""
+            UserDefaults.standard.removeObject(forKey: "aril.openRouterAuthMethod")
             markOpenRouterUnavailable(reason: "API key cleared. Add a key to use live models.")
             UserDefaults.standard.removeObject(forKey: "aril.openRouterAPIKey")
             applyDefaultModelPricing()
@@ -1645,6 +1681,7 @@ final class AppState: ObservableObject {
 
     /// Toggle a trailing tools flyout; opening one closes any other.
     func openToolPanel(_ panel: ToolPanel) {
+        showPreferences = false
         if activeToolPanel == panel {
             activeToolPanel = nil
         } else {
@@ -1654,6 +1691,55 @@ final class AppState: ObservableObject {
 
     func closeToolPanel() {
         activeToolPanel = nil
+    }
+
+    func openPreferences() {
+        activeToolPanel = nil
+        showPreferences = false
+        NotificationCenter.default.post(name: .arilOpenPreferences, object: nil)
+    }
+
+    func closePreferences() {
+        showPreferences = false
+        openRouterOAuth.cancel()
+        isOpenRouterOAuthInFlight = false
+    }
+
+    /// OpenRouter OAuth PKCE — browser sign-in that provisions a user-controlled API key.
+    func connectOpenRouterWithOAuth() async {
+        guard !isOpenRouterOAuthInFlight else { return }
+        isOpenRouterOAuthInFlight = true
+        openRouterKeyMessage = nil
+        defer { isOpenRouterOAuthInFlight = false }
+        do {
+            let key = try await openRouterOAuth.signIn()
+            let status = try await client.setOpenRouterKey(baseURL: gatewayURL, apiKey: key)
+            openRouterConfigured = status.configured
+            openRouterMaskedKey = status.maskedKey
+            openRouterKeyRequired = status.required
+            openRouterKeyDraft = ""
+            isEditingOpenRouterKey = false
+            openRouterAuthMethod = "oauth"
+            UserDefaults.standard.set("oauth", forKey: "aril.openRouterAuthMethod")
+            // Same mirror as manual save — Solo gateway injects this on next launch.
+            UserDefaults.standard.set(key, forKey: "aril.openRouterAPIKey")
+            openRouterKeyMessage = "Signed in with OpenRouter — key saved."
+            openRouterStatus = "OpenRouter not ready"
+            openRouterReady = false
+            openRouterCheckMessage = nil
+            await checkOpenRouterConnection()
+            await refreshModelPricing(forceRefresh: true)
+        } catch is CancellationError {
+            openRouterKeyMessage = "OpenRouter sign-in cancelled."
+        } catch {
+            openRouterKeyMessage = error.localizedDescription
+        }
+    }
+
+    func cancelOpenRouterOAuth() {
+        openRouterOAuth.cancel()
+        isOpenRouterOAuthInFlight = false
+        openRouterKeyMessage = "OpenRouter sign-in cancelled."
     }
 
     func loadSessions(retryCount: Int = 1) async {
@@ -2354,7 +2440,7 @@ final class AppState: ObservableObject {
                 lines.append("- **OpenRouter:** ❌ connection check failed")
             }
         } else {
-            lines.append("- **OpenRouter:** ⚠️ no API key set (Preferences → General)")
+            lines.append("- **OpenRouter:** ⚠️ no API key set (Preferences → Subscription)")
         }
 
         // Nmap managed server
@@ -2436,6 +2522,21 @@ final class AppState: ObservableObject {
                 text: "**ARIL update**\n\nCould not check for updates: \(error.localizedDescription)\n\nReleases: https://github.com/fizzball/ARIL/releases/latest"
             )
             updateNoteID = nil
+        }
+    }
+
+    /// Startup `/update` check — only surfaces the install dialog when a newer release exists.
+    func checkForAppUpdateOnLaunch() async {
+        guard !isUpdatingApp, updateConfirmMessage == nil, pendingUpdateRelease == nil else { return }
+        let current = appVersion
+        do {
+            let release = try await AppUpdateService.fetchLatestRelease()
+            guard AppUpdateService.isNewer(release.version, than: current) else { return }
+            pendingUpdateRelease = release
+            updateConfirmMessage =
+                "ARIL \(release.version) is available (you have \(current)).\n\nDownload \(release.dmgName) and replace /Applications/ARIL.app? ARIL will quit and relaunch when the install finishes."
+        } catch {
+            // Silent on launch — `/update` and `/status` remain available.
         }
     }
 
@@ -2587,12 +2688,33 @@ final class AppState: ObservableObject {
         let text = (promptOverride ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
 
-        if !text.isEmpty {
-            recordPromptHistory(text)
+        localGuardrailStatusMessage = nil
+        var sendText = text
+        if !text.isEmpty, localGuardrailSensitiveInfo || localGuardrailPromptInjection {
+            let scanned = LocalGuardrailScanner.apply(
+                text,
+                sensitiveInfo: localGuardrailSensitiveInfo,
+                promptInjection: localGuardrailPromptInjection
+            )
+            if scanned.blocked {
+                endGenerationTracking(error: scanned.blockMessage)
+                return
+            }
+            if scanned.didRedact {
+                sendText = scanned.text
+                localGuardrailStatusMessage = scanned.redactSummary
+                if promptOverride == nil {
+                    draft = sendText
+                }
+            }
+        }
+
+        if !sendText.isEmpty {
+            recordPromptHistory(sendText)
         }
 
         if promptOverride != nil {
-            draft = text
+            draft = sendText
         }
 
         // Enter during the idle countdown: skip classify/preview and judgement logging.
@@ -2609,7 +2731,7 @@ final class AppState: ObservableObject {
             showIntelligencePanel = false
             analysisStatus = .idle
             estimatedLatencyMs = nil
-        } else if !text.isEmpty, (preview == nil || analysisStatus != .ready) {
+        } else if !sendText.isEmpty, (preview == nil || analysisStatus != .ready) {
             await runPreview()
             if Task.isCancelled {
                 return
@@ -2624,7 +2746,7 @@ final class AppState: ObservableObject {
         }
 
         // Context-window gate — warn near the 96k char limit before mutating the session.
-        if !(await passContextGate(newUserText: text)) {
+        if !(await passContextGate(newUserText: sendText)) {
             return
         }
 
@@ -2634,16 +2756,16 @@ final class AppState: ObservableObject {
         let attachmentNote: String = {
             guard !pendingAttachments.isEmpty else { return "" }
             let names = pendingAttachments.map(\.filename).joined(separator: ", ")
-            return text.isEmpty ? "[Attached: \(names)]" : "\n\n[Attached: \(names)]"
+            return sendText.isEmpty ? "[Attached: \(names)]" : "\n\n[Attached: \(names)]"
         }()
-        let displayText = text.isEmpty ? attachmentNote : text + attachmentNote
+        let displayText = sendText.isEmpty ? attachmentNote : sendText + attachmentNote
 
-        lastUserPromptForPrefer = text.isEmpty ? displayText : text
+        lastUserPromptForPrefer = sendText.isEmpty ? displayText : sendText
         updateSession(sid) { session in
             session.messages.append(ChatMessage(role: .user, content: displayText))
             if session.title == "New session" {
                 session.title = String(
-                    (text.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : text).prefix(42)
+                    (sendText.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : sendText).prefix(42)
                 )
             }
         }
@@ -2731,6 +2853,8 @@ final class AppState: ObservableObject {
                 request: request,
                 onToken: { [weak self] token in
                     streamTokens.mark()
+                    // Hop to MainActor per chunk so the bubble grows as SSE arrives
+                    // (do not buffer until `done`).
                     Task { @MainActor in
                         guard let self,
                               let i = self.sessions.firstIndex(where: { $0.id == sid }),
@@ -2739,7 +2863,6 @@ final class AppState: ObservableObject {
                         if self.generationPhase == .thinking {
                             self.generationPhase = .streaming
                         }
-                        // Reassign array so @Published notifies during streaming.
                         var next = self.sessions
                         next[i].messages[m].content += token
                         self.sessions = next
@@ -3410,6 +3533,8 @@ final class AppState: ObservableObject {
                     categoryOverridden: updated.categoryOverridden,
                     cached: previous.cached,
                     costUsd: previous.costUsd,
+                    inputTokens: previous.inputTokens,
+                    outputTokens: previous.outputTokens,
                     sessionId: previous.sessionId,
                     createdAt: updated.createdAt,
                     updatedAt: updated.updatedAt

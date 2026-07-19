@@ -261,18 +261,62 @@ enum MessageContentParser {
 struct AssistantMarkdownContent: View {
     let content: String
     let textColor: Color
+    /// While tokens are still arriving, skip Markdown parsing so each chunk paints quickly.
+    var streaming: Bool = false
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(MessageContentParser.segments(from: content).enumerated()), id: \.offset) { _, segment in
-                switch segment {
-                case .text(let text):
-                    Text(text)
+        if streaming {
+            streamingBody
+        } else {
+            formattedBody
+        }
+    }
+
+    /// Plain line layout — cheap enough to update on every SSE token.
+    private var streamingBody: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Spacer().frame(height: 8)
+                } else {
+                    Text(line)
                         .font(ARILTheme.bodyFont)
                         .foregroundStyle(textColor)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private var formattedBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(MessageContentParser.segments(from: content).enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .text(let text):
+                    // Line-based layout so model `\n` / blank lines actually appear
+                    // (SwiftUI Markdown soft-breaks otherwise become a single paragraph).
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(
+                            Array(AssistantReadableText.displayLines(text).enumerated()),
+                            id: \.offset
+                        ) { _, line in
+                            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                                Spacer()
+                                    .frame(height: 8)
+                            } else {
+                                Text(AssistantReadableText.attributedLine(line))
+                                    .font(ARILTheme.bodyFont)
+                                    .foregroundStyle(textColor)
+                                    .tint(theme.palette.accent)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
                 case .image(let urlString, let alt):
                     MarkdownImageView(urlString: urlString, alt: alt)
                 case .mermaid(let source):

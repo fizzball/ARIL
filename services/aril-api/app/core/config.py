@@ -1,8 +1,29 @@
+from pathlib import Path
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _env_files() -> tuple[str, ...]:
+    """Load Solo secrets from Application Support when packaged; else cwd `.env` (dev).
+
+    The macOS app persists OpenRouter keys to ``$ARIL_DATA_DIR/.env``. Without
+    that path here, a restart drops the key even though the file still exists.
+    When ``ARIL_DATA_DIR`` is set, only that file is used so a leftover cwd
+    `.env` cannot override the Solo secret store.
+    """
+    raw = (os.environ.get("ARIL_DATA_DIR") or "").strip()
+    if raw:
+        return (str(Path(raw).expanduser() / ".env"),)
+    return (".env",)
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_env_files(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     aril_env: str = "development"
     aril_host: str = "127.0.0.1"

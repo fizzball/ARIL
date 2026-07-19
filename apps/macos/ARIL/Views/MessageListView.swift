@@ -25,6 +25,8 @@ struct MessageListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 // Eager VStack — LazyVStack was dropping older bubbles after reloads.
+                // Do NOT bind `.id` to content length: that recreates the whole list on
+                // every stream token and makes replies look like they arrive in one shot.
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(messages) { message in
                         MessageBubble(message: message)
@@ -35,14 +37,14 @@ struct MessageListView: View {
                         .id(bottomAnchorID)
                 }
                 .padding(28)
-                .id(messageFingerprint)
             }
             .onAppear { scrollToBottom(proxy: proxy, animated: false) }
             .onChange(of: state.selectedSessionID) { _, _ in
                 scrollToBottom(proxy: proxy, animated: false)
             }
             .onChange(of: messageFingerprint) { _, _ in
-                scrollToBottom(proxy: proxy, animated: true)
+                // While streaming, jump without animation so token paint stays responsive.
+                scrollToBottom(proxy: proxy, animated: !state.isSending)
             }
             .onChange(of: state.isSending) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
@@ -91,10 +93,10 @@ private struct MessageBubble: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 8) {
                 if message.role == .assistant {
-                    // Same row as the ARIL caption so the ghost sits next to the label.
-                    ARILGhostAvatar(
+                    // Same row as the ARIL caption; spins while waiting for the reply.
+                    ARILLogoAvatar(
                         animated: isWaitingAssistant,
-                        color: theme.palette.accent,
+                        color: ARILLogoPalette.gold,
                         size: 18
                     )
                 }
@@ -169,7 +171,8 @@ private struct MessageBubble: View {
                     if !body.isEmpty {
                         AssistantMarkdownContent(
                             content: body,
-                            textColor: theme.palette.assistantText
+                            textColor: theme.palette.assistantText,
+                            streaming: isWaitingAssistant
                         )
                     }
                     if let costLabel = message.costFooterLabel {

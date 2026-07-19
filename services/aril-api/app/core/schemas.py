@@ -294,6 +294,8 @@ class StoreRecord(BaseModel):
     category_overridden: bool | None = None
     cached: bool | None = None
     cost_usd: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     session_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None

@@ -71,15 +71,8 @@ final class StatusBarController: NSObject, ObservableObject {
     }
 
     @objc private func openPreferences() {
-        // SwiftUI Settings scene wires up one of these selectors depending on macOS.
-        let settingsSelector = Selector(("showSettingsWindow:"))
-        let prefsSelector = Selector(("showPreferencesWindow:"))
-        if NSApp.responds(to: settingsSelector) {
-            NSApp.sendAction(settingsSelector, to: nil, from: nil)
-        } else {
-            NSApp.sendAction(prefsSelector, to: nil, from: nil)
-        }
         NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 
     @objc private func quitARIL() {

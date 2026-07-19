@@ -495,6 +495,8 @@ struct StoreRecordDTO: Codable, Identifiable, Equatable {
     let categoryOverridden: Bool?
     let cached: Bool?
     let costUsd: Double?
+    let inputTokens: Int?
+    let outputTokens: Int?
     let sessionId: String?
     let createdAt: String?
     let updatedAt: String?
@@ -504,6 +506,8 @@ struct StoreRecordDTO: Codable, Identifiable, Equatable {
         case promptSnippet = "prompt_snippet"
         case categoryOverridden = "category_overridden"
         case costUsd = "cost_usd"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
         case sessionId = "session_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"

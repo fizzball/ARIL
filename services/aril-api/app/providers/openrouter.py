@@ -66,7 +66,16 @@ class OpenRouterProvider(LLMProvider):
             "Content-Type": "application/json",
             "HTTP-Referer": self.site_url,
             "X-Title": self.app_name,
+            # Some OpenRouter/CDN responses mislabel Content-Encoding; identity
+            # avoids zlib "incorrect header check" failures in httpx.
+            "Accept-Encoding": "identity",
         }
+
+    def _client(self, *, timeout: float | httpx.Timeout | None = 180.0) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=timeout,
+            headers={"Accept-Encoding": "identity"},
+        )
 
     def _require_key(self) -> None:
         if not self.api_key:
@@ -158,16 +167,22 @@ class OpenRouterProvider(LLMProvider):
             tool_choice=tool_choice,
         )
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
+        async with self._client(timeout=180.0) as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
             if response.status_code >= 400:
                 detail = response.text[:800]
                 raise RuntimeError(f"OpenRouter error {response.status_code}: {detail}")
-            data = response.json()
+            try:
+                data = response.json()
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(f"OpenRouter response decode failed: {exc}") from exc
 
         choices = data.get("choices") or []
         if not choices:
@@ -238,48 +253,53 @@ class OpenRouterProvider(LLMProvider):
             generate_image=False,
         )
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            ) as response:
-                if response.status_code >= 400:
-                    detail = (await response.aread()).decode("utf-8", errors="replace")[:800]
-                    raise RuntimeError(f"OpenRouter error {response.status_code}: {detail}")
+        async with self._client(timeout=None) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                ) as response:
+                    if response.status_code >= 400:
+                        detail = (await response.aread()).decode("utf-8", errors="replace")[:800]
+                        raise RuntimeError(f"OpenRouter error {response.status_code}: {detail}")
 
-                async for line in response.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data_str = line[5:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
 
-                    chunk = StreamChunk(model=data.get("model") or model)
-                    choices = data.get("choices") or []
-                    if choices:
-                        delta = choices[0].get("delta") or {}
-                        # Prefer incremental text; also fold any image payloads.
-                        text = delta.get("content") or ""
-                        if isinstance(text, list):
-                            text = _extract_message_content({"content": text})
-                        images = delta.get("images") or (choices[0].get("message") or {}).get("images")
-                        if images:
-                            folded = _extract_message_content({"content": text, "images": images})
-                            chunk.content = folded
-                        else:
-                            chunk.content = text if isinstance(text, str) else str(text)
-                        chunk.finish_reason = choices[0].get("finish_reason")
-                    usage = data.get("usage") or {}
-                    if usage:
-                        chunk.input_tokens = int(usage.get("prompt_tokens") or 0)
-                        chunk.output_tokens = int(usage.get("completion_tokens") or 0)
-                        chunk.cost_usd = float(usage.get("cost") or 0.0)
-                    yield chunk
+                        chunk = StreamChunk(model=data.get("model") or model)
+                        choices = data.get("choices") or []
+                        if choices:
+                            delta = choices[0].get("delta") or {}
+                            # Prefer incremental text; also fold any image payloads.
+                            text = delta.get("content") or ""
+                            if isinstance(text, list):
+                                text = _extract_message_content({"content": text})
+                            images = delta.get("images") or (choices[0].get("message") or {}).get("images")
+                            if images:
+                                folded = _extract_message_content({"content": text, "images": images})
+                                chunk.content = folded
+                            else:
+                                chunk.content = text if isinstance(text, str) else str(text)
+                            chunk.finish_reason = choices[0].get("finish_reason")
+                        usage = data.get("usage") or {}
+                        if usage:
+                            chunk.input_tokens = int(usage.get("prompt_tokens") or 0)
+                            chunk.output_tokens = int(usage.get("completion_tokens") or 0)
+                            chunk.cost_usd = float(usage.get("cost") or 0.0)
+                        yield chunk
+            except RuntimeError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(f"OpenRouter stream failed: {exc}") from exc
 
         yield StreamChunk(done=True)

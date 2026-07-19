@@ -7,8 +7,7 @@ struct EmptyHeroView: View {
     var body: some View {
         VStack(spacing: 14) {
             Spacer()
-            ARILGhostMark(color: theme.palette.accent, lineWidth: 2.4)
-                .frame(width: 88, height: 88)
+            ARILLogoImage(size: 88)
                 .opacity(appeared ? 1 : 0)
                 .scaleEffect(appeared ? 1 : 0.92)
                 .offset(y: appeared ? 0 : 6)
