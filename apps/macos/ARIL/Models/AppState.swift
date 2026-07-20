@@ -2150,7 +2150,7 @@ final class AppState: ObservableObject {
     /// `/nmap` and `/codescan` summaries are overridden at runtime by
     /// `paletteCommands` to reflect whether their MCP server is enabled.
     static let slashCommands: [SlashCommand] = [
-        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, Nmap, code scan, MCP, latest release"),
+        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, Nmap, code scan, MCP, latest release"),
         SlashCommand(id: "/update", summary: "Check for a newer ARIL release and install it to /Applications"),
         SlashCommand(id: "/nmap", summary: "Example Nmap prompts — port, host, and vuln scans"),
         SlashCommand(id: "/codescan", summary: "Example Semgrep prompts — scan a path or inline code"),
@@ -2442,6 +2442,12 @@ final class AppState: ObservableObject {
         } else {
             lines.append("- **OpenRouter:** ⚠️ no API key set (Preferences → Subscription)")
         }
+
+        // Local guardrails (Preferences → Subscription)
+        let sensitiveState = localGuardrailSensitiveInfo ? "✅ on (redact)" : "○ off"
+        let injectionState = localGuardrailPromptInjection ? "✅ on (block)" : "○ off"
+        lines.append("- **Sensitive Info guardrail:** \(sensitiveState)")
+        lines.append("- **Prompt Injection guardrail:** \(injectionState)")
 
         // Nmap managed server
         refreshNmapInstalled()

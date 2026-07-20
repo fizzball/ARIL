@@ -72,6 +72,12 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.7", changes: [
+            "Judge mode renders images, Mermaid, and SVG in comparison cards",
+            "Menu bar icon uses the ARIL logo (Preferences → General → Show in menu bar)",
+            "/status reports Sensitive Info and Prompt Injection guardrail state",
+            "Public site at aril.host with screenshots and direct download",
+        ]),
         ChangelogEntry(version: "0.4.6", changes: [
             "New ARIL app icon and in-chat logo; waiting replies show a spinning gold arrow",
             "Log Analysis moved to the toolbar; About opens from the ARIL title label",

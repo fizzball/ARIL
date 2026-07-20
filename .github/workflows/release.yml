@@ -116,3 +116,59 @@ jobs:
         run: |
           KEYCHAIN_PATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/aril-build.keychain-db}"
           security delete-keychain "$KEYCHAIN_PATH" || true
+
+  website:
+    needs: macos
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download macOS build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aril-macos
+          path: dist
+
+      - name: Stage DMG for website
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          mkdir -p website/downloads
+          cp "dist/ARIL-${VERSION}.dmg" "website/downloads/ARIL-${VERSION}.dmg"
+          cp "dist/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
+          SIZE="$(stat -c%s "website/downloads/ARIL-latest.dmg")"
+          cat > website/downloads/latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "file": "ARIL-latest.dmg",
+            "published": "$(date -u +%Y-%m-%d)",
+            "size_bytes": ${SIZE},
+            "requirements": "Apple Silicon Mac · macOS 14+ · OpenRouter key"
+          }
+          EOF
+
+      - name: Deploy to aril.host
+        if: ${{ secrets.HOSTINGER_SSH_KEY != '' }}
+        env:
+          HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          HOSTINGER_SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          HOSTINGER_WEB_ROOT: ${{ secrets.HOSTINGER_WEB_ROOT }}
+          SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 600 -D /dev/null "$RUNNER_TEMP/hostinger_key"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/hostinger_key"
+          HOST="${HOSTINGER_SSH_HOST:-145.79.25.220}"
+          PORT="${HOSTINGER_SSH_PORT:-65002}"
+          USER="${HOSTINGER_SSH_USER:-u669814535}"
+          REMOTE="${HOSTINGER_WEB_ROOT:-/home/u669814535/domains/aril.host/public_html}"
+          rsync -avz --delete \
+            -e "ssh -p ${PORT} -i $RUNNER_TEMP/hostinger_key -o StrictHostKeyChecking=accept-new" \
+            website/ \
+            "${USER}@${HOST}:${REMOTE}/"
+          echo "Deployed https://aril.host/"

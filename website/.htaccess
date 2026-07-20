@@ -1,0 +1,24 @@
+# Force HTTPS
+RewriteEngine On
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP:X-Forwarded-Proto} !https
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# DMG downloads
+<FilesMatch "\.(dmg)$">
+  Header set Content-Type "application/octet-stream"
+  Header set Content-Disposition "attachment"
+</FilesMatch>
+
+# Cache static assets; always revalidate download metadata
+<Files "index.html">
+  Header set Cache-Control "no-cache, must-revalidate"
+</Files>
+
+<FilesMatch "\.(css|png|jpg|webp|svg)$">
+  Header set Cache-Control "public, max-age=3600, must-revalidate"
+</FilesMatch>
+
+<Files "latest.json">
+  Header set Cache-Control "no-cache"
+</Files>

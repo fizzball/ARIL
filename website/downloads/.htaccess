@@ -1,0 +1,4 @@
+<FilesMatch "\.(dmg)$">
+  Header set Content-Type "application/octet-stream"
+  Header set Content-Disposition "attachment"
+</FilesMatch>

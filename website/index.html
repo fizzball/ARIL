@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ARIL — Adaptive Routing Intelligence Layer</title>
+  <meta name="description" content="ARIL is a native macOS chat client that grades prompts, routes OpenRouter models, and shows cost before you send. Download the notarized release for Apple Silicon.">
+  <meta property="og:title" content="ARIL — Adaptive Routing Intelligence Layer">
+  <meta property="og:description" content="Native macOS AI chat with smart routing, cost transparency, and local guardrails.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://aril.host/">
+  <meta property="og:image" content="https://aril.host/assets/screenshots/home.png">
+  <link rel="icon" href="/assets/logo.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/">
+        <img src="/assets/logo.png" width="32" height="32" alt="">
+        <span>ARIL</span>
+      </a>
+      <nav class="nav-actions">
+        <a class="nav-link hide-mobile" href="#features">Features</a>
+        <a class="nav-link hide-mobile" href="#screenshots">Screenshots</a>
+        <a class="btn btn-primary" href="#download" id="nav-download">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="hero-tagline">Adaptive Routing Intelligence Layer</p>
+          <h1>Route smarter.<br>Spend less.</h1>
+          <p class="hero-lead">
+            A native macOS chat app that grades your prompt, picks the right OpenRouter model,
+            and shows estimated cost before you send.
+          </p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="/downloads/ARIL-latest.dmg" id="hero-download">
+              Download for Mac
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/fizzball/ARIL" target="_blank" rel="noopener">Source on GitHub</a>
+          </div>
+          <p class="hero-meta">
+            <strong id="version-label">v0.4.7</strong> · Notarized · Apple Silicon · macOS 14+
+          </p>
+        </div>
+        <figure class="hero-shot">
+          <img src="/assets/screenshots/home.png" alt="ARIL home screen with session sidebar and prompt entry" width="1280" height="800" loading="eager">
+        </figure>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="container">
+        <p class="section-label">Features</p>
+        <h2 class="section-title">Built for power users who care about cost and quality</h2>
+        <p class="section-lead">
+          ARIL runs a local gateway on your Mac, connects to OpenRouter, and helps you choose
+          the right model for every task — without leaving the desktop.
+        </p>
+        <div class="features-grid">
+          <article class="feature-card">
+            <h3>Auto · Manual · Judge</h3>
+            <p>Let ARIL route by category, lock a model, or compare three providers side-by-side and pick a winner.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Prompt intelligence</h3>
+            <p>Grade, token estimate, latency probe, and rewrite suggestions while you type — before you spend.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Cost transparency</h3>
+            <p>Per-message cost footers, session totals, budget guardrails, and OpenRouter credit status in the footer.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Learning loop</h3>
+            <p>Prefer a Judge winner and Auto promotes that model next time for the same kind of prompt.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Local guardrails</h3>
+            <p>Redact sensitive patterns and block prompt-injection attempts before they leave your Mac.</p>
+          </article>
+          <article class="feature-card">
+            <h3>MCP tools</h3>
+            <p>Built-in nmap and Semgrep scanners over MCP, plus slash commands for status, scans, and updates.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="screenshots">
+      <div class="container">
+        <p class="section-label">In the app</p>
+        <h2 class="section-title">See it working</h2>
+
+        <div class="showcase">
+          <div class="showcase-copy">
+            <h3>Intelligence before you send</h3>
+            <p>Prompt grade, category, confidence, cost estimate, and an improved prompt alternative — all in one panel.</p>
+          </div>
+          <figure class="showcase-shot">
+            <img src="/assets/screenshots/intelligence.png" alt="ARIL intelligence panel with grade and prompt alternative" loading="lazy">
+          </figure>
+        </div>
+
+        <div class="showcase">
+          <div class="showcase-copy">
+            <h3>Clear, streaming replies</h3>
+            <p>Markdown and math render legibly. Every reply shows the model, tokens, and exact OpenRouter cost.</p>
+          </div>
+          <figure class="showcase-shot">
+            <img src="/assets/screenshots/chat.png" alt="ARIL chat with formatted agent response and cost footer" loading="lazy">
+          </figure>
+        </div>
+
+        <div class="showcase">
+          <div class="showcase-copy">
+            <h3>Judge three models at once</h3>
+            <p>Run the same prompt across GPT, Llama, and Gemini. ES scores help you select your preferred answer, and ARIL will automatically use that model next time a similar prompt is run.</p>
+          </div>
+          <figure class="showcase-shot">
+            <img src="/assets/screenshots/judge.png?v=2" alt="ARIL Judge mode comparing three model responses with images and diagrams" loading="lazy">
+          </figure>
+        </div>
+
+        <div class="showcase">
+          <div class="showcase-copy">
+            <h3>Images, logs, and tools</h3>
+            <p>Generate images in chat, inspect OpenRouter transactions live, and run nmap or code scans via MCP.</p>
+          </div>
+          <figure class="showcase-shot">
+            <img src="/assets/screenshots/images.png" alt="ARIL generating an image in chat" loading="lazy">
+          </figure>
+        </div>
+
+        <div class="showcase">
+          <div class="showcase-copy">
+            <h3>Live log analysis</h3>
+            <p>OpenRouter calls, token counts, and per-request cost — streamed in a toolbar panel so you always know what ran.</p>
+          </div>
+          <figure class="showcase-shot">
+            <img src="/assets/screenshots/log-analysis.png" alt="ARIL log analysis panel showing OpenRouter transactions" loading="lazy">
+          </figure>
+        </div>
+
+        <div class="showcase">
+          <div class="showcase-copy">
+            <h3>Managed MCP scanners</h3>
+            <p>Local nmap and Semgrep servers launch automatically. Slash commands for status, scans, and updates.</p>
+          </div>
+          <figure class="showcase-shot">
+            <img src="/assets/screenshots/mcp.png" alt="ARIL MCP settings with nmap and Semgrep scanners" loading="lazy">
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="download-band" id="download">
+      <div class="container">
+        <p class="section-label">Download</p>
+        <h2 class="section-title">Get ARIL for macOS</h2>
+        <p class="section-lead">
+          Signed with Developer ID and notarized by Apple. Drag to Applications and connect
+          your OpenRouter key in Preferences → Subscription.
+        </p>
+        <a class="btn btn-primary" href="/downloads/ARIL-latest.dmg" id="footer-download">
+          Download ARIL for Mac
+        </a>
+        <p class="download-version">
+          Latest release: <span id="download-version">v0.4.7</span>
+        </p>
+        <ul class="requirements">
+          <li><strong>Mac</strong> Apple Silicon (M-series)</li>
+          <li><strong>OS</strong> macOS 14 Sonoma or newer</li>
+          <li><strong>API</strong> <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter</a> key</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>© 2026 Ramon Ali · ARIL</p>
+      <nav class="footer-links">
+        <a href="https://github.com/fizzball/ARIL" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    fetch('/downloads/latest.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.version) return;
+        const v = 'v' + data.version;
+        document.getElementById('version-label').textContent = v;
+        document.getElementById('download-version').textContent = v;
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

@@ -113,23 +113,10 @@ private struct CompareCard: View {
                     .foregroundStyle(theme.palette.danger)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 3) {
-                        ForEach(
-                            Array(AssistantReadableText.displayLines(result.content).enumerated()),
-                            id: \.offset
-                        ) { _, line in
-                            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                                Spacer().frame(height: 8)
-                            } else {
-                                Text(AssistantReadableText.attributedLine(line))
-                                    .font(ARILTheme.bodyFont)
-                                    .foregroundStyle(theme.palette.text)
-                                    .tint(theme.palette.accent)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
+                    AssistantMarkdownContent(
+                        content: result.content,
+                        textColor: theme.palette.text
+                    )
                     .padding(8)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
