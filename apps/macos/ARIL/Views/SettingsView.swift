@@ -41,6 +41,7 @@ struct SettingsView: View {
         }
         .onAppear {
             Self.applyWindowChrome(colorScheme: theme.preferredColorScheme)
+            state.refreshSessionCacheStatus()
             Task {
                 await state.refreshDatabaseStatus()
                 await state.refreshOpenRouterKeyStatus()
@@ -218,6 +219,17 @@ struct SettingsView: View {
         .padding()
     }
 
+    private var sessionCacheColor: Color {
+        switch state.sessionCacheHealth {
+        case .healthy:
+            return theme.palette.textMuted
+        case .ok:
+            return theme.palette.preferredHighlight
+        case .warn:
+            return theme.palette.danger
+        }
+    }
+
     private var gatewayTab: some View {
         Form {
             Section("Gateway") {
@@ -366,6 +378,27 @@ struct SettingsView: View {
                 LabeledContent("Today’s spend") {
                     Text(String(format: "$%.4f", state.dailySpendUsd))
                         .monospacedDigit()
+                }
+            }
+
+            Section("Session cache") {
+                Text("Local chat history stored for fast startup. Bulky image payloads are stripped on save, but older caches may still grow large.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Size") {
+                    Text(state.sessionCacheLabel)
+                        .monospacedDigit()
+                        .foregroundStyle(sessionCacheColor)
+                }
+
+                HStack {
+                    Button("Compact cache") {
+                        state.compactSessionCache()
+                    }
+                    Button("Clear cache", role: .destructive) {
+                        state.clearSessionCache()
+                    }
                 }
             }
 

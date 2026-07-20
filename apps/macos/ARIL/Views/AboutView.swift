@@ -72,6 +72,12 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.8", changes: [
+            "Session cache management: strip bulky image payloads on save, auto-compact oversized caches, warn with Compact/Clear",
+            "Status footer shows Cache Size with healthy / ok / warn colours",
+            "Faster launch (fresh session before bootstrap) and smoother typing (draft no longer redraws the whole app)",
+            "Preferences → General: Compact cache and Clear cache",
+        ]),
         ChangelogEntry(version: "0.4.7", changes: [
             "Judge mode renders images, Mermaid, and SVG in comparison cards",
             "Menu bar icon uses the ARIL logo (Preferences → General → Show in menu bar)",

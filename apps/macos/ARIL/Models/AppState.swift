@@ -58,6 +58,33 @@ enum ContextLimitDecision {
     case cancel
 }
 
+/// Local `sessions-cache.json` size band for footer colour and launch warnings.
+enum SessionCacheHealth: Equatable, Comparable {
+    case healthy
+    case ok
+    case warn
+
+    static func from(byteCount: Int) -> SessionCacheHealth {
+        switch byteCount {
+        case ..<AppState.sessionCacheHealthyMaxBytes: return .healthy
+        case ..<AppState.sessionCacheOkMaxBytes: return .ok
+        default: return .warn
+        }
+    }
+
+    private var rank: Int {
+        switch self {
+        case .healthy: return 0
+        case .ok: return 1
+        case .warn: return 2
+        }
+    }
+
+    static func < (lhs: SessionCacheHealth, rhs: SessionCacheHealth) -> Bool {
+        lhs.rank < rhs.rank
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     /// Built-in starter models for the Manual-mode picker (before Other… picks).
@@ -72,6 +99,11 @@ final class AppState: ObservableObject {
 
     /// Cap for the Manual / Preferences shortlist (factory set + Other… picks).
     static let maxModelCatalogSize = 8
+
+    /// Session cache thresholds (see `SessionCacheHealth`).
+    static let sessionCacheHealthyMaxBytes = 512_000
+    static let sessionCacheOkMaxBytes = 1_048_576
+    static let sessionCacheAutoCompactBytes = 5_242_880
 
     /// Factory default for Preferences → Models (app default picker).
     static let factoryDefaultModel = "openai/gpt-4.1"
@@ -131,7 +163,10 @@ final class AppState: ObservableObject {
 
     @Published var sessions: [ChatSession] = []
     @Published var selectedSessionID: UUID?
-    @Published var draft: String = ""
+    /// Typing buffer — not `@Published` so keystrokes don't redraw the whole app.
+    var draft: String = ""
+    /// Bumped when `draft` is set programmatically (history recall, slash commands, session clear).
+    @Published private(set) var draftRevision: UInt = 0
     /// Preference default — persisted; applied to session temperature on launch / when prefs change.
     @Published var defaultTemperature: Double = 0.7
     /// Session temperature used by analysis + sends; resets to `defaultTemperature` on launch.
@@ -236,6 +271,12 @@ final class AppState: ObservableObject {
     @Published var budgetConfirmMessage: String?
     /// Context-window limit dialog message; nil when no prompt is showing.
     @Published var contextLimitMessage: String?
+    /// On-disk session cache size for the status footer.
+    @Published var sessionCacheBytes: Int = 0
+    @Published var sessionCacheLabel: String = "—"
+    @Published var sessionCacheHealth: SessionCacheHealth = .healthy
+    /// Launch / maintenance alert for an oversized local session cache.
+    @Published var sessionCacheAlertMessage: String?
     @Published var categoryPreferWins: [String: [String: Int]] = [:]
     @Published var fingerprintPreferWins: [String: [String: Int]] = [:]
     @Published var evalLog: [EvalLogEntry] = []
@@ -344,6 +385,11 @@ final class AppState: ObservableObject {
         loadDeletedSessionIDs()
         // Restore history synchronously so the first frame never looks empty.
         loadLocalSessions()
+        handleSessionCacheOnLaunch()
+        // Don't make first paint wait for gateway/bootstrap just to show a blank chat.
+        if !openLastSessionOnStartup, sessions.first?.messages.isEmpty != true {
+            createSession()
+        }
         // Seed built-in rates immediately so Preferences pricing isn’t blank
         // before the gateway answers (or when no OpenRouter key is configured).
         applyDefaultModelPricing()
@@ -430,6 +476,101 @@ final class AppState: ObservableObject {
         let cont = contextLimitContinuation
         contextLimitContinuation = nil
         cont?.resume(returning: decision)
+    }
+
+    func respondToSessionCacheAlert(compact: Bool) {
+        sessionCacheAlertMessage = nil
+        if compact {
+            compactSessionCache(silent: false)
+        } else {
+            clearSessionCache()
+        }
+    }
+
+    func dismissSessionCacheAlert() {
+        sessionCacheAlertMessage = nil
+    }
+
+    /// Strip bulky payloads from in-memory sessions and rewrite the on-disk cache.
+    func compactSessionCache(silent: Bool = false) {
+        let cleaned = sanitizedSessionsForCache()
+        sessions = cleaned
+        noteSessionsChanged()
+        writeLocalSessionsFile(cleaned)
+        if !silent {
+            appendLocalAssistantNote(
+                "**Session cache compacted** — local history is now \(sessionCacheLabel)."
+            )
+        }
+    }
+
+    /// Delete the on-disk cache and start from a fresh empty session list.
+    func clearSessionCache() {
+        try? FileManager.default.removeItem(at: localSessionsURL)
+        sessions = []
+        selectedSessionID = nil
+        createSession()
+        refreshSessionCacheStatus()
+        appendLocalAssistantNote(
+            "**Session cache cleared** — local chat history was removed. Gateway history may still be available after sync."
+        )
+    }
+
+    func refreshSessionCacheStatus() {
+        let url = localSessionsURL
+        let bytes: Int
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int {
+            bytes = size
+        } else {
+            bytes = 0
+        }
+        sessionCacheBytes = bytes
+        sessionCacheLabel = Self.formatSessionCacheSize(bytes)
+        sessionCacheHealth = SessionCacheHealth.from(byteCount: bytes)
+    }
+
+    private func handleSessionCacheOnLaunch() {
+        refreshSessionCacheStatus()
+        if sessionCacheBytes >= Self.sessionCacheAutoCompactBytes {
+            compactSessionCache(silent: true)
+            refreshSessionCacheStatus()
+        } else if sessionCacheBytes >= Self.sessionCacheOkMaxBytes {
+            compactSessionCache(silent: true)
+            refreshSessionCacheStatus()
+        }
+        if sessionCacheHealth >= .warn {
+            sessionCacheAlertMessage =
+                "Local session cache is \(sessionCacheLabel). Large caches can slow typing and opening previous sessions. Compact to remove bulky image data, or clear to start fresh."
+        }
+    }
+
+    private static func formatSessionCacheSize(_ bytes: Int) -> String {
+        switch bytes {
+        case ..<1024: return "\(bytes) B"
+        case ..<1_048_576: return String(format: "%.0f KB", Double(bytes) / 1024.0)
+        default: return String(format: "%.1f MB", Double(bytes) / 1_048_576.0)
+        }
+    }
+
+    private func sanitizedSessionsForCache() -> [ChatSession] {
+        var cleaned = sessions
+        for i in cleaned.indices {
+            cleaned[i].deduplicateMessages()
+            cleaned[i].messages = cleaned[i].messages.map { message in
+                ChatMessage(role: message.role, content: Self.sanitizeContentForStorage(message.content))
+            }
+            cleaned[i].recomputeTotalCost()
+        }
+        return cleaned
+    }
+
+    private func sessionsNeedStorageSanitization(_ sessions: [ChatSession]) -> Bool {
+        sessions.contains { session in
+            session.messages.contains { message in
+                Self.sanitizeContentForStorage(message.content) != message.content
+            }
+        }
     }
 
     private func requestContextLimitConfirmation(message: String) async -> ContextLimitDecision {
@@ -635,7 +776,7 @@ final class AppState: ObservableObject {
         case .newSession:
             let carriedAttachments = pendingAttachments
             createSession()
-            draft = newUserText
+            setDraft(newUserText)
             pendingAttachments = carriedAttachments
             return false
         case .cancel:
@@ -1087,7 +1228,7 @@ final class AppState: ObservableObject {
         reconcileSelection()
         // Default: start each launch on a fresh session to minimise context exhaustion.
         // Users can opt into reopening the most recent session via Preferences.
-        if !openLastSessionOnStartup {
+        if !openLastSessionOnStartup, sessions.first?.messages.isEmpty != true {
             createSession()
         }
         saveLocalSessions()
@@ -1302,7 +1443,7 @@ final class AppState: ObservableObject {
         next.insert(session, at: 0)
         sessions = next
         selectedSessionID = session.id
-        draft = ""
+        setDraft("")
         preview = nil
         showIntelligencePanel = false
         analysisStatus = .idle
@@ -1322,7 +1463,7 @@ final class AppState: ObservableObject {
         sessions.removeAll { $0.id == id }
         if selectedSessionID == id {
             selectedSessionID = sessions.first?.id
-            draft = ""
+            setDraft("")
             preview = nil
             showIntelligencePanel = false
             analysisStatus = .idle
@@ -1346,7 +1487,7 @@ final class AppState: ObservableObject {
         persistDeletedSessionIDs()
         sessions = []
         selectedSessionID = nil
-        draft = ""
+        setDraft("")
         preview = nil
         showIntelligencePanel = false
         analysisStatus = .idle
@@ -1896,13 +2037,13 @@ final class AppState: ObservableObject {
             .components(separatedBy: "\n\n[Attached:")
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? text
-        draft = cleaned.hasPrefix("[Attached:") ? "" : cleaned
+        setDraft(cleaned.hasPrefix("[Attached:") ? "" : cleaned)
         schedulePreview()
     }
 
     private func resetPromptForModeChange() {
         previewTask?.cancel()
-        draft = ""
+        setDraft("")
         preview = nil
         showIntelligencePanel = false
         analysisStatus = .idle
@@ -1969,14 +2110,14 @@ final class AppState: ObservableObject {
             pinnedFullAnalysisPrompt = ""
         }
 
-        showIntelligencePanel = true
-        // Keep prior skipped metrics visible during the idle wait when re-typing briefly.
-        if preview?.analysisSkipped != true || text != lastJudgementSkipPrompt {
-            preview = nil
+        if !showIntelligencePanel {
+            showIntelligencePanel = true
         }
-        estimatedLatencyMs = nil
         let idle = analysisIdleSeconds
-        analysisStatus = .analysing(secondsRemaining: idle)
+        let pendingStatus = AnalysisStatus.analysing(secondsRemaining: idle)
+        if analysisStatus != pendingStatus {
+            analysisStatus = pendingStatus
+        }
 
         previewTask = Task {
             if idle <= 0 {
@@ -2110,7 +2251,7 @@ final class AppState: ObservableObject {
             historyStash = draft
             historyNavIndex = promptHistory.count - 1
         }
-        if let idx = historyNavIndex { draft = promptHistory[idx] }
+        if let idx = historyNavIndex { setDraft(promptHistory[idx]) }
         return true
     }
 
@@ -2119,13 +2260,28 @@ final class AppState: ObservableObject {
         guard let idx = historyNavIndex else { return false }
         if idx < promptHistory.count - 1 {
             historyNavIndex = idx + 1
-            draft = promptHistory[idx + 1]
+            setDraft(promptHistory[idx + 1])
         } else {
             historyNavIndex = nil
-            draft = historyStash
+            setDraft(historyStash)
             historyStash = ""
         }
         return true
+    }
+
+    /// Programmatic draft updates (syncs the input field via `draftRevision`).
+    func setDraft(_ value: String) {
+        guard draft != value else { return }
+        draft = value
+        draftRevision &+= 1
+    }
+
+    /// Keystroke path — updates the buffer without publishing `draft`.
+    func updateDraftFromTyping(_ value: String) {
+        draft = value
+        noteDraftEditedFromTyping()
+        onDraftChangedForSlash()
+        schedulePreview()
     }
 
     /// Called when the draft changes from typing; drops history browsing if edited.
@@ -2225,7 +2381,7 @@ final class AppState: ObservableObject {
         let cmd = items[slashMenuIndex].id
         slashMenuIndex = 0
         slashMenuDismissed = false
-        draft = ""
+        setDraft("")
         _ = handleSlashCommand(cmd)
     }
 
@@ -2233,7 +2389,7 @@ final class AppState: ObservableObject {
     func insertSelectedSlash() {
         let items = filteredSlashCommands
         guard items.indices.contains(slashMenuIndex) else { return }
-        draft = items[slashMenuIndex].id + " "
+        setDraft(items[slashMenuIndex].id + " ")
         slashMenuIndex = 0
     }
 
@@ -2243,8 +2399,10 @@ final class AppState: ObservableObject {
 
     /// Keep the palette selection valid and re-arm it as the draft changes.
     func onDraftChangedForSlash() {
-        slashMenuDismissed = false
-        if slashMenuIndex >= filteredSlashCommands.count {
+        if slashMenuDismissed {
+            slashMenuDismissed = false
+        }
+        if slashMenuIndex >= filteredSlashCommands.count, !filteredSlashCommands.isEmpty {
             slashMenuIndex = 0
         }
     }
@@ -2257,42 +2415,42 @@ final class AppState: ObservableObject {
         switch command {
         case "/clear", "/cls":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             clearCurrentTranscript()
             return true
         case "/status", "/health":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             Task { await runStatusCommand() }
             return true
         case "/update", "/upgrade":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             Task { await runUpdateCommand() }
             return true
         case "/help", "/?":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             appendLocalAssistantNote(slashHelpText)
             return true
         case "/nmap":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             appendLocalAssistantNote(nmapExamplesNote())
             return true
         case "/codescan", "/code":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             appendLocalAssistantNote(codeScanExamplesNote())
             return true
         case "/reset":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             showResetConfirmation = true
             return true
         case "/exit", "/quit":
             recordPromptHistory(trimmed)
-            draft = ""
+            setDraft("")
             shutdown()
             NSApplication.shared.terminate(nil)
             return true
@@ -2710,7 +2868,7 @@ final class AppState: ObservableObject {
                 sendText = scanned.text
                 localGuardrailStatusMessage = scanned.redactSummary
                 if promptOverride == nil {
-                    draft = sendText
+                    setDraft(sendText)
                 }
             }
         }
@@ -2720,7 +2878,7 @@ final class AppState: ObservableObject {
         }
 
         if promptOverride != nil {
-            draft = sendText
+            setDraft(sendText)
         }
 
         // Enter during the idle countdown: skip classify/preview and judgement logging.
@@ -2776,7 +2934,7 @@ final class AppState: ObservableObject {
             }
         }
         guard let idx = sessions.firstIndex(where: { $0.id == sid }) else { return }
-        draft = ""
+        setDraft("")
         let attachmentsForSend = pendingAttachments
         pendingAttachments = []
         let lockedManualModel = UserDefaults.standard.string(forKey: "aril.lastModel") ?? defaultModel
@@ -3350,7 +3508,7 @@ final class AppState: ObservableObject {
         compareRouteCategory = nil
         preferredCompareModel = result.model
         routeMode = .auto
-        draft = ""
+        setDraft("")
         preview = nil
         showIntelligencePanel = false
         analysisStatus = .idle
@@ -3479,7 +3637,7 @@ final class AppState: ObservableObject {
 
         for prompt in AutoEvalPrompts.all {
             if Task.isCancelled { break }
-            draft = prompt
+            setDraft(prompt)
             isSending = true
             beginGenerationTracking()
             await performSend(promptOverride: prompt)
@@ -3594,7 +3752,7 @@ final class AppState: ObservableObject {
     }
 
     func applyAlternative(_ alt: PromptAlternative) {
-        draft = alt.text
+        setDraft(alt.text)
         schedulePreview()
     }
 
@@ -3753,23 +3911,24 @@ final class AppState: ObservableObject {
     }
 
     private func saveLocalSessions() {
-        var cleaned = sessions
-        for i in cleaned.indices {
-            cleaned[i].deduplicateMessages()
-            cleaned[i].recomputeTotalCost()
-        }
+        let cleaned = sanitizedSessionsForCache()
         let beforeCounts = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.messages.count) })
         let afterCounts = Dictionary(uniqueKeysWithValues: cleaned.map { ($0.id, $0.messages.count) })
-        if beforeCounts != afterCounts {
+        if beforeCounts != afterCounts || sessionsNeedStorageSanitization(sessions) {
             sessions = cleaned
             noteSessionsChanged()
         }
+        writeLocalSessionsFile(cleaned)
+    }
+
+    private func writeLocalSessionsFile(_ cleaned: [ChatSession]) {
         let cache = LocalSessionsCache(selectedSessionID: selectedSessionID, sessions: cleaned)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .deferredToDate
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(cache) else { return }
         try? data.write(to: localSessionsURL, options: [.atomic])
+        refreshSessionCacheStatus()
     }
 
     /// Gateway timestamps use fractional seconds; default ISO8601DateFormatter misses them.

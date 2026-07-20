@@ -47,6 +47,14 @@ struct StatusFooterView: View {
                     return parts.isEmpty ? "OpenRouter" : parts.joined(separator: " · ")
                 }())
 
+            Circle()
+                .fill(sessionCacheColor)
+                .frame(width: 6, height: 6)
+            Text("Cache Size \(state.sessionCacheLabel)")
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(sessionCacheColor)
+                .help(sessionCacheHelp)
+
             if state.lastCacheLabel == "cached" || state.lastCacheLabel == "not cached" {
                 Text(state.lastCacheLabel)
                     .font(ARILTheme.captionFont)
@@ -77,7 +85,7 @@ struct StatusFooterView: View {
                     .foregroundStyle(theme.palette.preferredHighlight)
                     .lineLimit(1)
             } else if let latency = state.lastLatencyMs {
-                Text("Last \(latency)ms")
+                Text("last \(latency)ms")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.textMuted.opacity(0.8))
             }
@@ -105,5 +113,27 @@ struct StatusFooterView: View {
         let ms = state.generationElapsedMs
         if ms < 1000 { return "\(ms)ms" }
         return String(format: "%.1fs", Double(ms) / 1000.0)
+    }
+
+    private var sessionCacheColor: Color {
+        switch state.sessionCacheHealth {
+        case .healthy:
+            return theme.palette.textMuted
+        case .ok:
+            return theme.palette.preferredHighlight
+        case .warn:
+            return theme.palette.danger
+        }
+    }
+
+    private var sessionCacheHelp: String {
+        switch state.sessionCacheHealth {
+        case .healthy:
+            return "Local session cache is a healthy size (\(state.sessionCacheLabel))."
+        case .ok:
+            return "Local session cache is growing (\(state.sessionCacheLabel)). Compact from Preferences if typing feels slow."
+        case .warn:
+            return "Local session cache is large (\(state.sessionCacheLabel)). Compact or clear it from Preferences to restore responsiveness."
+        }
     }
 }

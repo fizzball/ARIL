@@ -5,6 +5,7 @@ struct InputBarView: View {
     @EnvironmentObject private var theme: ThemeStore
     @FocusState private var focused: Bool
     @State private var showModelBrowser = false
+    @State private var localDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -151,7 +152,7 @@ struct InputBarView: View {
                 .buttonStyle(.plain)
                 .help("Attach images or files")
 
-                TextField("Describe what you need.", text: $state.draft, axis: .vertical)
+                TextField("Describe what you need.", text: $localDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(ARILTheme.bodyFont)
                     .foregroundStyle(theme.palette.text)
@@ -159,10 +160,18 @@ struct InputBarView: View {
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
                     .focused($focused)
-                    .onChange(of: state.draft) { _, _ in
-                        state.noteDraftEditedFromTyping()
-                        state.onDraftChangedForSlash()
-                        state.schedulePreview()
+                    .onAppear {
+                        localDraft = state.draft
+                    }
+                    .onChange(of: localDraft) { _, value in
+                        if value != state.draft {
+                            state.updateDraftFromTyping(value)
+                        }
+                    }
+                    .onChange(of: state.draftRevision) { _, _ in
+                        if localDraft != state.draft {
+                            localDraft = state.draft
+                        }
                     }
                     .onKeyPress(.upArrow) {
                         if state.slashMenuVisible {
@@ -170,7 +179,7 @@ struct InputBarView: View {
                             return .handled
                         }
                         // Shell-style history recall; leave multi-line editing alone.
-                        guard !state.draft.contains("\n") else { return .ignored }
+                        guard !localDraft.contains("\n") else { return .ignored }
                         return state.recallPreviousPrompt() ? .handled : .ignored
                     }
                     .onKeyPress(.downArrow) {
@@ -178,7 +187,7 @@ struct InputBarView: View {
                             state.slashMenuMove(1)
                             return .handled
                         }
-                        guard !state.draft.contains("\n") else { return .ignored }
+                        guard !localDraft.contains("\n") else { return .ignored }
                         return state.recallNextPrompt() ? .handled : .ignored
                     }
                     .onKeyPress(.tab) {
@@ -265,11 +274,11 @@ struct InputBarView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(
-                            state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            localDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                 && state.pendingAttachments.isEmpty
                         )
                         .opacity(
-                            state.draft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
+                            localDraft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
                         )
                         .help("Send")
                     }

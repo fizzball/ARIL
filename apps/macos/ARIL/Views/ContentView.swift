@@ -159,6 +159,25 @@ struct ContentView: View {
         } message: {
             Text(state.updateConfirmMessage ?? "")
         }
+        .alert(
+            "Session cache is large",
+            isPresented: Binding(
+                get: { state.sessionCacheAlertMessage != nil },
+                set: { if !$0 { state.dismissSessionCacheAlert() } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) {
+                state.dismissSessionCacheAlert()
+            }
+            Button("Clear cache", role: .destructive) {
+                state.respondToSessionCacheAlert(compact: false)
+            }
+            Button("Compact cache") {
+                state.respondToSessionCacheAlert(compact: true)
+            }
+        } message: {
+            Text(state.sessionCacheAlertMessage ?? "")
+        }
         .task {
             systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.

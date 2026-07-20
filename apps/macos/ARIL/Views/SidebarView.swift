@@ -70,12 +70,12 @@ struct SidebarView: View {
                     } else {
                         ForEach(filtered, id: \.id) { session in
                             let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                            SessionRow(sessionID: session.id, searchQuery: q)
+                            SessionRow(session: session, searchQuery: q)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(rowBackground(for: session.id, query: q))
+                                        .fill(rowBackground(for: session, query: q))
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -106,13 +106,11 @@ struct SidebarView: View {
         }
     }
 
-    private func rowBackground(for id: UUID, query: String) -> Color {
-        if state.selectedSessionID == id {
+    private func rowBackground(for session: ChatSession, query: String) -> Color {
+        if state.selectedSessionID == session.id {
             return theme.palette.accent.opacity(0.18)
         }
-        guard !query.isEmpty,
-              let session = state.sessions.first(where: { $0.id == id }),
-              session.matchesSearch(query) else {
+        guard !query.isEmpty, session.matchesSearch(query) else {
             return Color.clear
         }
         return theme.palette.preferredHighlight.opacity(0.10)
@@ -132,14 +130,10 @@ struct SidebarView: View {
 private struct SessionRow: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
-    let sessionID: UUID
+    let session: ChatSession
     /// Active sidebar search text (empty when not filtering).
     var searchQuery: String = ""
     @State private var hovering = false
-
-    private var live: ChatSession? {
-        state.sessions.first(where: { $0.id == sessionID })
-    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -151,7 +145,7 @@ private struct SessionRow: View {
                 HStack(spacing: 0) {
                     Text(subtitlePrefix)
                         .foregroundStyle(theme.palette.textMuted.opacity(0.8))
-                    Text(live?.totalCostLabel ?? "$0.0000")
+                    Text(session.totalCostLabel)
                         .foregroundStyle(theme.palette.danger)
                         .monospacedDigit()
                 }
@@ -165,8 +159,8 @@ private struct SessionRow: View {
                         .help(snippet)
                 }
 
-                if let live, !live.messages.isEmpty {
-                    let fraction = live.contextFraction
+                if !session.messages.isEmpty {
+                    let fraction = session.contextFraction
                     let color = contextColor(fraction)
                     HStack(spacing: 6) {
                         ContextUsageBar(fraction: fraction, color: color)
@@ -175,13 +169,13 @@ private struct SessionRow: View {
                             .foregroundStyle(color)
                             .monospacedDigit()
                     }
-                    .help("Approx. model context used: \(live.contextChars.formatted()) / \(ChatSession.maxContextChars.formatted()) characters")
+                    .help("Approx. model context used: \(session.contextChars.formatted()) / \(ChatSession.maxContextChars.formatted()) characters")
                 }
             }
             Spacer(minLength: 4)
             if hovering {
                 Button {
-                    Task { await state.deleteSession(sessionID) }
+                    Task { await state.deleteSession(session.id) }
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11, weight: .semibold))
@@ -197,18 +191,17 @@ private struct SessionRow: View {
 
     @ViewBuilder
     private var titleLabel: some View {
-        Text(live?.title ?? "Session")
+        Text(session.title)
     }
 
     private var matchSnippet: String? {
-        guard !searchQuery.isEmpty, let live else { return nil }
-        return live.searchSnippet(for: searchQuery)
+        guard !searchQuery.isEmpty else { return nil }
+        return session.searchSnippet(for: searchQuery)
     }
 
     private var subtitlePrefix: String {
-        guard let live else { return "Empty · " }
-        if live.messages.isEmpty { return "Empty · " }
-        return "\(live.messages.count) messages · "
+        if session.messages.isEmpty { return "Empty · " }
+        return "\(session.messages.count) messages · "
     }
 
     private func contextColor(_ fraction: Double) -> Color {
