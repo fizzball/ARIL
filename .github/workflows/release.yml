@@ -152,7 +152,6 @@ jobs:
           EOF
 
       - name: Deploy to aril.host
-        if: ${{ secrets.HOSTINGER_SSH_KEY != '' }}
         env:
           HOSTINGER_SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
           HOSTINGER_SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
@@ -161,6 +160,10 @@ jobs:
           SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
         run: |
           set -euo pipefail
+          if [[ -z "${SSH_KEY:-}" ]]; then
+            echo "Skipping aril.host deploy (HOSTINGER_SSH_KEY not configured)"
+            exit 0
+          fi
           install -m 600 -D /dev/null "$RUNNER_TEMP/hostinger_key"
           printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/hostinger_key"
           HOST="${HOSTINGER_SSH_HOST:-145.79.25.220}"
