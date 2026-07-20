@@ -140,6 +140,7 @@ jobs:
           mkdir -p website/downloads
           cp "dist/ARIL-${VERSION}.dmg" "website/downloads/ARIL-${VERSION}.dmg"
           cp "dist/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
+          chmod 644 "website/downloads/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
           SIZE="$(stat -c%s "website/downloads/ARIL-latest.dmg")"
           cat > website/downloads/latest.json <<EOF
           {
@@ -170,7 +171,7 @@ jobs:
           PORT="${HOSTINGER_SSH_PORT:-65002}"
           USER="${HOSTINGER_SSH_USER:-u669814535}"
           REMOTE="${HOSTINGER_WEB_ROOT:-/home/u669814535/domains/aril.host/public_html}"
-          rsync -avz --delete \
+          rsync -avz --delete --chmod=D755,F644 \
             -e "ssh -p ${PORT} -i $RUNNER_TEMP/hostinger_key -o StrictHostKeyChecking=accept-new" \
             website/ \
             "${USER}@${HOST}:${REMOTE}/"

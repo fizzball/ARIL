@@ -45,6 +45,7 @@ SIZE="$(stat -f%z "$TMP" 2>/dev/null || stat -c%s "$TMP")"
 
 cp "$TMP" "$DOWNLOADS/$DMG_NAME"
 cp "$TMP" "$DOWNLOADS/ARIL-latest.dmg"
+chmod 644 "$DOWNLOADS/$DMG_NAME" "$DOWNLOADS/ARIL-latest.dmg"
 rm -f "$TMP"
 
 PUBLISHED="$(gh release view "$TAG" --repo "$REPO" --json publishedAt -q '.publishedAt' 2>/dev/null | cut -c1-10 || true)"

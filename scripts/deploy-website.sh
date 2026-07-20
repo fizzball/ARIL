@@ -42,7 +42,7 @@ echo "-> Deploying website to ${USER}@${HOST}:${REMOTE} (port ${PORT})..."
 
 RSYNC_SSH="ssh -p ${PORT} -o StrictHostKeyChecking=accept-new"
 
-rsync -avz --delete \
+rsync -avz --delete --chmod=D755,F644 \
   -e "$RSYNC_SSH" \
   "$WEB/" \
   "${USER}@${HOST}:${REMOTE}/"
