@@ -15,7 +15,7 @@ from app.mcp.client import (
 )
 from app.providers.base import LLMProvider, ProviderMessage, ProviderResult
 
-MAX_TOOL_ROUNDS = 5
+MAX_TOOL_ROUNDS = 8
 
 StatusCallback = Callable[[dict[str, str]], Awaitable[None]]
 

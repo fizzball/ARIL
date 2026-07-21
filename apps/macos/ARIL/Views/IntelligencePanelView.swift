@@ -200,11 +200,11 @@ struct IntelligencePanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .help("Auto is using a model you Preferred in Learning / Judge.")
             }
-            if preview.cache.eligible {
-                metric("Cache", preview.cache.wouldHit ? "cached" : "not cached", valueColor: valueColor)
-            }
+            cacheStatusMetric(preview.cache, valueColor: valueColor, skipped: skipped)
         }
         .opacity(skipped ? 0.55 : 1)
+
+        cacheOfferSection(preview.cache, skipped: skipped)
 
         if !preview.grade.notes.isEmpty {
             Text(preview.grade.notes.joined(separator: " "))
@@ -261,6 +261,117 @@ struct IntelligencePanelView: View {
         }
     }
 
+    private var cacheHitGreen: Color {
+        Color(red: 0.35, green: 0.78, blue: 0.45)
+    }
+
+    @ViewBuilder
+    private func cacheStatusMetric(_ cache: CacheInsight, valueColor: Color, skipped: Bool) -> some View {
+        let label: String = {
+            if cache.wouldHit { return "hit" }
+            if cache.eligible { return "eligible" }
+            if cache.tokensToEligible > 0, cache.tokensToEligible <= max(128, cache.threshold / 4) {
+                return "~\(cache.tokensToEligible) short"
+            }
+            return "n/a"
+        }()
+        let color: Color = {
+            if skipped { return theme.palette.textMuted }
+            if cache.wouldHit { return cacheHitGreen }
+            if cache.eligible { return theme.palette.accent }
+            return valueColor
+        }()
+        let help: String = {
+            if cache.wouldHit {
+                let pct = cache.estimatedSavingsPct.map { Int($0) } ?? 55
+                return "This prompt will hit the gateway prompt cache (~\(pct)% savings vs a fresh completion)."
+            }
+            if cache.eligible {
+                return "Above the \(cache.threshold)-token cache threshold — first send seeds the cache; an identical resend hits it."
+            }
+            if cache.tokensToEligible > 0 {
+                return "About \(cache.tokensToEligible) more input tokens needed to become cache-eligible (threshold \(cache.threshold))."
+            }
+            return "Prompts over \(cache.threshold) estimated input tokens are cache-eligible."
+        }()
+        metric("Cache", label, valueColor: color, help: help)
+    }
+
+    @ViewBuilder
+    private func cacheOfferSection(_ cache: CacheInsight, skipped: Bool) -> some View {
+        if cache.wouldHit {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "bolt.fill")
+                    .foregroundStyle(cacheHitGreen)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Prompt cache hit")
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(cacheHitGreen)
+                    Text(cacheHitSubmitDetail(cache))
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                Spacer(minLength: 8)
+                Button("Submit") {
+                    state.send()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(cacheHitGreen)
+                .controlSize(.small)
+                .disabled(skipped || state.isSending)
+                .help("Send now and hit the prompt cache")
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(cacheHitGreen.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .opacity(skipped ? 0.55 : 1)
+        } else if let offered = cache.suggestedHitPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !offered.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "internaldrive")
+                        .foregroundStyle(theme.palette.accent)
+                    Text("Cached prompt available")
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.accent)
+                }
+                Text(cache.suggestedHitRationale ?? "Use this prior prompt to hit the prompt cache.")
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.textMuted)
+                Text(offered)
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(theme.palette.text)
+                    .lineLimit(4)
+                HStack {
+                    Button("Edit") {
+                        state.applyCacheHitPrompt(offered)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(skipped)
+                    .help("Copy the cached prompt into the entry field")
+                    Button("Submit") {
+                        state.submitCacheHitPrompt(offered)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(theme.palette.accentStrong)
+                    .disabled(skipped || state.isSending)
+                    .help("Send the cached prompt now for a cache hit")
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.palette.background)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .opacity(skipped ? 0.55 : 1)
+        } else if cache.eligible {
+            Text("Cache eligible — first send seeds the prompt cache for identical repeats.")
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(theme.palette.textMuted)
+                .opacity(skipped ? 0.55 : 1)
+        }
+    }
+
     private func judgementIndicator(exists: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HelpMetricTitle(
@@ -301,6 +412,11 @@ struct IntelligencePanelView: View {
         }
     }
 
+    private func cacheHitSubmitDetail(_ cache: CacheInsight) -> String {
+        let pct = cache.estimatedSavingsPct.map { Int($0) } ?? 55
+        return "Submit this draft to reuse the cached reply (~\(pct)% savings)."
+    }
+
     private func short(_ id: String) -> String {
         id.split(separator: "/").last.map(String.init) ?? id
     }
@@ -311,7 +427,9 @@ struct IntelligencePanelView: View {
             help += " Includes ~\(state.systemPromptTokenEstimate) tokens from the global system prompt."
         }
         if preview.cache.eligible {
-            help += " Prompts above the cache threshold may be cache-eligible."
+            help += " Prompts above the \(preview.cache.threshold)-token cache threshold are cache-eligible."
+        } else if preview.cache.tokensToEligible > 0 {
+            help += " About \(preview.cache.tokensToEligible) more tokens to reach the \(preview.cache.threshold)-token cache threshold."
         }
         return help
     }

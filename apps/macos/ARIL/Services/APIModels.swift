@@ -192,12 +192,50 @@ struct CacheInsight: Codable, Equatable {
     let threshold: Int
     let wouldHit: Bool
     let estimatedSavingsPct: Double?
+    let tokensToEligible: Int
+    let suggestedHitPrompt: String?
+    let suggestedHitRationale: String?
 
     enum CodingKeys: String, CodingKey {
         case eligible, threshold
         case estimatedInputTokens = "estimated_input_tokens"
         case wouldHit = "would_hit"
         case estimatedSavingsPct = "estimated_savings_pct"
+        case tokensToEligible = "tokens_to_eligible"
+        case suggestedHitPrompt = "suggested_hit_prompt"
+        case suggestedHitRationale = "suggested_hit_rationale"
+    }
+
+    init(
+        eligible: Bool,
+        estimatedInputTokens: Int,
+        threshold: Int,
+        wouldHit: Bool,
+        estimatedSavingsPct: Double?,
+        tokensToEligible: Int = 0,
+        suggestedHitPrompt: String? = nil,
+        suggestedHitRationale: String? = nil
+    ) {
+        self.eligible = eligible
+        self.estimatedInputTokens = estimatedInputTokens
+        self.threshold = threshold
+        self.wouldHit = wouldHit
+        self.estimatedSavingsPct = estimatedSavingsPct
+        self.tokensToEligible = tokensToEligible
+        self.suggestedHitPrompt = suggestedHitPrompt
+        self.suggestedHitRationale = suggestedHitRationale
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        eligible = try c.decode(Bool.self, forKey: .eligible)
+        estimatedInputTokens = try c.decode(Int.self, forKey: .estimatedInputTokens)
+        threshold = try c.decode(Int.self, forKey: .threshold)
+        wouldHit = try c.decodeIfPresent(Bool.self, forKey: .wouldHit) ?? false
+        estimatedSavingsPct = try c.decodeIfPresent(Double.self, forKey: .estimatedSavingsPct)
+        tokensToEligible = try c.decodeIfPresent(Int.self, forKey: .tokensToEligible) ?? 0
+        suggestedHitPrompt = try c.decodeIfPresent(String.self, forKey: .suggestedHitPrompt)
+        suggestedHitRationale = try c.decodeIfPresent(String.self, forKey: .suggestedHitRationale)
     }
 }
 

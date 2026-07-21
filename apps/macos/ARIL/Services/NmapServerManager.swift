@@ -4,9 +4,9 @@ import Security
 /// Launches and supervises the ARIL-managed Nmap MCP server.
 ///
 /// ARIL generates a bearer token once, writes it into a `config.json` (host
-/// pinned to 127.0.0.1) and stores the same token in the Keychain, then launches
-/// the server — so the token the server enforces and the token the app sends can
-/// never drift. The server is served by the same bundled `aril-gateway` binary
+/// pinned to 127.0.0.1) and stores the same token in Application Support `.env`,
+/// then launches the server — so the token the server enforces and the token the
+/// app sends can never drift. The server is served by the same bundled `aril-gateway` binary
 /// via its `nmap-mcp` subcommand (or `python -m app.nmap_mcp` in dev checkouts).
 @MainActor
 final class NmapServerManager: ObservableObject {
@@ -47,10 +47,15 @@ final class NmapServerManager: ObservableObject {
     }
 
     /// Ensure the server is running with the given bearer token. Returns true on success.
+    /// When `forceRestart` is true (token rotation on enable), stop any prior process,
+    /// free the port, rewrite config, and start fresh so the new token is enforced.
     @discardableResult
-    func ensureRunning(token: String) async -> Bool {
+    func ensureRunning(token: String, forceRestart: Bool = false) async -> Bool {
         refreshNmapInstalled()
-        if await healthOK() {
+        if forceRestart {
+            stop()
+            freeListenPort()
+        } else if await healthOK() {
             lastMessage = "Nmap MCP already running on port \(port)"
             isManagingProcess = process != nil
             return true
@@ -76,6 +81,15 @@ final class NmapServerManager: ObservableObject {
         process?.terminate()
         process = nil
         isManagingProcess = false
+    }
+
+    /// Kill any leftover listener on our port (orphan from a previous launch).
+    private func freeListenPort() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["bash", "-lc", "lsof -tiTCP:\(port) -sTCP:LISTEN | xargs kill 2>/dev/null || true"]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     // MARK: - Health

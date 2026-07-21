@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Prefer the sitemap for discovery
+Sitemap: https://aril.host/sitemap.xml
+
+# Do not index ephemeral download blobs as standalone pages
+Disallow: /downloads/*.dmg

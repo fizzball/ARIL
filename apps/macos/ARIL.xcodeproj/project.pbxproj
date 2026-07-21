@@ -42,17 +42,20 @@
 		D439B867809FBF6C9E29A4BC /* InputBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F2ABC0F4EC843FAB438355 /* InputBarView.swift */; };
 		D6FF601B057CD3CD167B75AE /* ARILTitleWordmarkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396373487839832B6360D578 /* ARILTitleWordmarkView.swift */; };
 		D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1416251B652DE7DE8C09313A /* MessageListView.swift */; };
+		DA44B72AD5A95C79010D99EB /* MCPEnvStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FE84B0100D74558885874D7 /* MCPEnvStore.swift */; };
+		DAD34B55453C688949F53BD7 /* SpendAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D8E72E848E66BF7EB03ADC /* SpendAnalysisView.swift */; };
 		DC94FE292CCBBB50127BA960 /* aril-mark.png in Resources */ = {isa = PBXBuildFile; fileRef = 06E463243CDA83DE4642027C /* aril-mark.png */; };
+		E1E83C57989C69FA4FC2C90D /* SpendLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 737E53E01C03502A719F8365 /* SpendLedger.swift */; };
 		E5676938CCEC2F485B4CC994 /* CompareResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4471C3658442F237DC5C1C61 /* CompareResultsView.swift */; };
 		EC27484AD20E0994A78094A7 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9CF94248A2D3725D27ED3A2 /* StatusBarController.swift */; };
 		EF19B318BFD33393131FB656 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ECDA663B4CC8289E453914E /* Models.swift */; };
 		F379B2566042AEF3969B0C2D /* LearningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32EA1CA6FCA0203B4A0A30A5 /* LearningView.swift */; };
-		F774A3387117939F173AD06C /* MCPKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51ABE8FCBA2C6A4061205AF7 /* MCPKeychainStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0443347766BFCB9819E1A606 /* CodeScanServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeScanServerManager.swift; sourceTree = "<group>"; };
 		06E463243CDA83DE4642027C /* aril-mark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "aril-mark.png"; sourceTree = "<group>"; };
+		07D8E72E848E66BF7EB03ADC /* SpendAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpendAnalysisView.swift; sourceTree = "<group>"; };
 		117873442667CB37A568D620 /* ARILGhostMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILGhostMark.swift; sourceTree = "<group>"; };
 		1416251B652DE7DE8C09313A /* MessageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListView.swift; sourceTree = "<group>"; };
 		275830288881563C30E79654 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -63,10 +66,11 @@
 		464CC3D69B6588E73D3EF50F /* APIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIModels.swift; sourceTree = "<group>"; };
 		48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGatewayManager.swift; sourceTree = "<group>"; };
 		4B6F3EF00A2E6D7AD243CA8A /* RoutingAnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingAnalysisView.swift; sourceTree = "<group>"; };
+		4FE84B0100D74558885874D7 /* MCPEnvStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPEnvStore.swift; sourceTree = "<group>"; };
 		51A5248C42FB7C5D311DC40B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		51ABE8FCBA2C6A4061205AF7 /* MCPKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPKeychainStore.swift; sourceTree = "<group>"; };
 		55361ECE99637E232D219342 /* LocalGuardrailScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGuardrailScanner.swift; sourceTree = "<group>"; };
 		5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligencePanelView.swift; sourceTree = "<group>"; };
+		737E53E01C03502A719F8365 /* SpendLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpendLedger.swift; sourceTree = "<group>"; };
 		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenRouterModelBrowserView.swift; sourceTree = "<group>"; };
 		796899604D33C1CBC8518B48 /* ARILTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARILTheme.swift; sourceTree = "<group>"; };
@@ -131,9 +135,10 @@
 				0443347766BFCB9819E1A606 /* CodeScanServerManager.swift */,
 				48839FC15BE4A88D4474BEF3 /* LocalGatewayManager.swift */,
 				55361ECE99637E232D219342 /* LocalGuardrailScanner.swift */,
-				51ABE8FCBA2C6A4061205AF7 /* MCPKeychainStore.swift */,
+				4FE84B0100D74558885874D7 /* MCPEnvStore.swift */,
 				D1043C54877BC10229B71AC9 /* NmapServerManager.swift */,
 				8E05477DDB4E98CC6BFD805B /* OpenRouterOAuthCoordinator.swift */,
+				737E53E01C03502A719F8365 /* SpendLedger.swift */,
 				A9CF94248A2D3725D27ED3A2 /* StatusBarController.swift */,
 				C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */,
 			);
@@ -164,6 +169,7 @@
 				4B6F3EF00A2E6D7AD243CA8A /* RoutingAnalysisView.swift */,
 				51A5248C42FB7C5D311DC40B /* SettingsView.swift */,
 				E02CE4510A6C8072E4A59FD6 /* SidebarView.swift */,
+				07D8E72E848E66BF7EB03ADC /* SpendAnalysisView.swift */,
 				9654EC6E96D9A4A97B74AF5D /* StatusFooterView.swift */,
 				419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */,
 				C74640C08B47F41FFFDDC233 /* ToolFlyoutPanel.swift */,
@@ -292,7 +298,7 @@
 				3BB8237CE98D9F86E756540F /* LocalGatewayManager.swift in Sources */,
 				464A498032BC186E03084024 /* LocalGuardrailScanner.swift in Sources */,
 				7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */,
-				F774A3387117939F173AD06C /* MCPKeychainStore.swift in Sources */,
+				DA44B72AD5A95C79010D99EB /* MCPEnvStore.swift in Sources */,
 				5893D8DC9ED804F866D51509 /* MCPServerEditorView.swift in Sources */,
 				6AD417ABCEA0AEBEA62851B6 /* MessageDiagramSupport.swift in Sources */,
 				D84FE3251619E0DA674D7A1D /* MessageListView.swift in Sources */,
@@ -304,6 +310,8 @@
 				0642E4B64AFFAB0B2CEDE8D1 /* RoutingAnalysisView.swift in Sources */,
 				B8EB569822A0AC3A6D7FFD52 /* SettingsView.swift in Sources */,
 				5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */,
+				DAD34B55453C688949F53BD7 /* SpendAnalysisView.swift in Sources */,
+				E1E83C57989C69FA4FC2C90D /* SpendLedger.swift in Sources */,
 				EC27484AD20E0994A78094A7 /* StatusBarController.swift in Sources */,
 				647C08CDB2364845BB562E7A /* StatusFooterView.swift in Sources */,
 				2143BD1EEDEAB0F06806F37C /* SystemMetricsMonitor.swift in Sources */,
@@ -349,7 +357,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 69;
+				CURRENT_PROJECT_VERSION = 70;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -362,7 +370,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.4.8;
+				MARKETING_VERSION = 0.4.9;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -379,7 +387,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 69;
+				CURRENT_PROJECT_VERSION = 70;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
@@ -390,7 +398,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.8;
+				MARKETING_VERSION = 0.4.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
 				PRODUCT_NAME = ARIL;
 				SDKROOT = macosx;
@@ -431,7 +439,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 69;
+				CURRENT_PROJECT_VERSION = 70;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -450,7 +458,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.4.8;
+				MARKETING_VERSION = 0.4.9;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -468,7 +476,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ARIL/ARIL.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 69;
+				CURRENT_PROJECT_VERSION = 70;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ARIL;
@@ -479,7 +487,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.8;
+				MARKETING_VERSION = 0.4.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aril.app;
 				PRODUCT_NAME = ARIL;
 				SDKROOT = macosx;

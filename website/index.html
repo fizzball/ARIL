@@ -3,27 +3,115 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ARIL — Adaptive Routing Intelligence Layer</title>
-  <meta name="description" content="ARIL is a native macOS chat client that grades prompts, routes OpenRouter models, and shows cost before you send. Download the notarized release for Apple Silicon.">
+  <title>ARIL — Adaptive Routing Intelligence Layer for macOS</title>
+  <meta name="description" content="ARIL is a native macOS AI chat client that grades prompts, routes OpenRouter models, shows cost before you send, and includes local MCP tools. Download the notarized Apple Silicon release.">
+  <meta name="keywords" content="ARIL, macOS AI chat, OpenRouter, model routing, prompt intelligence, MCP, Apple Silicon, notarized Mac app">
+  <meta name="author" content="Ramon Ali">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="color-scheme" content="dark light">
+  <link rel="canonical" href="https://aril.host/">
+
+  <!-- Open Graph -->
+  <meta property="og:site_name" content="ARIL">
+  <meta property="og:locale" content="en_US">
   <meta property="og:title" content="ARIL — Adaptive Routing Intelligence Layer">
-  <meta property="og:description" content="Native macOS AI chat with smart routing, cost transparency, and local guardrails.">
+  <meta property="og:description" content="Native macOS AI chat with smart OpenRouter routing, cost transparency, prompt intelligence, and local MCP tools.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://aril.host/">
   <meta property="og:image" content="https://aril.host/assets/screenshots/home.png">
-  <link rel="icon" href="/assets/logo.png" type="image/png">
+  <meta property="og:image:secure_url" content="https://aril.host/assets/screenshots/home.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1024">
+  <meta property="og:image:height" content="624">
+  <meta property="og:image:alt" content="ARIL home screen with session sidebar and prompt entry">
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ARIL — Adaptive Routing Intelligence Layer">
+  <meta name="twitter:description" content="Native macOS AI chat with smart OpenRouter routing, cost transparency, and local guardrails.">
+  <meta name="twitter:image" content="https://aril.host/assets/screenshots/home.png">
+  <meta name="twitter:image:alt" content="ARIL home screen with session sidebar and prompt entry">
+
+  <link rel="icon" href="/assets/logo.png" type="image/png" sizes="256x256">
+  <link rel="apple-touch-icon" href="/assets/logo.png">
+  <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/site.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://aril.host/#website",
+        "url": "https://aril.host/",
+        "name": "ARIL",
+        "description": "Adaptive Routing Intelligence Layer — native macOS AI chat with OpenRouter routing and cost transparency.",
+        "publisher": { "@id": "https://aril.host/#organization" },
+        "inLanguage": "en-US"
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://aril.host/#organization",
+        "name": "ARIL",
+        "url": "https://aril.host/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://aril.host/assets/logo.png",
+          "width": 256,
+          "height": 256
+        },
+        "sameAs": [
+          "https://github.com/fizzball/ARIL"
+        ]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://aril.host/#app",
+        "name": "ARIL",
+        "alternateName": "Adaptive Routing Intelligence Layer",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "AI Chat Client",
+        "operatingSystem": "macOS 14 or later (Apple Silicon)",
+        "url": "https://aril.host/",
+        "downloadUrl": "https://aril.host/downloads/ARIL-latest.dmg",
+        "screenshot": [
+          "https://aril.host/assets/screenshots/home.png",
+          "https://aril.host/assets/screenshots/intelligence.png",
+          "https://aril.host/assets/screenshots/chat.png"
+        ],
+        "image": "https://aril.host/assets/screenshots/home.png",
+        "description": "Native macOS chat client that grades prompts, routes OpenRouter models, shows estimated cost before you send, and includes local MCP tools.",
+        "author": {
+          "@type": "Person",
+          "name": "Ramon Ali"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://aril.host/downloads/ARIL-latest.dmg"
+        },
+        "softwareRequirements": "OpenRouter API key"
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <header class="site-header">
     <div class="container">
       <a class="brand" href="/">
-        <img src="/assets/logo.png" width="32" height="32" alt="">
+        <img src="/assets/logo.png" width="32" height="32" alt="ARIL logo">
         <span>ARIL</span>
       </a>
-      <nav class="nav-actions">
+      <nav class="nav-actions" aria-label="Primary">
         <a class="nav-link hide-mobile" href="#features">Features</a>
         <a class="nav-link hide-mobile" href="#screenshots">Screenshots</a>
         <a class="btn btn-primary" href="#download" id="nav-download">Download</a>
@@ -48,7 +136,7 @@
             <a class="btn btn-ghost" href="https://github.com/fizzball/ARIL" target="_blank" rel="noopener">Source on GitHub</a>
           </div>
           <p class="hero-meta">
-            <strong id="version-label">v0.4.8</strong> · Notarized · Apple Silicon · macOS 14+
+            <strong id="version-label">v0.4.9</strong> · Notarized · Apple Silicon · macOS 14+
           </p>
         </div>
         <figure class="hero-shot">
@@ -173,7 +261,7 @@
           Download ARIL for Mac
         </a>
         <p class="download-version">
-          Latest release: <span id="download-version">v0.4.8</span>
+          Latest release: <span id="download-version">v0.4.9</span>
         </p>
         <ul class="requirements">
           <li><strong>Mac</strong> Apple Silicon (M-series)</li>
@@ -187,9 +275,10 @@
   <footer class="site-footer">
     <div class="container footer-inner">
       <p>© 2026 Ramon Ali · ARIL</p>
-      <nav class="footer-links">
+      <nav class="footer-links" aria-label="Footer">
         <a href="https://github.com/fizzball/ARIL" target="_blank" rel="noopener">GitHub</a>
         <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>
+        <a href="/sitemap.xml">Sitemap</a>
       </nav>
     </div>
   </footer>

@@ -29,6 +29,7 @@ enum ToolPanel: String, Identifiable, Equatable {
     case modelPopularity
     case logAnalysis
     case learning
+    case spendAnalysis
     case about
 
     var id: String { rawValue }
@@ -38,6 +39,7 @@ enum ToolPanel: String, Identifiable, Equatable {
         case .modelPopularity: return "Model popularity"
         case .logAnalysis: return "Log analysis"
         case .learning: return "Learning"
+        case .spendAnalysis: return "Spend analysis"
         case .about: return "About ARIL"
         }
     }
@@ -162,6 +164,10 @@ final class AppState: ObservableObject {
     private var systemPromptBaseline: String = ""
 
     @Published var sessions: [ChatSession] = []
+    /// Local project folders that group sessions (not synced to the gateway).
+    @Published var projects: [ChatProject] = []
+    /// Which project folders are expanded in the sidebar.
+    @Published var expandedProjectIDs: Set<UUID> = []
     @Published var selectedSessionID: UUID?
     /// Typing buffer — not `@Published` so keystrokes don't redraw the whole app.
     var draft: String = ""
@@ -232,6 +238,7 @@ final class AppState: ObservableObject {
     @Published var classifications: [ClassificationRecordDTO] = []
     @Published var storeRecords: [StoreRecordDTO] = []
     @Published var storeStats: StoreStatsDTO? = nil
+    @Published var spendAnalysisSnapshot: SpendAnalysisSnapshot = .empty
     @Published var compareCategoryDraft: [String: RouteCategory] = [:]
     @Published var compareAccuracyDraft: [String: Double] = [:]
     @Published var openRouterConfigured: Bool = false
@@ -281,6 +288,10 @@ final class AppState: ObservableObject {
     @Published var fingerprintPreferWins: [String: [String: Int]] = [:]
     @Published var evalLog: [EvalLogEntry] = []
     @Published var isRunningAutoEval: Bool = false
+    /// Non-nil while Learning → Selected Model Test is in progress (drives the slide-up).
+    @Published var modelTestProgress: ModelTestProgress?
+    /// When set, Manual sends use this model instead of `aril.lastModel`.
+    private var modelTestForcedModel: String?
 
     private let client = ARILAPIClient()
     let gatewayManager = LocalGatewayManager()
@@ -293,7 +304,7 @@ final class AppState: ObservableObject {
     /// Local tombstone so reload can't resurrect until gateway agrees.
     private var deletedSessionIDs: Set<UUID> = []
     private var budgetConfirmContinuation: CheckedContinuation<Bool, Never>?
-    /// Skip budget UI while Learning → Run Auto eval is driving sends.
+    /// Skip budget UI while Learning → Run Selected Model Test is driving sends.
     private var budgetBypassForEval: Bool = false
     private var contextLimitContinuation: CheckedContinuation<ContextLimitDecision, Never>?
     /// Sessions where the user chose "Continue" past the context warning — don't nag again.
@@ -508,6 +519,8 @@ final class AppState: ObservableObject {
     func clearSessionCache() {
         try? FileManager.default.removeItem(at: localSessionsURL)
         sessions = []
+        projects = []
+        expandedProjectIDs = []
         selectedSessionID = nil
         createSession()
         refreshSessionCacheStatus()
@@ -604,6 +617,10 @@ final class AppState: ObservableObject {
     }
 
     private func accrueDailySpend(_ amount: Double) {
+        accrueDailySpend(amount, model: nil)
+    }
+
+    private func accrueDailySpend(_ amount: Double, model: String?) {
         guard amount > 0 else { return }
         let today = Self.localDayKey()
         let defaults = UserDefaults.standard
@@ -613,6 +630,7 @@ final class AppState: ObservableObject {
         defaults.set(today, forKey: "aril.budget.dailyDate")
         defaults.set(total, forKey: "aril.budget.dailyTotalUsd")
         dailySpendUsd = total
+        SpendLedger.shared.add(amount: amount, model: model, on: today)
     }
 
     /// Refresh published daily spend (e.g. after midnight while app stays open).
@@ -878,7 +896,7 @@ final class AppState: ObservableObject {
 
     /// Always-on note so models emit Mermaid fences instead of “I can’t render diagrams”.
     static let platformCapabilityNote = """
-        ARIL renders Mermaid, SVG, and ASCII diagrams directly in this chat UI. When the user asks for a diagram or flowchart, emit a complete fenced code block (for example ```mermaid … ```). Do not say you cannot display graphics, and do not tell the user to paste into mermaid.live, VS Code, or other external tools.
+        ARIL renders Mermaid, SVG, and ASCII diagrams directly in this chat UI. When the user explicitly asks for a diagram or flowchart, emit a complete fenced code block (for example ```mermaid … ```) using valid Mermaid syntax (use `-->` for arrows, not `|>`). Do not say you cannot display graphics, and do not tell the user to paste into mermaid.live, VS Code, or other external tools. When MCP tools are available for the task, call those tools instead of inventing a Mermaid flowchart of the workflow.
         """
 
     /// System prompt text to send with preview/chat when the feature is enabled.
@@ -947,7 +965,7 @@ final class AppState: ObservableObject {
             next.enabled = false
         }
         mcpServers[idx] = next
-        MCPKeychainStore.save(serverID: next.id, apiKey: next.apiKey)
+        MCPEnvStore.save(serverID: next.id, apiKey: next.apiKey)
         saveMCPServers()
     }
 
@@ -958,9 +976,10 @@ final class AppState: ObservableObject {
         if mcpServers[idx].isManaged {
             let presetId = mcpServers[idx].presetId
             Task {
-                if presetId == MCPServerConfig.codescanPresetId {
+                switch presetId {
+                case MCPServerConfig.codescanPresetId:
                     enabled ? await startCodeScanServer() : stopCodeScanServer()
-                } else {
+                default:
                     enabled ? await startNmapServer() : stopNmapServer()
                 }
             }
@@ -970,22 +989,14 @@ final class AppState: ObservableObject {
         saveMCPServers()
     }
 
-    /// Resolve a managed server token, preferring the copy already loaded into memory
-    /// (populated by `loadMCPServers`) so we don't hit the Keychain again. Falls back
-    /// to a Keychain read, and finally generates + persists a fresh token if absent.
-    private func ensureManagedToken(for id: UUID) -> String {
-        if let idx = mcpServers.firstIndex(where: { $0.id == id }) {
-            let inMemory = mcpServers[idx].apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !inMemory.isEmpty {
-                return inMemory
-            }
-        }
-        let existing = MCPKeychainStore.load(serverID: id)
-        if !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return existing
-        }
+    /// Always mint a fresh bearer token for a managed MCP server, persist it in
+    /// Application Support `.env`, and return it for `config.json` + chat auth.
+    private func rotateManagedToken(for id: UUID) -> String {
         let token = NmapServerManager.generateToken()
-        MCPKeychainStore.save(serverID: id, apiKey: token)
+        MCPEnvStore.save(serverID: id, apiKey: token)
+        if let idx = mcpServers.firstIndex(where: { $0.id == id }) {
+            mcpServers[idx].apiKey = token
+        }
         return token
     }
 
@@ -999,7 +1010,7 @@ final class AppState: ObservableObject {
         nmapInstalled = nmapServerManager.refreshNmapInstalled()
     }
 
-    /// Generate/reuse a token, write config.json, launch the server, and wire the preset.
+    /// Rotate token, rewrite config.json, restart the server, and wire the preset.
     func startNmapServer() async {
         guard let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.nmapPresetId })
         else { return }
@@ -1007,8 +1018,8 @@ final class AppState: ObservableObject {
         nmapServerBusy = true
         defer { nmapServerBusy = false }
 
-        let token = ensureManagedToken(for: id)
-        let ok = await nmapServerManager.ensureRunning(token: token)
+        let token = rotateManagedToken(for: id)
+        let ok = await nmapServerManager.ensureRunning(token: token, forceRestart: true)
         nmapServerRunning = ok
         nmapInstalled = nmapServerManager.nmapInstalled
         nmapServerStatus = nmapServerManager.lastMessage
@@ -1045,7 +1056,7 @@ final class AppState: ObservableObject {
         semgrepInstalled = codeScanServerManager.refreshSemgrepInstalled()
     }
 
-    /// Generate/reuse a token, write config.json, launch the server, and wire the preset.
+    /// Rotate token, rewrite config.json, restart the server, and wire the preset.
     func startCodeScanServer() async {
         guard let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.codescanPresetId })
         else { return }
@@ -1053,8 +1064,8 @@ final class AppState: ObservableObject {
         codeScanServerBusy = true
         defer { codeScanServerBusy = false }
 
-        let token = ensureManagedToken(for: id)
-        let ok = await codeScanServerManager.ensureRunning(token: token)
+        let token = rotateManagedToken(for: id)
+        let ok = await codeScanServerManager.ensureRunning(token: token, forceRestart: true)
         codeScanServerRunning = ok
         semgrepInstalled = codeScanServerManager.semgrepInstalled
         codeScanServerStatus = codeScanServerManager.lastMessage
@@ -1081,10 +1092,25 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Reload MCP bearer tokens from Application Support `.env` into memory.
+    /// UserDefaults persistence strips `apiKey`, so without this `isReady` can be false
+    /// even when a managed server is enabled and the token exists on disk.
+    private func hydrateManagedMCPAPIKeys() {
+        for i in mcpServers.indices {
+            guard mcpServers[i].isManaged else { continue }
+            if mcpServers[i].apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let loaded = MCPEnvStore.load(serverID: mcpServers[i].id)
+                if !loaded.isEmpty {
+                    mcpServers[i].apiKey = loaded
+                }
+            }
+        }
+    }
+
     func setMCPServerAPIKey(id: UUID, apiKey: String) {
         guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
         mcpServers[idx].apiKey = apiKey
-        MCPKeychainStore.save(serverID: id, apiKey: apiKey)
+        MCPEnvStore.save(serverID: id, apiKey: apiKey)
         saveMCPServers()
     }
 
@@ -1097,14 +1123,14 @@ final class AppState: ObservableObject {
             next.transport = .http
         }
         mcpServers.append(next)
-        MCPKeychainStore.save(serverID: next.id, apiKey: next.apiKey)
+        MCPEnvStore.save(serverID: next.id, apiKey: next.apiKey)
         saveMCPServers()
     }
 
     func deleteMCPServer(id: UUID) {
         guard let idx = mcpServers.firstIndex(where: { $0.id == id }) else { return }
         guard mcpServers[idx].presetId == nil else { return }
-        MCPKeychainStore.delete(serverID: id)
+        MCPEnvStore.delete(serverID: id)
         mcpServers.remove(at: idx)
         saveMCPServers()
     }
@@ -1117,7 +1143,7 @@ final class AppState: ObservableObject {
         var restored = factory
         restored.id = mcpServers[idx].id
         restored.apiKey = ""
-        MCPKeychainStore.delete(serverID: restored.id)
+        MCPEnvStore.delete(serverID: restored.id)
         mcpServers[idx] = restored
         saveMCPServers()
     }
@@ -1194,10 +1220,10 @@ final class AppState: ObservableObject {
                     }
                     preset.lastCheckStatus = row.lastCheckStatus
                     preset.lastCheckMessage = row.lastCheckMessage
-                    preset.apiKey = MCPKeychainStore.load(serverID: preset.id)
+                    preset.apiKey = MCPEnvStore.load(serverID: preset.id)
                     byPreset[pid] = preset
                 } else if row.presetId == nil {
-                    row.apiKey = MCPKeychainStore.load(serverID: row.id)
+                    row.apiKey = MCPEnvStore.load(serverID: row.id)
                     customs.append(row)
                 }
             }
@@ -1207,7 +1233,7 @@ final class AppState: ObservableObject {
             guard let pid = factory.presetId else { return factory }
             var row = byPreset[pid] ?? factory
             if row.apiKey.isEmpty {
-                row.apiKey = MCPKeychainStore.load(serverID: row.id)
+                row.apiKey = MCPEnvStore.load(serverID: row.id)
             }
             return row
         }
@@ -1251,7 +1277,7 @@ final class AppState: ObservableObject {
         }
         beginGatewayActivity()
         startHealthPolling()
-        // Quiet launch check — same path as `/update`, dialog only when behind.
+        // Quiet launch check — surfaces sidebar Update when behind.
         Task { await checkForAppUpdateOnLaunch() }
         objectWillChange.send()
     }
@@ -1456,6 +1482,110 @@ final class AppState: ObservableObject {
         Task { await persistSelectedSession() }
     }
 
+    /// Create a new session already filed under `projectID`.
+    func createSession(inProject projectID: UUID) {
+        guard projects.contains(where: { $0.id == projectID }) else {
+            createSession()
+            return
+        }
+        let session = ChatSession(title: "New session", messages: [], projectID: projectID)
+        var next = sessions
+        next.insert(session, at: 0)
+        sessions = next
+        selectedSessionID = session.id
+        expandedProjectIDs.insert(projectID)
+        setDraft("")
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        compareResults = []
+        compareRouteCategory = nil
+        preferredCompareModel = nil
+        pendingAttachments = []
+        saveLocalSessions()
+        objectWillChange.send()
+        Task { await persistSelectedSession() }
+    }
+
+    @discardableResult
+    func createProject(named name: String) -> ChatProject? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let project = ChatProject(name: trimmed)
+        var next = projects
+        next.insert(project, at: 0)
+        projects = next
+        expandedProjectIDs.insert(project.id)
+        saveLocalSessions()
+        return project
+    }
+
+    func renameProject(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let idx = projects.firstIndex(where: { $0.id == id }) else { return }
+        var next = projects
+        next[idx].name = trimmed
+        next[idx].updatedAt = .now
+        projects = next
+        saveLocalSessions()
+    }
+
+    /// Remove a project folder. Sessions stay; they become ungrouped.
+    func deleteProject(_ id: UUID) {
+        projects.removeAll { $0.id == id }
+        expandedProjectIDs.remove(id)
+        var touched = false
+        for i in sessions.indices where sessions[i].projectID == id {
+            sessions[i].projectID = nil
+            touched = true
+        }
+        if touched {
+            sessions = sessions
+        }
+        saveLocalSessions()
+    }
+
+    func toggleProjectExpanded(_ id: UUID) {
+        if expandedProjectIDs.contains(id) {
+            expandedProjectIDs.remove(id)
+        } else {
+            expandedProjectIDs.insert(id)
+        }
+        saveLocalSessions()
+    }
+
+    func moveSession(_ sessionID: UUID, toProject projectID: UUID?) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        if let projectID, !projects.contains(where: { $0.id == projectID }) { return }
+        sessions[idx].projectID = projectID
+        sessions = sessions
+        if let projectID {
+            expandedProjectIDs.insert(projectID)
+        }
+        saveLocalSessions()
+    }
+
+    func sessions(inProject projectID: UUID) -> [ChatSession] {
+        sessions
+            .filter { $0.projectID == projectID }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    var ungroupedSessions: [ChatSession] {
+        sessions
+            .filter { session in
+                guard let pid = session.projectID else { return true }
+                return !projects.contains(where: { $0.id == pid })
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    func project(for session: ChatSession) -> ChatProject? {
+        guard let pid = session.projectID else { return nil }
+        return projects.first { $0.id == pid }
+    }
+
     func deleteSession(_ id: UUID) async {
         let sid = id.uuidString.lowercased()
         deletedSessionIDs.insert(id)
@@ -1481,11 +1611,53 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Export a session as Markdown via a Save panel (defaults to the selected session).
+    @discardableResult
+    func exportSessionAsMarkdown(_ id: UUID? = nil) -> Bool {
+        let sid = id ?? selectedSessionID
+        guard let sid,
+              let session = sessions.first(where: { $0.id == sid })
+        else {
+            lastError = "No session to export"
+            return false
+        }
+        let markdown = session.markdownExport(
+            userLabel: userLabel,
+            assistantLabel: "ARIL",
+            appVersion: appVersionString
+        )
+        let panel = NSSavePanel()
+        if let md = UTType(filenameExtension: "md") {
+            panel.allowedContentTypes = [md, .plainText]
+        } else {
+            panel.allowedContentTypes = [.plainText]
+        }
+        panel.allowsOtherFileTypes = true
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(session.exportFilenameStem).md"
+        panel.title = "Export session as Markdown"
+        panel.message = "Save a Markdown copy of this chat session."
+        panel.prompt = "Export"
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        do {
+            try markdown.write(to: url, atomically: true, encoding: .utf8)
+            appendLocalAssistantNote(
+                "**Session exported** — saved Markdown to `\(url.lastPathComponent)`."
+            )
+            return true
+        } catch {
+            lastError = "Could not export session: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func deleteAllSessions() async {
         let ids = sessions.map(\.id)
         for id in ids { deletedSessionIDs.insert(id) }
         persistDeletedSessionIDs()
         sessions = []
+        projects = []
+        expandedProjectIDs = []
         selectedSessionID = nil
         setDraft("")
         preview = nil
@@ -1827,7 +1999,21 @@ final class AppState: ObservableObject {
             activeToolPanel = nil
         } else {
             activeToolPanel = panel
+            if panel == .spendAnalysis {
+                Task { await refreshSpendAnalysis() }
+            }
         }
+    }
+
+    /// Rebuild spend totals from the local ledger + Learning chat transactions.
+    func refreshSpendAnalysis() async {
+        if gatewayReady {
+            await loadStoreBrowser()
+        }
+        spendAnalysisSnapshot = SpendAnalysisSnapshot.build(
+            storeRecords: storeRecords,
+            ledger: SpendLedger.shared.load()
+        )
     }
 
     func closeToolPanel() {
@@ -1966,20 +2152,29 @@ final class AppState: ObservableObject {
 
     /// Choose the better of two already-deduped sessions for the same id.
     private static func preferredSession(_ a: ChatSession, _ b: ChatSession) -> ChatSession {
+        var winner: ChatSession
         if b.messages.count != a.messages.count {
-            return b.messages.count > a.messages.count ? b : a
+            winner = b.messages.count > a.messages.count ? b : a
+        } else {
+            let aPlace = placeholderCount(a)
+            let bPlace = placeholderCount(b)
+            if aPlace != bPlace {
+                winner = bPlace < aPlace ? b : a
+            } else {
+                let aRich = a.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
+                let bRich = b.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
+                if aRich != bRich {
+                    winner = bRich > aRich ? b : a
+                } else {
+                    winner = b.updatedAt > a.updatedAt ? b : a
+                }
+            }
         }
-        let aPlace = placeholderCount(a)
-        let bPlace = placeholderCount(b)
-        if aPlace != bPlace {
-            return bPlace < aPlace ? b : a
+        // Keep local project membership across gateway merges.
+        if winner.projectID == nil {
+            winner.projectID = a.projectID ?? b.projectID
         }
-        let aRich = a.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
-        let bRich = b.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
-        if aRich != bRich {
-            return bRich > aRich ? b : a
-        }
-        return b.updatedAt > a.updatedAt ? b : a
+        return winner
     }
 
     /// Count messages whose generated image was reduced to a lossy placeholder.
@@ -2065,6 +2260,15 @@ final class AppState: ObservableObject {
     func schedulePreview() {
         previewTask?.cancel()
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Selected Model Test owns the slide-up — don't start Intelligence analysis.
+        if isRunningAutoEval {
+            showIntelligencePanel = false
+            preview = nil
+            analysisStatus = .idle
+            estimatedLatencyMs = nil
+            return
+        }
 
         // Slash commands own the `/` palette — never start the intelligence window
         // for them (it otherwise competes with / suppresses the command menu).
@@ -2306,10 +2510,14 @@ final class AppState: ObservableObject {
     /// `/nmap` and `/codescan` summaries are overridden at runtime by
     /// `paletteCommands` to reflect whether their MCP server is enabled.
     static let slashCommands: [SlashCommand] = [
-        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, Nmap, code scan, MCP, latest release"),
+        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, cache, Nmap, code scan, MCP, latest release"),
         SlashCommand(id: "/update", summary: "Check for a newer ARIL release and install it to /Applications"),
         SlashCommand(id: "/nmap", summary: "Example Nmap prompts — port, host, and vuln scans"),
         SlashCommand(id: "/codescan", summary: "Example Semgrep prompts — scan a path or inline code"),
+        SlashCommand(id: "/web", summary: "Toggle web search (or /web on|off)"),
+        SlashCommand(id: "/cache", summary: "Session cache size — /cache compact|clear"),
+        SlashCommand(id: "/export", summary: "Export the current session as Markdown"),
+        SlashCommand(id: "/new", summary: "Start a new chat session"),
         SlashCommand(id: "/clear", summary: "Clear the current chat transcript"),
         SlashCommand(id: "/reset", summary: "Delete ALL sessions and Learning entries (asks to confirm)"),
         SlashCommand(id: "/exit", summary: "Quit ARIL"),
@@ -2325,6 +2533,7 @@ final class AppState: ObservableObject {
     var codeScanServerEnabled: Bool {
         mcpEnabled && (codeScanPreset?.enabled ?? false)
     }
+
 
     /// Palette commands with runtime-computed summaries (server enabled/disabled state).
     var paletteCommands: [SlashCommand] {
@@ -2411,7 +2620,11 @@ final class AppState: ObservableObject {
     func handleSlashCommand(_ raw: String) -> Bool {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/") else { return false }
-        let command = trimmed.split(separator: " ", maxSplits: 1).first.map { $0.lowercased() } ?? ""
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let command = parts.first.map { $0.lowercased() } ?? ""
+        let arg = parts.count > 1
+            ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            : ""
         switch command {
         case "/clear", "/cls":
             recordPromptHistory(trimmed)
@@ -2443,6 +2656,25 @@ final class AppState: ObservableObject {
             setDraft("")
             appendLocalAssistantNote(codeScanExamplesNote())
             return true
+        case "/web", "/search":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            runWebSearchCommand(arg: arg)
+            return true
+        case "/cache":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            runSessionCacheCommand(arg: arg)
+            return true
+        case "/export":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            _ = exportSessionAsMarkdown()
+            return true
+        case "/new", "/session":
+            recordPromptHistory(trimmed)
+            createSession()
+            return true
         case "/reset":
             recordPromptHistory(trimmed)
             setDraft("")
@@ -2459,17 +2691,99 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// `/web` — toggle or set web search; echoes the new state in-chat.
+    private func runWebSearchCommand(arg: String) {
+        switch arg {
+        case "", "toggle":
+            webSearchEnabled.toggle()
+        case "on", "enable", "true", "1":
+            webSearchEnabled = true
+        case "off", "disable", "false", "0":
+            webSearchEnabled = false
+        case "status":
+            break
+        default:
+            appendLocalAssistantNote(
+                "**Web search** — unknown option `\(arg)`. Use `/web`, `/web on`, `/web off`, or `/web status`."
+            )
+            return
+        }
+        let stateLabel = webSearchEnabled ? "on" : "off"
+        var lines = [
+            "**Web search — \(stateLabel)**",
+            "",
+        ]
+        if webSearchEnabled {
+            lines.append(
+                "OpenRouter web search is enabled for the next send (extra per-request fee may apply). Toggle off with `/web` or `/web off`."
+            )
+        } else {
+            lines.append(
+                "Web search is off. Enable with `/web` or `/web on`."
+            )
+        }
+        appendLocalAssistantNote(lines.joined(separator: "\n"))
+    }
+
+    /// `/cache` — report session-cache health; `compact` / `clear` match Preferences.
+    private func runSessionCacheCommand(arg: String) {
+        switch arg {
+        case "", "status":
+            refreshSessionCacheStatus()
+            appendLocalAssistantNote(sessionCacheStatusNote())
+        case "compact", "gc":
+            compactSessionCache(silent: false)
+        case "clear", "wipe":
+            clearSessionCache()
+        default:
+            appendLocalAssistantNote(
+                "**Session cache** — unknown option `\(arg)`. Use `/cache`, `/cache compact`, or `/cache clear`."
+            )
+        }
+    }
+
+    private func sessionCacheStatusNote() -> String {
+        let healthLabel: String
+        switch sessionCacheHealth {
+        case .healthy: healthLabel = "healthy"
+        case .ok: healthLabel = "ok (growing)"
+        case .warn: healthLabel = "warn (large)"
+        }
+        return [
+            "**Session cache**",
+            "",
+            "- Size: **\(sessionCacheLabel)** (\(sessionCacheBytes) bytes)",
+            "- Health: **\(healthLabel)** — healthy < \(Self.formatSessionCacheSize(Self.sessionCacheHealthyMaxBytes)), ok < \(Self.formatSessionCacheSize(Self.sessionCacheOkMaxBytes)), warn at or above that",
+            "",
+            "Commands: `/cache compact` strips bulky payloads; `/cache clear` deletes local chat history (same as Preferences → Session cache).",
+            "This is the on-disk session history file — not the gateway prompt/result cache.",
+        ].joined(separator: "\n")
+    }
+
     /// Backing flag for the `/reset` confirmation alert (presented by ContentView).
     @Published var showResetConfirmation = false
 
-    /// `/update` confirmation — non-nil message shows the upgrade alert.
+    /// `/update` confirmation — legacy; prefer sidebar Update button.
     @Published var updateConfirmMessage: String?
-    /// Pending release waiting on the upgrade alert.
+    /// Pending release waiting for the sidebar Update button / install.
     private var pendingUpdateRelease: AppUpdateService.LatestRelease?
+    /// Non-nil when a newer release is available — drives the sidebar **Update** button.
+    @Published private(set) var availableUpdateVersion: String?
     /// True while download/install is in progress (disables re-entry).
     @Published var isUpdatingApp = false
     /// Note id for in-place progress updates during `/update`.
     private var updateNoteID: UUID?
+
+    /// Newer release waiting for the sidebar **Update** button (no dialog).
+    var updateAvailableVersion: String? {
+        guard !isUpdatingApp else { return nil }
+        return availableUpdateVersion
+    }
+
+    private func setPendingUpdate(_ release: AppUpdateService.LatestRelease?) {
+        pendingUpdateRelease = release
+        availableUpdateVersion = release?.version
+    }
 
     /// Wipe every session and all Learning/judgement records. Destructive; only run
     /// after the user confirms the `/reset` warning.
@@ -2535,6 +2849,7 @@ final class AppState: ObservableObject {
         ])
         return lines.joined(separator: "\n")
     }
+
 
     /// Clear the visible transcript for the current session (in place).
     func clearCurrentTranscript() {
@@ -2607,6 +2922,30 @@ final class AppState: ObservableObject {
         lines.append("- **Sensitive Info guardrail:** \(sensitiveState)")
         lines.append("- **Prompt Injection guardrail:** \(injectionState)")
 
+        // Cache (session file + last prompt-cache outcome — same signals as the status footer)
+        refreshSessionCacheStatus()
+        let sessionHealth: String = {
+            switch sessionCacheHealth {
+            case .healthy: return "✅ healthy"
+            case .ok: return "⚠️ ok (growing)"
+            case .warn: return "⚠️ warn (large)"
+            }
+        }()
+        lines.append("- **Session cache:** \(sessionHealth) · \(sessionCacheLabel)")
+        let promptCacheLine: String = {
+            switch lastCacheLabel {
+            case "cached":
+                return "✅ last reply hit prompt cache"
+            case "not cached":
+                return "○ last reply missed prompt cache"
+            case "not eligible":
+                return "○ last reply not cache-eligible"
+            default:
+                return "— no chat reply yet this launch"
+            }
+        }()
+        lines.append("- **Prompt cache:** \(promptCacheLine)")
+
         // Nmap managed server
         refreshNmapInstalled()
         let nmapState = nmapServerRunning ? "✅ running on port \(nmapServerManager.port)" : "○ stopped"
@@ -2618,6 +2957,7 @@ final class AppState: ObservableObject {
         let codeState = codeScanServerRunning ? "✅ running on port \(codeScanServerManager.port)" : "○ stopped"
         let codeBin = semgrepInstalled ? "semgrep installed" : "semgrep missing (brew install semgrep)"
         lines.append("- **Code Scan MCP:** \(codeState) · \(codeBin)")
+
 
         // MCP servers
         if mcpEnabled {
@@ -2633,7 +2973,7 @@ final class AppState: ObservableObject {
         if let latest = await fetchLatestReleaseTag() {
             let latestClean = latest.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
             if AppUpdateService.isNewer(latestClean, than: current) {
-                lines.append("- **Version:** ⚠️ \(current) installed · latest is \(latestClean) — run `/update` or https://github.com/fizzball/ARIL/releases/latest")
+                lines.append("- **Version:** ⚠️ \(current) installed · latest is \(latestClean) — click **Update** under sessions, or https://github.com/fizzball/ARIL/releases/latest")
             } else if AppUpdateService.compareVersions(latestClean, current) == .orderedSame {
                 lines.append("- **Version:** ✅ \(current) (latest)")
             } else {
@@ -2647,7 +2987,7 @@ final class AppState: ObservableObject {
         updateLastAssistantNote(id: noteID.id, text: lines.joined(separator: "\n"))
     }
 
-    /// `/update`: check GitHub for a newer DMG and prompt to install into `/Applications`.
+    /// `/update`: check GitHub for a newer DMG and surface the sidebar Update button.
     func runUpdateCommand() async {
         if isUpdatingApp {
             appendLocalAssistantNote("An update is already in progress.")
@@ -2671,15 +3011,14 @@ final class AppState: ObservableObject {
                 }
                 updateLastAssistantNote(id: note.id, text: text)
                 updateNoteID = nil
+                setPendingUpdate(nil)
                 return
             }
+            setPendingUpdate(release)
             updateLastAssistantNote(
                 id: note.id,
-                text: "**ARIL update**\n\nVersion **\(release.version)** is available (you have **\(current)**).\n\nConfirm in the dialog to download \(release.dmgName) and install it to `/Applications`."
+                text: "**ARIL update**\n\nVersion **\(release.version)** is available (you have **\(current)**).\n\nClick **Update** under the session list to download \(release.dmgName) and install it to `/Applications`."
             )
-            pendingUpdateRelease = release
-            updateConfirmMessage =
-                "ARIL \(release.version) is available (you have \(current)).\n\nDownload \(release.dmgName) and replace /Applications/ARIL.app? ARIL will quit and relaunch when the install finishes."
         } catch {
             updateLastAssistantNote(
                 id: note.id,
@@ -2689,36 +3028,52 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Startup `/update` check — only surfaces the install dialog when a newer release exists.
+    /// Startup update check — shows the sidebar **Update** button when a newer release exists.
     func checkForAppUpdateOnLaunch() async {
-        guard !isUpdatingApp, updateConfirmMessage == nil, pendingUpdateRelease == nil else { return }
+        guard !isUpdatingApp, pendingUpdateRelease == nil else { return }
         let current = appVersion
         do {
             let release = try await AppUpdateService.fetchLatestRelease()
             guard AppUpdateService.isNewer(release.version, than: current) else { return }
-            pendingUpdateRelease = release
-            updateConfirmMessage =
-                "ARIL \(release.version) is available (you have \(current)).\n\nDownload \(release.dmgName) and replace /Applications/ARIL.app? ARIL will quit and relaunch when the install finishes."
+            setPendingUpdate(release)
         } catch {
             // Silent on launch — `/update` and `/status` remain available.
         }
     }
 
-    func respondToUpdateConfirm(_ upgrade: Bool) {
+    /// Sidebar **Update** button — download DMG and replace `/Applications/ARIL.app`.
+    func startPendingAppUpdate() {
+        guard !isUpdatingApp, let release = pendingUpdateRelease else { return }
+        setPendingUpdate(nil)
+        ensureSession()
+        if updateNoteID == nil, let sid = selectedSessionID {
+            let note = ChatMessage(
+                role: .assistant,
+                content: "**ARIL update** → \(release.version)\n\nStarting download…"
+            )
+            updateNoteID = note.id
+            updateSession(sid) { $0.messages.append(note) }
+        }
+        Task { await performAppUpdate(release: release) }
+    }
+
+    /// Dismiss the sidebar Update affordance without installing.
+    func dismissPendingAppUpdate() {
+        setPendingUpdate(nil)
         updateConfirmMessage = nil
-        if upgrade {
-            guard let release = pendingUpdateRelease else { return }
-            pendingUpdateRelease = nil
-            Task { await performAppUpdate(release: release) }
-            return
-        }
-        // Ignore dismiss-after-accept (alert binding may fire false after Upgrade).
-        guard pendingUpdateRelease != nil else { return }
-        pendingUpdateRelease = nil
         if let id = updateNoteID {
-            updateLastAssistantNote(id: id, text: "**ARIL update**\n\nUpgrade cancelled.")
+            updateLastAssistantNote(id: id, text: "**ARIL update**\n\nUpgrade dismissed.")
+            updateNoteID = nil
         }
-        updateNoteID = nil
+    }
+
+    func respondToUpdateConfirm(_ upgrade: Bool) {
+        // Kept for any leftover call sites; prefer startPendingAppUpdate / dismiss.
+        if upgrade {
+            startPendingAppUpdate()
+        } else {
+            dismissPendingAppUpdate()
+        }
     }
 
     private func performAppUpdate(release: AppUpdateService.LatestRelease) async {
@@ -2895,7 +3250,9 @@ final class AppState: ObservableObject {
             showIntelligencePanel = false
             analysisStatus = .idle
             estimatedLatencyMs = nil
-        } else if !sendText.isEmpty, (preview == nil || analysisStatus != .ready) {
+        } else if !isRunningAutoEval,
+                  !sendText.isEmpty,
+                  (preview == nil || analysisStatus != .ready) {
             await runPreview()
             if Task.isCancelled {
                 return
@@ -2925,8 +3282,11 @@ final class AppState: ObservableObject {
         let displayText = sendText.isEmpty ? attachmentNote : sendText + attachmentNote
 
         lastUserPromptForPrefer = sendText.isEmpty ? displayText : sendText
+        let userDisplayNameForSend: String? = isRunningAutoEval ? Self.modelTestSenderLabel : nil
         updateSession(sid) { session in
-            session.messages.append(ChatMessage(role: .user, content: displayText))
+            session.messages.append(
+                ChatMessage(role: .user, content: displayText, displayName: userDisplayNameForSend)
+            )
             if session.title == "New session" {
                 session.title = String(
                     (sendText.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : sendText).prefix(42)
@@ -2958,7 +3318,11 @@ final class AppState: ObservableObject {
         }
 
         if routeMode == .manual {
-            selectedModel = lockedManualModel
+            if let forced = modelTestForcedModel, !forced.isEmpty {
+                selectedModel = forced
+            } else {
+                selectedModel = lockedManualModel
+            }
         }
 
         let assistantID = UUID()
@@ -2975,6 +3339,9 @@ final class AppState: ObservableObject {
             )
         }
 
+        // Ensure managed MCP tokens are present in memory (persisted encode strips apiKey).
+        hydrateManagedMCPAPIKeys()
+
         let mcpForRequest: [MCPServerInRequestDTO] = {
             guard mcpEnabled else { return [] }
             return mcpServers.filter(\.isReady).map {
@@ -2989,9 +3356,13 @@ final class AppState: ObservableObject {
             }
         }()
 
+
         // Auto must not send the Manual lock as `model` — the gateway ignores it for
         // Auto routing, but omitting it keeps the contract obvious.
-        let requestModel: String? = routeMode == .manual ? selectedModel : nil
+        let requestModel: String? = {
+            if let forced = modelTestForcedModel, !forced.isEmpty { return forced }
+            return routeMode == .manual ? selectedModel : nil
+        }()
 
         let request = ChatRequest(
             messages: historyForAPI,
@@ -3045,11 +3416,11 @@ final class AppState: ObservableObject {
                             switch phase {
                             case "preparing":
                                 if tool == "connect" {
-                                    return "Connecting to \(server)…\n"
+                                    return "**MCP** · Connecting to \(server)…\n"
                                 }
-                                return "Asking model with MCP tools…\n"
+                                return "**MCP** · Asking model with tools…\n"
                             case "calling":
-                                return "Using \(server) · \(tool)…\n"
+                                return "**MCP** · Using \(server) · `\(tool)`…\n"
                             case "progress":
                                 let detail = (note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                                 return detail.isEmpty ? "" : "  ↳ \(detail)\n"
@@ -3327,7 +3698,7 @@ final class AppState: ObservableObject {
             )
             session.recomputeTotalCost()
         }
-        accrueDailySpend(cost)
+        accrueDailySpend(cost, model: model)
     }
 
     /// Drop embedded base64 images / huge blobs from outbound context (UI keeps originals).
@@ -3621,26 +3992,48 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Learning → Run Auto eval: fixed smoke prompts through Auto routing.
+    /// Learning → Run Selected Model Test: one prompt per category using Preferences → Models.
+    static let modelTestSenderLabel = "ARIL Model Test"
+
     func runAutoEval() async {
         guard !isRunningAutoEval, !isSending else { return }
+        closeToolPanel()
         isRunningAutoEval = true
         budgetBypassForEval = true
         let previousMode = routeMode
-        routeMode = .auto
+        let previousModel = selectedModel
+        let cases = AutoEvalPrompts.cases
+        routeMode = .manual
         evalLog = []
+        previewTask?.cancel()
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
         defer {
             routeMode = previousMode
+            selectedModel = previousModel
+            modelTestForcedModel = nil
+            modelTestProgress = nil
             budgetBypassForEval = false
             isRunningAutoEval = false
+            showIntelligencePanel = false
         }
 
-        for prompt in AutoEvalPrompts.all {
+        for (offset, testCase) in cases.enumerated() {
             if Task.isCancelled { break }
-            setDraft(prompt)
+            let model = routingProfile.model(for: testCase.category)
+            modelTestForcedModel = model
+            selectedModel = model
+            modelTestProgress = ModelTestProgress(
+                category: testCase.category,
+                model: model,
+                index: offset + 1,
+                total: cases.count
+            )
+            setDraft(testCase.prompt)
             isSending = true
             beginGenerationTracking()
-            await performSend(promptOverride: prompt)
+            await performSend(promptOverride: testCase.prompt)
             if isSending {
                 endGenerationTracking()
             }
@@ -3649,10 +4042,11 @@ final class AppState: ObservableObject {
             let body = assistant?.content ?? ""
             let cost = ChatMessage.actualCostUsd(from: body)
             let ok = !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && lastError == nil
-            let modelLeaf = exchangeLog.last?.model ?? selectedModel
+            let modelLeaf = exchangeLog.last?.model ?? model
             evalLog.append(
                 EvalLogEntry(
-                    prompt: prompt,
+                    prompt: testCase.prompt,
+                    category: testCase.category,
                     model: modelLeaf,
                     costUsd: cost,
                     ok: ok,
@@ -3758,6 +4152,15 @@ final class AppState: ObservableObject {
 
     func submitAlternative(_ alt: PromptAlternative) {
         send(promptOverride: alt.text)
+    }
+
+    func applyCacheHitPrompt(_ text: String) {
+        setDraft(text)
+        schedulePreview()
+    }
+
+    func submitCacheHitPrompt(_ text: String) {
+        send(promptOverride: text)
     }
 
     func attachFiles() {
@@ -3888,6 +4291,8 @@ final class AppState: ObservableObject {
     private struct LocalSessionsCache: Codable {
         var selectedSessionID: UUID?
         var sessions: [ChatSession]
+        var projects: [ChatProject]?
+        var expandedProjectIDs: [UUID]?
     }
 
     private func loadLocalSessions() {
@@ -3897,9 +4302,22 @@ final class AppState: ObservableObject {
         decoder.dateDecodingStrategy = .deferredToDate
         guard let cache = try? decoder.decode(LocalSessionsCache.self, from: data) else { return }
         let restored = cache.sessions.filter { !deletedSessionIDs.contains($0.id) }
-        guard !restored.isEmpty else { return }
+        projects = (cache.projects ?? []).sorted { $0.updatedAt > $1.updatedAt }
+        expandedProjectIDs = Set(cache.expandedProjectIDs ?? [])
+        // Drop expansion ids for deleted projects.
+        expandedProjectIDs = expandedProjectIDs.intersection(Set(projects.map(\.id)))
+        // Clear orphan project refs on sessions.
+        let projectIDs = Set(projects.map(\.id))
+        let healed = restored.map { session -> ChatSession in
+            var next = session
+            if let pid = next.projectID, !projectIDs.contains(pid) {
+                next.projectID = nil
+            }
+            return next
+        }
+        guard !healed.isEmpty || !projects.isEmpty else { return }
         // Prefer richer local copy when bootstrap races with an empty in-memory list.
-        sessions = Self.mergeSessions(local: sessions, remote: restored)
+        sessions = Self.mergeSessions(local: sessions, remote: healed)
             .sorted { $0.updatedAt > $1.updatedAt }
         if let selected = cache.selectedSessionID, sessions.contains(where: { $0.id == selected }) {
             selectedSessionID = selected
@@ -3922,7 +4340,12 @@ final class AppState: ObservableObject {
     }
 
     private func writeLocalSessionsFile(_ cleaned: [ChatSession]) {
-        let cache = LocalSessionsCache(selectedSessionID: selectedSessionID, sessions: cleaned)
+        let cache = LocalSessionsCache(
+            selectedSessionID: selectedSessionID,
+            sessions: cleaned,
+            projects: projects,
+            expandedProjectIDs: Array(expandedProjectIDs)
+        )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .deferredToDate
         encoder.outputFormatting = [.sortedKeys]

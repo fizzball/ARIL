@@ -140,6 +140,25 @@ struct RoutingProfile: Hashable, Codable {
     }
 }
 
+struct ChatProject: Identifiable, Hashable, Codable {
+    let id: UUID
+    var name: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 struct ChatSession: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
@@ -147,19 +166,27 @@ struct ChatSession: Identifiable, Hashable, Codable {
     var updatedAt: Date
     /// Running total of actual turn costs (USD). New sessions start at 0.
     var totalCostUsd: Double
+    /// Optional folder grouping in the sidebar (local only).
+    var projectID: UUID?
 
     init(
         id: UUID = UUID(),
         title: String,
         messages: [ChatMessage],
         updatedAt: Date = .now,
-        totalCostUsd: Double = 0
+        totalCostUsd: Double = 0,
+        projectID: UUID? = nil
     ) {
         self.id = id
         self.title = title
         self.messages = messages
         self.updatedAt = updatedAt
         self.totalCostUsd = totalCostUsd
+        self.projectID = projectID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages, updatedAt, totalCostUsd, projectID
     }
 
     init(from decoder: Decoder) throws {
@@ -169,6 +196,7 @@ struct ChatSession: Identifiable, Hashable, Codable {
         messages = try c.decode([ChatMessage].self, forKey: .messages)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         totalCostUsd = try c.decodeIfPresent(Double.self, forKey: .totalCostUsd) ?? 0
+        projectID = try c.decodeIfPresent(UUID.self, forKey: .projectID)
         if totalCostUsd == 0 {
             recomputeTotalCost()
         }
@@ -181,6 +209,88 @@ struct ChatSession: Identifiable, Hashable, Codable {
     var totalCostLabel: String {
         String(format: "$%.4f", totalCostUsd)
     }
+
+    /// Filename-safe stem derived from the session title (for Markdown export).
+    var exportFilenameStem: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? "ARIL-session" : trimmed
+        let cleaned = base
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: #"\s+"#, with: "-", options: .regularExpression)
+        let limited = String(cleaned.prefix(80))
+        return limited.isEmpty ? "ARIL-session" : limited
+    }
+
+    /// Export this session as Markdown (title, metadata, and turns).
+    func markdownExport(
+        userLabel: String = "You",
+        assistantLabel: String = "ARIL",
+        appVersion: String? = nil,
+        exportedAt: Date = .now
+    ) -> String {
+        var lines: [String] = []
+        let titleText = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Untitled session"
+            : title
+        lines.append("# \(titleText)")
+        lines.append("")
+        lines.append("| | |")
+        lines.append("|---|---|")
+        lines.append("| Exported | \(Self.exportDateFormatter.string(from: exportedAt)) |")
+        lines.append("| Updated | \(Self.exportDateFormatter.string(from: updatedAt)) |")
+        lines.append("| Messages | \(messages.count) |")
+        lines.append("| Session cost | \(totalCostLabel) |")
+        if let appVersion, !appVersion.isEmpty {
+            lines.append("| ARIL | \(appVersion) |")
+        }
+        lines.append("| Session ID | `\(id.uuidString.lowercased())` |")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        if messages.isEmpty {
+            lines.append("_No messages in this session._")
+            lines.append("")
+            return lines.joined(separator: "\n")
+        }
+
+        for message in messages {
+            switch message.role {
+            case .user:
+                let label = message.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                lines.append("## \(label?.isEmpty == false ? label! : userLabel)")
+            case .assistant:
+                lines.append("## \(assistantLabel)")
+            case .system:
+                lines.append("## System")
+            }
+            lines.append("")
+            let body = message.bodyWithoutCostFooter
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if body.isEmpty {
+                lines.append("_Empty message._")
+            } else {
+                lines.append(body)
+            }
+            if let cost = message.costFooterLabel {
+                lines.append("")
+                lines.append("*\(cost)*")
+            }
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static let exportDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
 
     /// Total character budget the gateway allows for context before it drops the
     /// oldest turns. Seeded from `_MAX_TOTAL_CHARS` in the gateway and refreshed from
@@ -243,7 +353,13 @@ struct ChatSession: Identifiable, Hashable, Codable {
             var snippet = String(body[start..<end])
             if start > body.startIndex { snippet = "…" + snippet }
             if end < body.endIndex { snippet += "…" }
-            let who = message.role == .user ? "You" : "ARIL"
+            let who: String = {
+                if message.role == .assistant { return "ARIL" }
+                if let name = message.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                    return name
+                }
+                return "You"
+            }()
             return "\(who): \(snippet)"
         }
         return nil
@@ -304,11 +420,26 @@ struct ChatMessage: Identifiable, Hashable, Codable {
     let id: UUID
     var role: Role
     var content: String
+    /// Optional chat bubble label for user turns (e.g. model-test sender). Nil → Preferences display name / "You".
+    var displayName: String?
 
-    init(id: UUID = UUID(), role: Role, content: String) {
+    init(id: UUID = UUID(), role: Role, content: String, displayName: String? = nil) {
         self.id = id
         self.role = role
         self.content = content
+        self.displayName = displayName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, content, displayName
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        role = try c.decode(Role.self, forKey: .role)
+        content = try c.decode(String.self, forKey: .content)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
     }
 
     static func formatActualCostFooter(
@@ -560,7 +691,7 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
     var transport: MCPTransport
     /// Target MCP server URL (e.g. https://host/mcp).
     var url: String
-    /// API key / bearer token (loaded from Keychain at runtime; not persisted in UserDefaults).
+    /// API key / bearer token (loaded from Application Support `.env` at runtime; not persisted in UserDefaults).
     var apiKey: String
     var enabled: Bool
     /// Stable built-in id (`agenty`, `deepwiki`, …). `nil` = custom server.
@@ -571,7 +702,7 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
     var docsURL: String?
     /// Presets lock URL by default; customs are fully editable.
     var isEditable: Bool
-    /// True for stdio/Playwright-style entries that are not yet supported.
+    /// True for deferred entries that are not yet supported.
     var isDeferred: Bool
     var lastCheckStatus: MCPCheckStatus
     var lastCheckMessage: String
@@ -623,7 +754,7 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
         let decodedURL = try c.decodeIfPresent(String.self, forKey: .url)
         let legacyEndpoint = try c.decodeIfPresent(String.self, forKey: .endpoint)
         url = (decodedURL?.isEmpty == false ? decodedURL : legacyEndpoint) ?? ""
-        // Keys live in Keychain — ignore any legacy apiKey on disk.
+        // Keys live in Application Support `.env` — ignore any legacy apiKey on disk.
         _ = try c.decodeIfPresent(String.self, forKey: .apiKey)
         apiKey = ""
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
@@ -866,10 +997,11 @@ enum BudgetGateResult: Equatable {
     case hardBlock(message: String)
 }
 
-/// One row from Learning → Run Auto eval.
+/// One row from Learning → Run Selected Model Test.
 struct EvalLogEntry: Identifiable, Equatable {
     let id: UUID
     let prompt: String
+    let category: RouteCategory
     let model: String
     let costUsd: Double?
     let ok: Bool
@@ -878,6 +1010,7 @@ struct EvalLogEntry: Identifiable, Equatable {
     init(
         id: UUID = UUID(),
         prompt: String,
+        category: RouteCategory,
         model: String,
         costUsd: Double? = nil,
         ok: Bool,
@@ -885,6 +1018,7 @@ struct EvalLogEntry: Identifiable, Equatable {
     ) {
         self.id = id
         self.prompt = prompt
+        self.category = category
         self.model = model
         self.costUsd = costUsd
         self.ok = ok
@@ -892,17 +1026,58 @@ struct EvalLogEntry: Identifiable, Equatable {
     }
 }
 
-/// Fixed smoke prompts for Learning → Run Auto eval (~8 turns).
+/// Progress for the Learning → Selected Model Test slide-up.
+struct ModelTestProgress: Equatable {
+    let category: RouteCategory
+    let model: String
+    let index: Int
+    let total: Int
+}
+
+/// Fixed category prompts for Learning → Run Selected Model Test (one per route category).
 enum AutoEvalPrompts {
-    static let all: [String] = [
-        "Write a one-line Swift function that returns the larger of two Ints.",
-        "What is the difference between OAuth access tokens and refresh tokens?",
-        "Reason step by step: if a train leaves at 3pm going 60mph and another at 4pm going 80mph from the same station same direction, when does the second catch up?",
-        "Suggest three secure password storage practices for a web API.",
-        "Rewrite this sentence more clearly: 'The thing that the team did was they made improvements to the system which resulted in better performance metrics.'",
-        "Explain what a race condition is using a short everyday analogy.",
-        "Give a minimal Python snippet that reads a CSV and prints the column names.",
-        "List three trade-offs between SQLite and Postgres for a single-user desktop app.",
+    struct Case: Equatable {
+        let category: RouteCategory
+        let prompt: String
+    }
+
+    /// One prompt per Preferences → Models category, in display order.
+    static let cases: [Case] = [
+        Case(
+            category: .coding,
+            prompt: "Write a one-line Swift function that returns the larger of two Ints."
+        ),
+        Case(
+            category: .security,
+            prompt: "Suggest three secure password storage practices for a web API."
+        ),
+        Case(
+            category: .reasoning,
+            prompt: "Reason step by step: if a train leaves at 3pm going 60mph and another at 4pm going 80mph from the same station same direction, when does the second catch up?"
+        ),
+        Case(
+            category: .vision,
+            prompt: "Describe how you would analyze a mobile app screenshot for accessibility issues (contrast, tap targets, labels). List five concrete checks."
+        ),
+        Case(
+            category: .cost,
+            prompt: "In one short sentence, what is HTTP status code 404?"
+        ),
+        Case(
+            category: .performance,
+            prompt: "Reply with only the word: ok"
+        ),
+        Case(
+            category: .confidence,
+            prompt: "A production payment API started returning intermittent 500s after a deploy. Outline a rigorous incident triage plan with ordered steps and what evidence to gather at each step."
+        ),
+        Case(
+            category: .general,
+            prompt: "Rewrite this sentence more clearly: 'The thing that the team did was they made improvements to the system which resulted in better performance metrics.'"
+        ),
     ]
+
+    static var all: [String] { cases.map(\.prompt) }
+    static var count: Int { cases.count }
 }
 

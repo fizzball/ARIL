@@ -45,6 +45,16 @@ SSH access:
 ssh -p 65002 u669814535@145.79.25.220
 ```
 
+## SEO
+
+The marketing page includes:
+
+- Canonical URL, Open Graph, and Twitter card meta tags
+- JSON-LD (`WebSite`, `Organization`, `SoftwareApplication`)
+- [`robots.txt`](robots.txt) and [`sitemap.xml`](sitemap.xml)
+
+Submit `https://aril.host/sitemap.xml` in Google Search Console / Bing Webmaster when ready.
+
 ## Download URL
 
 The site buttons point at:

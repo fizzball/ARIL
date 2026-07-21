@@ -107,6 +107,11 @@ class CacheInsight(BaseModel):
     threshold: int
     would_hit: bool = False
     estimated_savings_pct: float | None = None
+    # Tokens still needed to cross the eligibility threshold (0 when eligible).
+    tokens_to_eligible: int = 0
+    # Prior cached prompt text similar to the draft (offer Edit/Submit for a hit).
+    suggested_hit_prompt: str | None = None
+    suggested_hit_rationale: str | None = None
 
 
 class ContextLimitsResponse(BaseModel):

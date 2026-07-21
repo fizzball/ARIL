@@ -19,17 +19,18 @@ ARIL is a native **macOS 14+** chat client. Solo mode runs a bundled local gatew
 
 ### Optional MCP servers (Preferences → MCP)
 
-Remote HTTP MCP presets can be enabled for Auto/Manual chat tools. Turn on **Use MCP servers**, enable a preset (e.g. DeepWiki), run **Check**, then ask in chat — the reply may show `Using DeepWiki · …` while tools run. Judge mode does not use MCP. Playwright/stdio is deferred.
+Remote HTTP MCP presets and ARIL-managed local servers (Nmap, Semgrep) can be enabled for Auto/Manual chat tools. Turn on **Use MCP servers**, enable a preset, run **Check**, then ask in chat — the reply may show `Using … · …` while tools run. Judge mode does not use MCP.
 
 | Preset | Auth | Notes |
 |--------|------|-------|
+| Nmap Scanner (local) | Managed bearer | Requires `brew install nmap` |
+| Code Scanner (Semgrep, local) | Managed bearer | Requires `brew install semgrep` |
 | Agenty | Bearer API key | Web scraping / screenshots |
 | AI Diagram Maker | `X-ADM-API-Key` | Diagram generation |
 | Cloudflare Browser | Bearer / API token | Browser rendering |
 | DeepWiki | None | Public GitHub wiki Q&A |
 | GitHub | Bearer PAT | Repos / issues / PRs |
 | Firecrawl | Bearer or keyless free tier | Scrape / search |
-| Playwright | — | Deferred (needs local Node) |
 
 ### Gatekeeper / “app can’t be opened”
 

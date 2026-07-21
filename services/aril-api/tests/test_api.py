@@ -76,6 +76,7 @@ def test_prompt_cache_module():
         model="openai/gpt-4.1-mini",
         temperature=0.0,
     )
+    long_prompt = ("refactor this python module with tests and docs. " * 40).strip()
     prompt_cache.put(
         key,
         {
@@ -84,6 +85,8 @@ def test_prompt_cache_module():
             "input_tokens": 2000,
             "output_tokens": 10,
             "cost_usd": 0.01,
+            "user_prompt": long_prompt,
+            "temperature": 0.0,
         },
     )
     hit = prompt_cache.peek(key)
@@ -91,6 +94,16 @@ def test_prompt_cache_module():
     assert hit["content"] == "cached-content"
     assert prompt_cache.eligible(2000) is True
     assert prompt_cache.eligible(10) is False
+
+    # Near-prefix of a stored prompt should surface as a suggested hit.
+    prefix = long_prompt[: len(long_prompt) // 2]
+    suggestion = prompt_cache.suggest_hit(
+        prompt=prefix,
+        model="openai/gpt-4.1-mini",
+        temperature=0.0,
+    )
+    assert suggestion is not None
+    assert suggestion["prompt"] == long_prompt
 
 
 def test_prefer_feedback_boosts_learning():

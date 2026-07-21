@@ -4,7 +4,7 @@ High-level capabilities of the Adaptive Routing Intelligent Layer macOS client.
 
 ## macOS native AI chat client
 
-SwiftUI app with multi-session chat history (create/delete sessions, sidebar session list).
+SwiftUI app with multi-session chat history (create/delete sessions, sidebar session list). Group sessions into **Projects** (folders); project search is scoped to that project’s sessions, while the main sidebar search covers all sessions. Export a session as **Markdown** via the sidebar export control, context menu, or `/export`. Slash commands include `/web` (toggle web search) and `/cache` / `/cache compact` / `/cache clear` for local session-cache health.
 
 ## Local “Solo” gateway
 
@@ -37,7 +37,7 @@ Runs after an idle delay while you type:
 - Can skip re-analysis when a matching judgement exists (token saver), with “Redo Analysis” to refresh.
 - **Prefer** wins (Judge or explicit Prefer) feed Auto routing and appear in the Intelligence panel as a short preference reason.
 - **Category Prefer wins** table in the Learning panel (from preferences snapshot).
-- **Run Auto eval** — fixed ~8 smoke prompts through Auto; results append to an in-Learning eval log (prompt, model, cost, ok/fail). Full Auto vs Manual vs Judge bake-off is deferred.
+- **Run Selected Model Test** — one prompt per route category (Coding, Security, …) sent in Manual mode using that category’s model from Preferences → Models. A slide-up shows category, model, and progress (e.g. 3 of 8). Results append to an in-Learning log (category, model, cost, ok/fail).
 
 ## Cost & pricing visibility
 
@@ -45,10 +45,11 @@ Runs after an idle delay while you type:
 - Tracks per-message actual cost and session total cost (and shows whether a response was cached).
 - **Toolbar → Model popularity** flyout: OpenRouter weekly token rankings (`top-weekly`); tap a row to lock it in Manual mode. (Replaces the old Model costs flyout.)
 - **Budget guardrails** (Preferences → General → Budget): master **Enable budget guardrails** toggle (off by default). Session/Daily Soft/Hard USD caps in a grid ($0.50 stepper steps; `0` = off for that cap). Soft caps confirm before send; hard caps block. Judge, web search, and image-gen always soft-confirm when a soft cap is set. Daily spend is tracked by local calendar date even when guardrails are off.
+- **Spend analysis** (toolbar): models used with costs, rolling last-7-day total, and calendar-month total (from Learning chat transactions + a local spend ledger).
 
 ## Prompt/result caching
 
-Gateway-side prompt cache for eligible prompts; cached replies are marked and discounted in cost reporting.
+Gateway-side prompt cache for eligible prompts (>1024 estimated input tokens); cached replies are marked and discounted in cost reporting. The Intelligence panel shows cache status (`hit` / `eligible` / tokens short) and, when relevant, offers a prior cached prompt (Edit / Submit) or a one-click Submit for an exact cache hit.
 
 ## Attachments + multimodal awareness
 
@@ -81,14 +82,14 @@ Configure remote MCP servers in **Preferences → MCP**:
 - Built-in presets (disabled by default): Agenty, AI Diagram Maker, Cloudflare Browser, DeepWiki, GitHub, Firecrawl
 - **Nmap Scanner (local)** and **Code Scanner (Semgrep, local)** — ARIL-*managed* MCP servers (see below)
 - Selective enable per server + master **Use MCP servers** toggle
-- API keys stored in Keychain; **Check connection** probes initialize + tools/list via the Solo gateway
+- API keys stored in Application Support `.env` (with OpenRouter); **Check connection** probes initialize + tools/list via the Solo gateway
+- Managed servers mint a **new bearer token on each enable**, rewrite localhost `config.json`, and restart so token + server never drift
 - **Add server…** for custom remote HTTP endpoints
-- **Playwright** is listed as deferred (local stdio / Node required later)
 
 ### Managed Nmap security scanner (0.4.0)
 
 - Enable **Nmap Scanner (local)** and ARIL runs the whole thing for you — no manual setup:
-  - Generates a 256-bit bearer token once and stores it in the **Keychain**
+  - Generates a fresh 256-bit bearer token on each enable and stores it in Application Support **`.env`**
   - Writes a `config.json` (in Application Support) pinned to **127.0.0.1** with that token, so the token the server enforces and the token ARIL sends can never drift
   - Launches the server from the bundled `aril-gateway` binary (the same frozen binary via a `nmap-mcp` subcommand — no extra Python dependencies)
   - Health-checks the endpoint and only marks the server ready once it responds
@@ -99,7 +100,7 @@ Configure remote MCP servers in **Preferences → MCP**:
 
 ### Managed Semgrep code scanner (0.4.0)
 
-- Enable **Code Scanner (Semgrep, local)** and ARIL manages it exactly like the Nmap server — token in Keychain, localhost-only `config.json`, launched via the bundled `aril-gateway code-mcp` subcommand (listens on **127.0.0.1:8743**), health-checked before it's marked ready
+- Enable **Code Scanner (Semgrep, local)** and ARIL manages it exactly like the Nmap server — token in `.env` (rotated on enable), localhost-only `config.json`, launched via the bundled `aril-gateway code-mcp` subcommand (listens on **127.0.0.1:8743**), health-checked before it's marked ready
 - Scans **both on-disk paths and inline code snippets** (inline code is written to a temp dir and deleted after the scan; a `filename` argument drives language detection)
 - Tools exposed to Auto/Manual chat: `semgrep_scan` (default `auto` ruleset, override via `config` e.g. `p/owasp-top-ten`), `security_check` (`p/security-audit`), and `semgrep_scan_with_custom_rule` (bring-your-own YAML rule, no registry needed)
 - Requires the `semgrep` binary; ARIL detects it and prompts **`brew install semgrep`** (or `pipx install semgrep`) if missing

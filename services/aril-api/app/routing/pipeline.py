@@ -124,6 +124,61 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def build_cache_insight(
+    *,
+    prompt: str,
+    model: str,
+    temperature: float,
+    input_tokens: int,
+) -> CacheInsight:
+    """Cache eligibility, hit peek, and optional similar-hit prompt offer."""
+    from app.core import cache as prompt_cache
+
+    threshold = settings.aril_cache_token_threshold
+    eligible = input_tokens > threshold
+    tokens_to_eligible = 0 if eligible else max(0, threshold + 1 - input_tokens)
+    would_hit = False
+    savings: float | None = None
+    suggested: str | None = None
+    suggested_rationale: str | None = None
+
+    key = prompt_cache.make_key(
+        messages=[{"role": "user", "content": prompt}],
+        model=model,
+        temperature=temperature,
+    )
+    if eligible:
+        would_hit = prompt_cache.peek(key) is not None
+        savings = prompt_cache.savings_pct() if would_hit else 25.0
+
+    if not would_hit:
+        match = prompt_cache.suggest_hit(
+            prompt=prompt,
+            model=model,
+            temperature=temperature,
+        )
+        if match and (match.get("prompt") or "").strip():
+            suggested = str(match["prompt"]).strip()
+            if suggested == prompt.strip():
+                suggested = None
+            else:
+                suggested_rationale = (
+                    "Close to a previously cached prompt — use it to hit the prompt cache "
+                    f"(~{int(prompt_cache.savings_pct())}% savings)."
+                )
+
+    return CacheInsight(
+        eligible=eligible,
+        estimated_input_tokens=input_tokens,
+        threshold=threshold,
+        would_hit=would_hit,
+        estimated_savings_pct=savings,
+        tokens_to_eligible=tokens_to_eligible,
+        suggested_hit_prompt=suggested,
+        suggested_hit_rationale=suggested_rationale,
+    )
+
+
 def resolve_profile(profile: RoutingProfile | None) -> dict[RouteCategory, str]:
     base = dict(DEFAULT_PROFILE)
     if profile is not None:
@@ -452,19 +507,12 @@ def build_preview(
     in_tok = estimate_tokens(req.prompt)
     if system_prompt:
         in_tok += estimate_tokens(system_prompt)
-    eligible = in_tok > settings.aril_cache_token_threshold
-    would_hit = False
-    savings = None
-    if eligible:
-        from app.core import cache as prompt_cache
-
-        key = prompt_cache.make_key(
-            messages=[{"role": "user", "content": req.prompt}],
-            model=recommended,
-            temperature=temp,
-        )
-        would_hit = prompt_cache.peek(key) is not None
-        savings = prompt_cache.savings_pct() if would_hit else 25.0
+    cache = build_cache_insight(
+        prompt=req.prompt,
+        model=recommended,
+        temperature=temp,
+        input_tokens=in_tok,
+    )
 
     src = alternatives_source
     if not alts:
@@ -476,13 +524,7 @@ def build_preview(
         alternatives=alts,
         recommended_model=recommended,
         routes=routes,
-        cache=CacheInsight(
-            eligible=eligible,
-            estimated_input_tokens=in_tok,
-            threshold=settings.aril_cache_token_threshold,
-            would_hit=would_hit,
-            estimated_savings_pct=savings,
-        ),
+        cache=cache,
         temperature=temp,
         route_mode=req.route_mode,
         alternatives_source=src,  # type: ignore[arg-type]
@@ -611,19 +653,12 @@ def build_preview_from_judgement(
         )
     ]
 
-    eligible = in_tok > settings.aril_cache_token_threshold
-    would_hit = False
-    savings = None
-    if eligible:
-        from app.core import cache as prompt_cache
-
-        key = prompt_cache.make_key(
-            messages=[{"role": "user", "content": req.prompt}],
-            model=recommended,
-            temperature=temp,
-        )
-        would_hit = prompt_cache.peek(key) is not None
-        savings = prompt_cache.savings_pct() if would_hit else 25.0
+    cache = build_cache_insight(
+        prompt=req.prompt,
+        model=recommended,
+        temperature=temp,
+        input_tokens=in_tok,
+    )
 
     src = "judgement"
     if alts and payload:
@@ -637,13 +672,7 @@ def build_preview_from_judgement(
         alternatives=alts,
         recommended_model=recommended,
         routes=routes,
-        cache=CacheInsight(
-            eligible=eligible,
-            estimated_input_tokens=in_tok,
-            threshold=settings.aril_cache_token_threshold,
-            would_hit=would_hit,
-            estimated_savings_pct=savings,
-        ),
+        cache=cache,
         temperature=temp,
         route_mode=req.route_mode,
         alternatives_source=src,  # type: ignore[arg-type]

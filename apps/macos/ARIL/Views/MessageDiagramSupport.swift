@@ -370,40 +370,57 @@ struct MermaidDiagramView: View {
     @State private var height: CGFloat = 160
     @State private var errorText: String?
     @State private var copied = false
+    @State private var showSource = false
+
+    private var sanitizedSource: String {
+        MermaidHTMLBuilder.sanitize(source)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            diagramChrome(title: "Mermaid", source: source, copied: $copied)
+            diagramChrome(title: "Mermaid", source: sanitizedSource, copied: $copied)
             ZStack(alignment: .topLeading) {
-                DiagramWebView(
-                    html: MermaidHTMLBuilder.html(
-                        source: source,
-                        dark: theme.palette.colorScheme == .dark
-                    ),
-                    height: $height,
-                    errorText: $errorText
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: max(120, height))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(theme.palette.hairline, lineWidth: 1)
-                )
-
-                if let errorText {
-                    Text(errorText)
-                        .font(ARILTheme.captionFont)
-                        .foregroundStyle(theme.palette.danger)
-                        .padding(8)
-                        .background(theme.palette.backgroundElevated.opacity(0.92))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .padding(8)
+                if errorText == nil {
+                    DiagramWebView(
+                        html: MermaidHTMLBuilder.html(
+                            source: sanitizedSource,
+                            dark: theme.palette.colorScheme == .dark
+                        ),
+                        height: $height,
+                        errorText: $errorText
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(120, height))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(theme.palette.hairline, lineWidth: 1)
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Couldn’t render this diagram", systemImage: "exclamationmark.triangle")
+                            .font(ARILTheme.captionFont.weight(.semibold))
+                            .foregroundStyle(theme.palette.danger)
+                        Text(compactMermaidError(errorText ?? ""))
+                            .font(ARILTheme.captionFont)
+                            .foregroundStyle(theme.palette.textMuted)
+                            .textSelection(.enabled)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.palette.inputFill)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(theme.palette.danger.opacity(0.35), lineWidth: 1)
+                    )
                 }
             }
-            // Source fallback always available under the graphic.
-            DisclosureGroup("Source") {
-                Text(source)
+            .onChange(of: errorText) { _, newValue in
+                if newValue != nil { showSource = true }
+            }
+            DisclosureGroup("Source", isExpanded: $showSource) {
+                Text(sanitizedSource)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.palette.textMuted)
                     .textSelection(.enabled)
@@ -413,6 +430,20 @@ struct MermaidDiagramView: View {
             .foregroundStyle(theme.palette.textMuted)
         }
         .accessibilityLabel("Mermaid diagram")
+    }
+
+    private func compactMermaidError(_ raw: String) -> String {
+        // Drop the huge "Parse error on line N:" stack; keep a short hint.
+        let trimmed = raw
+            .replacingOccurrences(of: "Mermaid render failed: ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let nl = trimmed.firstIndex(of: "\n") {
+            return String(trimmed[..<nl])
+        }
+        if trimmed.count > 160 {
+            return String(trimmed.prefix(157)) + "…"
+        }
+        return trimmed
     }
 }
 
@@ -479,8 +510,18 @@ private func diagramChrome(title: String, source: String, copied: Binding<Bool>)
 // MARK: - HTML builders
 
 enum MermaidHTMLBuilder {
+    /// Fix common model mistakes that break Mermaid 11 parsing.
+    static func sanitize(_ source: String) -> String {
+        var s = source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        // `A -->|label|> B` is invalid; edge labels end with `|` then the target.
+        s = s.replacingOccurrences(of: "|>", with: "|")
+        return s
+    }
+
     static func html(source: String, dark: Bool) -> String {
-        let escaped = jsonEscape(source)
+        let escaped = jsonEscape(sanitize(source))
         let theme = dark ? "dark" : "default"
         let bg = dark ? "#1a1a1a" : "#ffffff"
         let fg = dark ? "#e8e8e8" : "#1a1a1a"

@@ -44,7 +44,7 @@ struct MCPServerEditorView: View {
                             .disabled(isDeferred)
                     }
                     if isDeferred {
-                        Text("Playwright / stdio servers are not available yet. Remote HTTP only for now.")
+                        Text("Stdio custom servers are not available yet. Use a managed local preset (Nmap / Semgrep), or a remote HTTP MCP server.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -70,7 +70,7 @@ struct MCPServerEditorView: View {
                     }
                     if authStyle != .none {
                         SecureField("API key / token", text: $apiKey)
-                        Text("Stored in Keychain on this Mac. Never committed to the repo.")
+                        Text("Stored in Application Support ARIL/.env on this Mac. Never committed to the repo.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {

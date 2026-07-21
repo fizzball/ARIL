@@ -137,20 +137,27 @@ def _tool_result_text(result: Any) -> str:
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
+        is_error = bool(result.get("isError"))
         content = result.get("content")
         if isinstance(content, list):
             parts: list[str] = []
             for item in content:
                 if isinstance(item, dict):
-                    if item.get("type") == "text" and isinstance(item.get("text"), str):
+                    item_type = item.get("type")
+                    if item_type == "text" and isinstance(item.get("text"), str):
                         parts.append(item["text"])
+                    elif item_type == "image":
+                        # Base64 screenshots blow the context window.
+                        parts.append("[screenshot image omitted]")
                     else:
                         parts.append(json.dumps(item, ensure_ascii=False))
                 else:
                     parts.append(str(item))
             if parts:
-                return "\n".join(parts)
-        return json.dumps(result, ensure_ascii=False)
+                body = "\n".join(parts)
+                return f"TOOL ERROR:\n{body}" if is_error else body
+        raw = json.dumps(result, ensure_ascii=False)
+        return f"TOOL ERROR:\n{raw}" if is_error else raw
     return json.dumps(result, ensure_ascii=False)
 
 

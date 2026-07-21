@@ -101,7 +101,7 @@ private struct MessageBubble: View {
                     )
                 }
 
-                Text(message.role == .user ? state.userLabel : "ARIL")
+                Text(message.role == .user ? (message.displayName ?? state.userLabel) : "ARIL")
                     .font(ARILTheme.captionFont)
                     .foregroundStyle(theme.palette.accent)
 

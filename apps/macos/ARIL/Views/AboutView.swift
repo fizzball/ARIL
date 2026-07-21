@@ -72,6 +72,19 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.9", changes: [
+            "Sidebar Update button replaces the upgrade dialog when a newer release is available",
+            "Export session as Markdown (sidebar, context menu, or /export)",
+            "Spend analysis toolbar panel — models used, calendar-month and rolling 7-day totals",
+            "Intelligence panel prompt-cache status with Edit/Submit when a cache hit is available",
+            "/web toggles OpenRouter web search; /cache reports session cache (compact|clear)",
+            "/status includes session-cache and prompt-cache lines",
+            "/new starts a new chat session",
+            "Learning Selected Model Test — category prompts vs Preferences → Models with progress slide-up",
+            "Sidebar Projects — group sessions into folders; project search is scoped, main search is global",
+            "MCP tokens in Application Support .env (no Keychain); rotate on each managed-server enable",
+            "Removed Playwright Browser MCP (unreliable local browser automation)",
+        ]),
         ChangelogEntry(version: "0.4.8", changes: [
             "Session cache management: strip bulky image payloads on save, auto-compact oversized caches, warn with Compact/Clear",
             "Status footer shows Cache Size with healthy / ok / warn colours",

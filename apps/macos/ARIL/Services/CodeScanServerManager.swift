@@ -3,11 +3,11 @@ import Security
 
 /// Launches and supervises the ARIL-managed Semgrep code-scan MCP server.
 ///
-/// Mirrors `NmapServerManager`: ARIL generates a bearer token once, writes it
-/// into a `config.json` (host pinned to 127.0.0.1) and stores the same token in
-/// the Keychain, then launches the server — so the token the server enforces and
-/// the token the app sends can never drift. The server is served by the same
-/// bundled `aril-gateway` binary via its `code-mcp` subcommand (or
+/// Mirrors `NmapServerManager`: ARIL generates a bearer token on each enable,
+/// writes it into a `config.json` (host pinned to 127.0.0.1) and stores the same
+/// token in Application Support `.env`, then launches the server — so the token
+/// the server enforces and the token the app sends can never drift. The server
+/// is served by the same bundled `aril-gateway` binary via its `code-mcp` subcommand (or
 /// `python -m app.codescan_mcp` in dev checkouts).
 @MainActor
 final class CodeScanServerManager: ObservableObject {
@@ -49,9 +49,12 @@ final class CodeScanServerManager: ObservableObject {
 
     /// Ensure the server is running with the given bearer token. Returns true on success.
     @discardableResult
-    func ensureRunning(token: String) async -> Bool {
+    func ensureRunning(token: String, forceRestart: Bool = false) async -> Bool {
         refreshSemgrepInstalled()
-        if await healthOK() {
+        if forceRestart {
+            stop()
+            freeListenPort()
+        } else if await healthOK() {
             lastMessage = "Code Scan MCP already running on port \(port)"
             isManagingProcess = process != nil
             return true
@@ -77,6 +80,14 @@ final class CodeScanServerManager: ObservableObject {
         process?.terminate()
         process = nil
         isManagingProcess = false
+    }
+
+    private func freeListenPort() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["bash", "-lc", "lsof -tiTCP:\(port) -sTCP:LISTEN | xargs kill 2>/dev/null || true"]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     // MARK: - Health

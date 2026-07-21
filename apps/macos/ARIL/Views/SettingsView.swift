@@ -731,7 +731,7 @@ struct SettingsView: View {
                     get: { state.mcpEnabled },
                     set: { state.setMCPEnabled($0) }
                 ))
-                Text("Enabled servers are available as tools in Auto/Manual chat. Judge mode does not use MCP. The Nmap Scanner (local) is managed by ARIL — enable it to run a local, token-authenticated nmap server. Playwright/stdio is deferred.")
+                Text("Enabled servers are available as tools in Auto/Manual chat. Judge mode does not use MCP. Local managed servers (Nmap, Semgrep) are started by ARIL when enabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 let ready = state.mcpServers.filter(\.isReady).count
@@ -751,6 +751,10 @@ struct SettingsView: View {
         }
         .padding()
         .formStyle(.grouped)
+        .onAppear {
+            state.refreshNmapInstalled()
+            state.refreshSemgrepInstalled()
+        }
         .sheet(item: $mcpEditorTarget) { target in
             MCPServerEditorView(serverID: target.serverID)
                 .environmentObject(state)
@@ -801,7 +805,7 @@ struct SettingsView: View {
                 )
                 .labelsHidden()
                 .disabled(server.isDeferred || !state.mcpEnabled)
-                .help(server.isDeferred ? "Playwright requires local Node — coming later" : "Enable this server")
+                .help(server.isDeferred ? "Coming soon" : "Enable this server")
             }
 
             if server.isManaged {
@@ -856,49 +860,76 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func managedServerDetails(_ server: MCPServerConfig) -> some View {
-        let isCode = server.presetId == MCPServerConfig.codescanPresetId
-        let toolName = isCode ? "semgrep" : "nmap"
-        let installHint = isCode ? "brew install semgrep" : "brew install nmap"
-        let blurb = isCode
-            ? "ARIL runs this server for you — it generates a bearer token, writes a localhost-only config, and launches semgrep over MCP for static code analysis (files, folders, or inline snippets). Enable it above to start; the token is stored in your Keychain."
-            : "ARIL runs this server for you — it generates a bearer token, writes a localhost-only config, and launches nmap over MCP. Enable it above to start; the token is stored in your Keychain."
-        let installed = isCode ? state.semgrepInstalled : state.nmapInstalled
-        let busy = isCode ? state.codeScanServerBusy : state.nmapServerBusy
-        let statusText = isCode ? state.codeScanServerStatus : state.nmapServerStatus
-
+        let details = managedDetails(for: server)
         VStack(alignment: .leading, spacing: 4) {
-            Text(blurb)
+            Text(details.blurb)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 6) {
-                Image(systemName: installed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(installed ? Color.green : Color.orange)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: details.installed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(details.installed ? Color.green : Color.orange)
                     .font(.caption)
-                if installed {
-                    Text("\(toolName) is installed")
+                if details.installed {
+                    Text("\(details.toolName) is installed")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("\(toolName) not found — install with ")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        + Text(installHint)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.primary)
+                    (
+                        Text("\(details.toolName) not found — install with ")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        + Text(details.installHint)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.primary)
+                    )
+                    .textSelection(.enabled)
                 }
-                if busy {
+                if details.busy {
                     ProgressView().controlSize(.small)
                 }
             }
 
-            if !statusText.isEmpty {
-                Text(statusText)
+            if !details.statusText.isEmpty {
+                Text(details.statusText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private struct ManagedDetails {
+        let toolName: String
+        let installHint: String
+        let blurb: String
+        let installed: Bool
+        let busy: Bool
+        let statusText: String
+    }
+
+    private func managedDetails(for server: MCPServerConfig) -> ManagedDetails {
+        switch server.presetId {
+        case MCPServerConfig.codescanPresetId:
+            return ManagedDetails(
+                toolName: "semgrep",
+                installHint: "brew install semgrep",
+                blurb: "ARIL runs this server for you — it generates a fresh bearer token each time you enable it, writes a localhost-only config, and launches semgrep over MCP for static code analysis (files, folders, or inline snippets). The token is stored in Application Support `.env` (same place as your OpenRouter key).",
+                installed: state.semgrepInstalled,
+                busy: state.codeScanServerBusy,
+                statusText: state.codeScanServerStatus
+            )
+        default:
+            return ManagedDetails(
+                toolName: "nmap",
+                installHint: "brew install nmap",
+                blurb: "ARIL runs this server for you — it generates a fresh bearer token each time you enable it, writes a localhost-only config, and launches nmap over MCP. The token is stored in Application Support `.env` (same place as your OpenRouter key).",
+                installed: state.nmapInstalled,
+                busy: state.nmapServerBusy,
+                statusText: state.nmapServerStatus
+            )
+        }
     }
 
     @ViewBuilder

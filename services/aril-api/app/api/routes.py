@@ -248,6 +248,10 @@ async def _complete_cached(
             generate_image=generate_image,
         )
     if cacheable and prompt_cache.eligible(result.input_tokens or est):
+        last_user = next(
+            (m.content for m in reversed(messages) if m.role == "user"),
+            "",
+        )
         prompt_cache.put(
             key,
             {
@@ -256,6 +260,8 @@ async def _complete_cached(
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "cost_usd": result.cost_usd,
+                "user_prompt": last_user,
+                "temperature": round(temperature, 2),
             },
         )
     return result, False
@@ -735,6 +741,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     "input_tokens": meta["input_tokens"],
                     "output_tokens": meta["output_tokens"],
                     "cost_usd": meta["cost_usd"],
+                    "user_prompt": last_user,
+                    "temperature": round(temperature, 2),
                 },
             )
         # Client still received the full streamed content (including images) above.

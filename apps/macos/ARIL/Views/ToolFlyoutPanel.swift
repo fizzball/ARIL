@@ -14,6 +14,8 @@ struct ToolFlyoutPanel: View {
                 LogAnalysisView()
             case .learning:
                 LearningView()
+            case .spendAnalysis:
+                SpendAnalysisView()
             case .about:
                 AboutView()
             case .none:

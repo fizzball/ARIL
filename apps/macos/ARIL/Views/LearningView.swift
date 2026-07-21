@@ -148,8 +148,10 @@ struct LearningView: View {
                     }
                 }
 
-                Section("Auto eval") {
-                    Text("Runs \(AutoEvalPrompts.all.count) fixed smoke prompts through Auto. Results append below (prompt, model, cost, ok/fail).")
+                Section("Selected model test") {
+                    Text(
+                        "Runs \(AutoEvalPrompts.count) category prompts against the models in Preferences → Models (e.g. Coding → that category’s model). Results append below."
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -162,7 +164,7 @@ struct LearningView: View {
                                     .controlSize(.small)
                                 Text("Running…")
                             } else {
-                                Text("Run Auto eval")
+                                Text("Run Selected Model Test")
                             }
                         }
                         .disabled(state.isRunningAutoEval || state.isSending || !state.gatewayReady)
@@ -176,7 +178,7 @@ struct LearningView: View {
                     }
 
                     if state.evalLog.isEmpty {
-                        Text("No eval runs yet.")
+                        Text("No test runs yet.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(state.evalLog) { entry in
@@ -186,6 +188,9 @@ struct LearningView: View {
                                         .foregroundStyle(entry.ok ? theme.palette.accent : theme.palette.danger)
                                     Text(entry.ok ? "ok" : "fail")
                                         .font(.caption.weight(.semibold))
+                                    Text(entry.category.label)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(theme.palette.accent)
                                     if let cost = entry.costUsd {
                                         Text(String(format: "$%.4f", cost))
                                             .font(.caption)
