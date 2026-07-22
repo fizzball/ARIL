@@ -2421,7 +2421,19 @@ final class AppState: ObservableObject {
     // MARK: - Prompt history (shell-style ↑/↓ recall)
 
     private static func loadPromptHistory() -> [String] {
-        (UserDefaults.standard.array(forKey: "aril.promptHistory") as? [String]) ?? []
+        let raw = (UserDefaults.standard.array(forKey: "aril.promptHistory") as? [String]) ?? []
+        // Drop slash-command entries left by older builds — they aren't chat prompts
+        // and recalling them re-opens the `/` palette, stealing ↑/↓ from history.
+        let cleaned = raw.filter { !Self.isSlashHistoryEntry($0) }
+        if cleaned.count != raw.count {
+            UserDefaults.standard.set(cleaned, forKey: "aril.promptHistory")
+        }
+        return cleaned
+    }
+
+    /// Slash commands are not chat prompts; keep them out of ↑/↓ recall.
+    private static func isSlashHistoryEntry(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
     }
 
     private func savePromptHistory() {
@@ -2431,7 +2443,11 @@ final class AppState: ObservableObject {
     /// Record a submitted prompt (dedupes consecutive repeats; caps at the limit).
     func recordPromptHistory(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, !Self.isSlashHistoryEntry(trimmed) else {
+            historyNavIndex = nil
+            historyStash = ""
+            return
+        }
         if promptHistory.last == trimmed {
             // no-op: identical to the most recent entry
         } else {
@@ -2456,6 +2472,8 @@ final class AppState: ObservableObject {
             historyNavIndex = promptHistory.count - 1
         }
         if let idx = historyNavIndex { setDraft(promptHistory[idx]) }
+        // Keep the palette dismissed for the duration of this history browse.
+        slashMenuDismissed = true
         return true
     }
 
@@ -2465,10 +2483,13 @@ final class AppState: ObservableObject {
         if idx < promptHistory.count - 1 {
             historyNavIndex = idx + 1
             setDraft(promptHistory[idx + 1])
+            slashMenuDismissed = true
         } else {
             historyNavIndex = nil
             setDraft(historyStash)
             historyStash = ""
+            // Leaving history — allow the slash palette again if the restored draft is `/…`.
+            slashMenuDismissed = false
         }
         return true
     }
@@ -2519,6 +2540,7 @@ final class AppState: ObservableObject {
         SlashCommand(id: "/export", summary: "Export the current session as Markdown"),
         SlashCommand(id: "/new", summary: "Start a new chat session"),
         SlashCommand(id: "/clear", summary: "Clear the current chat transcript"),
+        SlashCommand(id: "/version", summary: "Show the current ARIL app version"),
         SlashCommand(id: "/reset", summary: "Delete ALL sessions and Learning entries (asks to confirm)"),
         SlashCommand(id: "/exit", summary: "Quit ARIL"),
         SlashCommand(id: "/help", summary: "Show the list of commands"),
@@ -2574,7 +2596,11 @@ final class AppState: ObservableObject {
 
     /// Whether the `/` command palette should be shown above the input bar.
     var slashMenuVisible: Bool {
-        !slashMenuDismissed && !filteredSlashCommands.isEmpty
+        // While browsing ↑/↓ history, never steal arrows for the slash palette —
+        // recalled drafts can look like `/status` and would otherwise reopen the menu.
+        historyNavIndex == nil
+            && !slashMenuDismissed
+            && !filteredSlashCommands.isEmpty
     }
 
     func slashMenuMove(_ delta: Int) {
@@ -2616,7 +2642,11 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Handle `/clear`, `/status`, `/help`. Returns true if `raw` was a known command.
+    /// Handle `/clear`, `/status`, `/help`, etc.
+    ///
+    /// Any input starting with `/` is treated as a slash command — known commands run
+    /// as usual; unknown ones get an in-chat error and are **not** sent as a model prompt.
+    /// Returns `true` when the input was consumed as a slash command.
     func handleSlashCommand(_ raw: String) -> Bool {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/") else { return false }
@@ -2645,6 +2675,11 @@ final class AppState: ObservableObject {
             recordPromptHistory(trimmed)
             setDraft("")
             appendLocalAssistantNote(slashHelpText)
+            return true
+        case "/version", "/ver":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            appendLocalAssistantNote(versionCommandNote)
             return true
         case "/nmap":
             recordPromptHistory(trimmed)
@@ -2687,7 +2722,13 @@ final class AppState: ObservableObject {
             NSApplication.shared.terminate(nil)
             return true
         default:
-            return false
+            // Leading `/` means "slash command" — never fall through to a model turn.
+            setDraft("")
+            let shown = command.isEmpty ? "/" : command
+            appendLocalAssistantNote(
+                "**Unknown command** `\(shown)`. Type `/help` for the list of commands."
+            )
+            return true
         }
     }
 
@@ -2806,6 +2847,17 @@ final class AppState: ObservableObject {
             "Tip: type `/` for the command menu, or press ↑ / ↓ in the prompt box to recall recent prompts (last \(Self.promptHistoryLimit))."
         )
         return lines.joined(separator: "\n")
+    }
+
+    /// `/version` — marketing version plus build number when available.
+    private var versionCommandNote: String {
+        let marketing = appVersion
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !build.isEmpty, build != marketing {
+            return "**ARIL** \(marketing) (build \(build))"
+        }
+        return "**ARIL** \(marketing)"
     }
 
     /// Example prompts for the managed Nmap MCP server (`/nmap`).
@@ -3125,6 +3177,7 @@ final class AppState: ObservableObject {
 
     func send(promptOverride: String? = nil) {
         // Intercept slash commands before starting a model turn.
+        // Any draft starting with `/` is a command (known or unknown) — never a prompt.
         if promptOverride == nil {
             let raw = draft.trimmingCharacters(in: .whitespacesAndNewlines)
             if raw.hasPrefix("/"), handleSlashCommand(raw) {

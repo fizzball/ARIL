@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 
 struct StatusFooterView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
+    @State private var showModelBrowser = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -90,7 +92,9 @@ struct StatusFooterView: View {
                     .foregroundStyle(theme.palette.textMuted.opacity(0.8))
             }
 
-            Spacer()
+            Spacer(minLength: 8)
+
+            modelPicker
 
             Text(state.routeMode.label)
                 .font(ARILTheme.captionFont)
@@ -101,12 +105,81 @@ struct StatusFooterView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
         .background(theme.palette.sidebar.opacity(0.9))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(theme.palette.hairline)
                 .frame(height: 1)
         }
+        .sheet(isPresented: $showModelBrowser) {
+            OpenRouterModelBrowserView(title: "Choose OpenRouter model") { modelID in
+                state.selectModelFromCatalog(modelID)
+            }
+            .environmentObject(state)
+            .environmentObject(theme)
+        }
+    }
+
+    private var modelPicker: some View {
+        Menu {
+            ForEach(state.modelCatalog, id: \.self) { model in
+                Button {
+                    state.selectModel(model)
+                } label: {
+                    HStack {
+                        Text(model)
+                        if model == state.defaultModel {
+                            Text("DEFAULT")
+                                .font(.caption2)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Other…") {
+                showModelBrowser = true
+            }
+        } label: {
+            Text(shortModel(state.selectedModel))
+                .font(ARILTheme.captionFont)
+                .foregroundStyle(modelLabelColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .help(modelHelp)
+    }
+
+    private var modelLabelColor: Color {
+        if state.routeMode == .manual {
+            return theme.palette.danger
+        }
+        if state.selectedModel == state.defaultModel {
+            return theme.palette.preferredHighlight
+        }
+        return theme.palette.textMuted
+    }
+
+    private var modelHelp: String {
+        switch state.routeMode {
+        case .auto:
+            return "Auto-selected for detected category"
+        case .manual:
+            return "Manual mode — model is locked (shown in red). Use Other… to browse the full OpenRouter catalog."
+        case .compare:
+            return "Judge mode — three models are evaluated side by side"
+        }
+    }
+
+    private func shortModel(_ id: String) -> String {
+        let leaf = id.split(separator: "/").last.map(String.init) ?? id
+        let mark = id == state.defaultModel ? " ★" : ""
+        if state.routeMode == .auto, let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
+            return "\(leaf)\(mark) · \(cat.label)"
+        }
+        return "\(leaf)\(mark) · \(state.routeMode.label)"
     }
 
     private var elapsedLabel: String {

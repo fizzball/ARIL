@@ -9,40 +9,46 @@ struct ContentView: View {
     @StateObject private var systemMetrics = SystemMetricsMonitor()
 
     var body: some View {
-        HStack(spacing: 0) {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView()
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
-            } detail: {
-                VStack(spacing: 0) {
-                    if state.gatewayReady && !state.openRouterConfigured {
-                        HStack(spacing: 10) {
-                            Image(systemName: "key.fill")
-                            Text("OpenRouter subscription required — connect in Preferences → Subscription to enable live models.")
-                                .font(ARILTheme.captionFont)
-                            Spacer()
-                            Button("Open Preferences") {
-                                openSettings()
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    SidebarView()
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+                } detail: {
+                    VStack(spacing: 0) {
+                        if state.gatewayReady && !state.openRouterConfigured {
+                            HStack(spacing: 10) {
+                                Image(systemName: "key.fill")
+                                Text("OpenRouter subscription required — connect in Preferences → Subscription to enable live models.")
+                                    .font(ARILTheme.captionFont)
+                                Spacer()
+                                Button("Open Preferences") {
+                                    openSettings()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .tint(theme.palette.accentStrong)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .tint(theme.palette.accentStrong)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(theme.palette.danger.opacity(0.92))
                         }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(theme.palette.danger.opacity(0.92))
-                    }
 
-                    ChatDetailView()
+                        ChatDetailView()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if state.activeToolPanel != nil {
+                    ToolFlyoutPanel()
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if state.activeToolPanel != nil {
-                ToolFlyoutPanel()
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+            // Full-width tray under sidebar + chat (+ tool flyout when open).
+            StatusFooterView()
         }
         .background(theme.palette.background)
         .background(WindowTitleVisibilityHidden())

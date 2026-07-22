@@ -1,11 +1,14 @@
 import SwiftUI
+import AppKit
 
 struct InputBarView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
     @FocusState private var focused: Bool
-    @State private var showModelBrowser = false
     @State private var localDraft = ""
+    /// Bumped on programmatic draft changes so the multiline TextField remounts and
+    /// remeasures height (SwiftUI often keeps a 1-line frame after send clears the field).
+    @State private var fieldEpoch: UInt = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -157,8 +160,10 @@ struct InputBarView: View {
                     .font(ARILTheme.bodyFont)
                     .foregroundStyle(theme.palette.text)
                     .lineLimit(1...6)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
+                    .id(fieldEpoch)
                     .focused($focused)
                     .onAppear {
                         localDraft = state.draft
@@ -171,6 +176,18 @@ struct InputBarView: View {
                     .onChange(of: state.draftRevision) { _, _ in
                         if localDraft != state.draft {
                             localDraft = state.draft
+                            fieldEpoch &+= 1
+                            // Remount drops focus; restore so ↑/↓ history keeps working,
+                            // then collapse any select-all to a caret at the end.
+                            DispatchQueue.main.async {
+                                focused = true
+                                placeCaretAtEndOfDraft()
+                                // AppKit often applies select-all after becomeFirstResponder —
+                                // clear it again on the next turn.
+                                DispatchQueue.main.async {
+                                    placeCaretAtEndOfDraft()
+                                }
+                            }
                         }
                     }
                     .onKeyPress(.upArrow) {
@@ -204,6 +221,12 @@ struct InputBarView: View {
                         }
                         return .ignored
                     }
+                    .onKeyPress(keys: [.return], phases: .down) { press in
+                        // Shift+Return inserts a line break; plain Return sends via onSubmit.
+                        guard press.modifiers.contains(.shift) else { return .ignored }
+                        insertNewlineAtCursor()
+                        return .handled
+                    }
                     .onSubmit {
                         if state.slashMenuVisible {
                             state.executeSelectedSlash()
@@ -211,77 +234,46 @@ struct InputBarView: View {
                             state.send()
                         }
                     }
+                    .help("Return to send · Shift+Return for a new line")
 
-                HStack(alignment: .bottom, spacing: 8) {
-                    Menu {
-                        ForEach(state.modelCatalog, id: \.self) { model in
-                            Button {
-                                state.selectModel(model)
-                            } label: {
-                                HStack {
-                                    Text(model)
-                                    if model == state.defaultModel {
-                                        Text("DEFAULT")
-                                            .font(.caption2)
-                                    }
-                                }
-                            }
-                        }
-                        Divider()
-                        Button("Other…") {
-                            showModelBrowser = true
-                        }
+                if state.isSending {
+                    Button {
+                        state.stopGeneration()
                     } label: {
-                        Text(shortModel(state.selectedModel))
-                            .font(ARILTheme.captionFont)
-                            .foregroundStyle(modelLabelColor)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 128, alignment: .trailing)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .help(modelHelp)
-
-                    if state.isSending {
-                        Button {
-                            state.stopGeneration()
-                        } label: {
-                            ZStack {
-                                Circle()
-                                    .fill(theme.palette.danger)
-                                    .frame(width: 28, height: 28)
-                                Image(systemName: "stop.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(.white)
-                            }
+                        ZStack {
+                            Circle()
+                                .fill(theme.palette.danger)
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
                         }
-                        .buttonStyle(.plain)
-                        .help("Stop generation")
-                        .keyboardShortcut(.cancelAction)
-                    } else {
-                        Button {
-                            state.send()
-                        } label: {
-                            ZStack {
-                                Circle()
-                                    .fill(theme.palette.accentStrong)
-                                    .frame(width: 28, height: 28)
-                                Image(systemName: "arrow.up")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(theme.palette.background)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(
-                            localDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                && state.pendingAttachments.isEmpty
-                        )
-                        .opacity(
-                            localDraft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
-                        )
-                        .help("Send")
                     }
+                    .buttonStyle(.plain)
+                    .help("Stop generation")
+                    .keyboardShortcut(.cancelAction)
+                } else {
+                    Button {
+                        state.send()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(theme.palette.accentStrong)
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(theme.palette.background)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(
+                        localDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && state.pendingAttachments.isEmpty
+                    )
+                    .opacity(
+                        localDraft.isEmpty && state.pendingAttachments.isEmpty ? 0.5 : 1
+                    )
+                    .help("Send")
                 }
             }
         }
@@ -294,43 +286,37 @@ struct InputBarView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.35 : 0.08), radius: 12, y: 4)
-        .sheet(isPresented: $showModelBrowser) {
-            OpenRouterModelBrowserView(title: "Choose OpenRouter model") { modelID in
-                state.selectModelFromCatalog(modelID)
+    }
+
+    /// Insert `\n` at the field-editor caret when possible; otherwise append.
+    private func insertNewlineAtCursor() {
+        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+           textView.isEditable,
+           textView.window?.firstResponder === textView {
+            let range = textView.selectedRange()
+            if textView.shouldChangeText(in: range, replacementString: "\n") {
+                textView.replaceCharacters(in: range, with: "\n")
+                textView.didChangeText()
             }
-            .environmentObject(state)
-            .environmentObject(theme)
+            localDraft = textView.string
+            if localDraft != state.draft {
+                state.updateDraftFromTyping(localDraft)
+            }
+            return
+        }
+        localDraft.append("\n")
+        if localDraft != state.draft {
+            state.updateDraftFromTyping(localDraft)
         }
     }
 
-    private var modelLabelColor: Color {
-        // Red = locked / not auto-optimised (Manual or explicit pick outside Auto).
-        if state.routeMode == .manual {
-            return theme.palette.danger
-        }
-        if state.selectedModel == state.defaultModel {
-            return theme.palette.preferredHighlight
-        }
-        return theme.palette.textMuted
-    }
-
-    private var modelHelp: String {
-        switch state.routeMode {
-        case .auto:
-            return "Auto-selected for detected category"
-        case .manual:
-            return "Manual mode — model is locked (shown in red). Use Other… to browse the full OpenRouter catalog."
-        case .compare:
-            return "Judge mode — three models are evaluated side by side"
-        }
-    }
-
-    private func shortModel(_ id: String) -> String {
-        let leaf = id.split(separator: "/").last.map(String.init) ?? id
-        let mark = id == state.defaultModel ? " ★" : ""
-        if state.routeMode == .auto, let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
-            return "\(leaf)\(mark) · \(cat.label)"
-        }
-        return "\(leaf)\(mark) · \(state.routeMode.label)"
+    /// After history recall remounts the field, AppKit often selects all text —
+    /// collapse to a caret at the end so the draft isn't "copy/paste selected".
+    private func placeCaretAtEndOfDraft() {
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+              textView.isEditable else { return }
+        let end = (textView.string as NSString).length
+        textView.setSelectedRange(NSRange(location: end, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: max(end - 1, 0), length: 0))
     }
 }

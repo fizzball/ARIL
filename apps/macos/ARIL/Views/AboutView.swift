@@ -72,6 +72,13 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.10", changes: [
+            "Model picker moved to the full-width status tray — prompt field has more room",
+            "Status tray spans the full window (under sidebar + chat)",
+            "Shift+Return inserts a newline in the prompt; Return still sends",
+            "↑/↓ prompt history ignores slash commands and expands multi-line recalls correctly",
+            "/version shows the current app version; unknown /commands are not sent as prompts",
+        ]),
         ChangelogEntry(version: "0.4.9", changes: [
             "Sidebar Update button replaces the upgrade dialog when a newer release is available",
             "Export session as Markdown (sidebar, context menu, or /export)",

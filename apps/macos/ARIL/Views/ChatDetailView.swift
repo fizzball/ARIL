@@ -45,8 +45,6 @@ struct ChatDetailView: View {
                 InputBarView()
                     .padding(.horizontal, 24)
                     .padding(.bottom, 10)
-
-                StatusFooterView()
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.86), value: state.showIntelligencePanel)
             .animation(.spring(response: 0.35, dampingFraction: 0.86), value: state.modelTestProgress)
