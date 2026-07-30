@@ -52,6 +52,7 @@ The marketing page includes:
 - Canonical URL, Open Graph, and Twitter card meta tags
 - JSON-LD (`WebSite`, `Organization`, `SoftwareApplication`)
 - [`robots.txt`](robots.txt) and [`sitemap.xml`](sitemap.xml)
+- Help guide at [`/help/`](https://aril.host/help/) (linked from the macOS **Help → ARIL Help** menu)
 
 Submit `https://aril.host/sitemap.xml` in Google Search Console / Bing Webmaster when ready.
 

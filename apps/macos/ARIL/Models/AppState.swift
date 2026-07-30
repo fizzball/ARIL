@@ -2844,7 +2844,7 @@ final class AppState: ObservableObject {
         }
         lines.append("")
         lines.append(
-            "Tip: type `/` for the command menu, or press ↑ / ↓ in the prompt box to recall recent prompts (last \(Self.promptHistoryLimit))."
+            "Tip: type `/` for the command menu, or press ↑ / ↓ in the prompt box to recall recent prompts (last \(Self.promptHistoryLimit)). Full guide: https://aril.host/help/"
         )
         return lines.joined(separator: "\n")
     }

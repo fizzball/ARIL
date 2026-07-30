@@ -72,6 +72,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.11", changes: [
+            "New ARIL app icon and website logo based on the letter-A routing mark",
+            "Website Help page at aril.host/help, linked from the macOS Help menu",
+            "Preferences → Appearance: choose the app text size and typeface",
+        ]),
         ChangelogEntry(version: "0.4.10", changes: [
             "Model picker moved to the full-width status tray — prompt field has more room",
             "Status tray spans the full window (under sidebar + chat)",

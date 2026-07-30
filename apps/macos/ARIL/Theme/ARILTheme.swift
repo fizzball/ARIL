@@ -34,6 +34,68 @@ enum AppThemeOption: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Body text size for chat, sidebar, and chrome (caption is 2pt smaller).
+enum AppFontSize: String, CaseIterable, Identifiable, Codable {
+    case small, medium, large, extraLarge
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        case .extraLarge: return "Extra Large"
+        }
+    }
+
+    /// Body point size.
+    var bodyPoints: CGFloat {
+        switch self {
+        case .small: return 12
+        case .medium: return 13
+        case .large: return 15
+        case .extraLarge: return 17
+        }
+    }
+
+    var captionPoints: CGFloat { max(10, bodyPoints - 2) }
+
+    var wordmarkPoints: CGFloat {
+        switch self {
+        case .small: return 40
+        case .medium: return 44
+        case .large: return 48
+        case .extraLarge: return 52
+        }
+    }
+}
+
+/// Typeface design applied across the client.
+enum AppFontFamily: String, CaseIterable, Identifiable, Codable {
+    case system, rounded, serif, monospaced
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .rounded: return "Rounded"
+        case .serif: return "Serif"
+        case .monospaced: return "Monospaced"
+        }
+    }
+
+    var design: Font.Design {
+        switch self {
+        case .system: return .default
+        case .rounded: return .rounded
+        case .serif: return .serif
+        case .monospaced: return .monospaced
+        }
+    }
+}
+
 struct ThemePalette {
     let background: Color
     let backgroundElevated: Color
@@ -242,18 +304,49 @@ final class ThemeStore: ObservableObject {
             refreshPalette()
         }
     }
+    @Published var fontSize: AppFontSize {
+        didSet {
+            UserDefaults.standard.set(fontSize.rawValue, forKey: "aril.fontSize")
+            syncTypography()
+        }
+    }
+    @Published var fontFamily: AppFontFamily {
+        didSet {
+            UserDefaults.standard.set(fontFamily.rawValue, forKey: "aril.fontFamily")
+            syncTypography()
+        }
+    }
     @Published private(set) var palette: ThemePalette
 
     /// `nil` when Theme is System — SwiftUI / windows follow macOS light·dark·auto.
     var preferredColorScheme: ColorScheme? { option.fixedColorScheme }
+
+    var bodyFont: Font {
+        Font.system(size: fontSize.bodyPoints, weight: .regular, design: fontFamily.design)
+    }
+
+    var captionFont: Font {
+        Font.system(size: fontSize.captionPoints, weight: .medium, design: fontFamily.design)
+    }
+
+    var wordmarkFont: Font {
+        Font.system(size: fontSize.wordmarkPoints, weight: .bold, design: .serif)
+    }
 
     private var appearanceObservation: NSKeyValueObservation?
 
     init() {
         let raw = UserDefaults.standard.string(forKey: "aril.theme") ?? AppThemeOption.noir.rawValue
         let opt = AppThemeOption(rawValue: raw) ?? .noir
+        let sizeRaw = UserDefaults.standard.string(forKey: "aril.fontSize") ?? AppFontSize.medium.rawValue
+        let size = AppFontSize(rawValue: sizeRaw) ?? .medium
+        let familyRaw = UserDefaults.standard.string(forKey: "aril.fontFamily") ?? AppFontFamily.system.rawValue
+        let family = AppFontFamily(rawValue: familyRaw) ?? .system
         option = opt
+        fontSize = size
+        fontFamily = family
         palette = ThemePalette.palette(for: opt, systemIsDark: Self.macOSIsDark)
+        syncTypography()
         appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in
                 self?.refreshPalette()
@@ -269,14 +362,36 @@ final class ThemeStore: ObservableObject {
         palette = ThemePalette.palette(for: option, systemIsDark: Self.macOSIsDark)
     }
 
+    private func syncTypography() {
+        ARILTheme.sync(size: fontSize, family: fontFamily)
+    }
+
     static var macOSIsDark: Bool {
         NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 }
 
-/// Back-compat aliases used across views.
+/// Typography tokens used across views. Updated by `ThemeStore` so existing
+/// `ARILTheme.bodyFont` call sites pick up Preferences → Appearance changes
+/// when those views also observe `ThemeStore`.
 enum ARILTheme {
-    static let wordmarkFont = Font.system(size: 44, weight: .bold, design: .serif)
-    static let bodyFont = Font.system(size: 13, weight: .regular, design: .default)
-    static let captionFont = Font.system(size: 11, weight: .medium, design: .default)
+    private static var size: AppFontSize = .medium
+    private static var family: AppFontFamily = .system
+
+    fileprivate static func sync(size: AppFontSize, family: AppFontFamily) {
+        self.size = size
+        self.family = family
+    }
+
+    static var wordmarkFont: Font {
+        Font.system(size: size.wordmarkPoints, weight: .bold, design: .serif)
+    }
+
+    static var bodyFont: Font {
+        Font.system(size: size.bodyPoints, weight: .regular, design: family.design)
+    }
+
+    static var captionFont: Font {
+        Font.system(size: size.captionPoints, weight: .medium, design: family.design)
+    }
 }

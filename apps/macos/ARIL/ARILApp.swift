@@ -37,6 +37,14 @@ struct ARILApp: App {
                     appState.openToolPanel(.about)
                 }
             }
+            CommandGroup(replacing: .help) {
+                Button("ARIL Help") {
+                    if let url = URL(string: "https://aril.host/help/") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .keyboardShortcut("?", modifiers: .command)
+            }
         }
 
         Settings {

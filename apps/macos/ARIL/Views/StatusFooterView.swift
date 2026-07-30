@@ -141,11 +141,15 @@ struct StatusFooterView: View {
                 showModelBrowser = true
             }
         } label: {
-            Text(shortModel(state.selectedModel))
-                .font(ARILTheme.captionFont)
-                .foregroundStyle(modelLabelColor)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            HStack(spacing: 6) {
+                ARILMeshMark(style: ARILMeshStyle.forModel(state.selectedModel))
+                    .frame(width: 14, height: 14)
+                Text(shortModel(state.selectedModel))
+                    .font(ARILTheme.captionFont)
+                    .foregroundStyle(modelLabelColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)

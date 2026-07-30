@@ -89,21 +89,34 @@ private struct MessageBubble: View {
         isWaitingAssistant && state.generationPhase == .streaming
     }
 
+    /// Style variant from the reply’s model leaf, else the live selected model.
+    private var assistantMeshStyle: ARILMeshStyle {
+        if let leaf = ChatMessage.actualModelLeaf(from: message.content) {
+            return ARILMeshStyle.forModel(leaf)
+        }
+        return ARILMeshStyle.forModel(state.selectedModel)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 8) {
                 if message.role == .assistant {
-                    // Same row as the ARIL caption; spins while waiting for the reply.
+                    // Mesh tint follows the reply model (footer) or current selection while waiting.
                     ARILLogoAvatar(
                         animated: isWaitingAssistant,
-                        color: ARILLogoPalette.gold,
+                        style: assistantMeshStyle,
+                        color: assistantMeshStyle.accent,
                         size: 18
                     )
                 }
 
                 Text(message.role == .user ? (message.displayName ?? state.userLabel) : "ARIL")
                     .font(ARILTheme.captionFont)
-                    .foregroundStyle(theme.palette.accent)
+                    .foregroundStyle(
+                        message.role == .user
+                            ? theme.palette.preferredHighlight
+                            : theme.palette.accent
+                    )
 
                 Spacer(minLength: 0)
 

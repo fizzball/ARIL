@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ARIL Help — Adaptive Routing Intelligence Layer</title>
+  <meta name="description" content="How to install and use ARIL on macOS: OpenRouter setup, Auto/Manual/Judge modes, slash commands, MCP scanners, and troubleshooting.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="color-scheme" content="dark light">
+  <link rel="canonical" href="https://aril.host/help/">
+
+  <meta property="og:site_name" content="ARIL">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="ARIL Help">
+  <meta property="og:description" content="Install, OpenRouter setup, modes, slash commands, MCP tools, and troubleshooting for ARIL on macOS.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://aril.host/help/">
+  <meta property="og:image" content="https://aril.host/assets/screenshots/home.png">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ARIL Help">
+  <meta name="twitter:description" content="Install and use ARIL on Apple Silicon macOS.">
+  <meta name="twitter:image" content="https://aril.host/assets/screenshots/home.png">
+
+  <link rel="icon" href="/assets/logo.png" type="image/png" sizes="256x256">
+  <link rel="apple-touch-icon" href="/assets/logo.png">
+  <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/site.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "ARIL Help",
+    "url": "https://aril.host/help/",
+    "description": "User guide for ARIL — Adaptive Routing Intelligence Layer for macOS.",
+    "isPartOf": { "@id": "https://aril.host/#website" },
+    "about": { "@id": "https://aril.host/#app" }
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/">
+        <img src="/assets/logo.png" width="32" height="32" alt="ARIL logo">
+        <span>ARIL</span>
+      </a>
+      <nav class="nav-actions" aria-label="Primary">
+        <a class="nav-link hide-mobile" href="/#features">Features</a>
+        <a class="nav-link hide-mobile" href="/#screenshots">Screenshots</a>
+        <a class="nav-link" href="/help/" aria-current="page">Help</a>
+        <a class="btn btn-primary" href="/#download">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="help-page">
+    <div class="container help-layout">
+      <aside class="help-toc" aria-label="On this page">
+        <p class="help-toc-label">On this page</p>
+        <ol>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#first-chat">First chat</a></li>
+          <li><a href="#modes">Auto · Manual · Judge</a></li>
+          <li><a href="#prompt-bar">Prompt bar</a></li>
+          <li><a href="#slash">Slash commands</a></li>
+          <li><a href="#preferences">Preferences</a></li>
+          <li><a href="#mcp">MCP tools</a></li>
+          <li><a href="#sessions">Sessions &amp; projects</a></li>
+          <li><a href="#updates">Updates</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+        </ol>
+      </aside>
+
+      <article class="help-content">
+        <p class="section-label">Help</p>
+        <h1>Using ARIL</h1>
+        <p class="section-lead">
+          ARIL is a native macOS chat client for OpenRouter. It grades prompts, routes models,
+          shows cost before you send, and can run local MCP tools — all from your Mac.
+        </p>
+
+        <section id="install">
+          <h2>Install</h2>
+          <ol>
+            <li>Download <a href="/downloads/ARIL-latest.dmg">ARIL-latest.dmg</a> from this site (or GitHub Releases).</li>
+            <li>Open the disk image and drag <strong>ARIL</strong> into <strong>Applications</strong>.</li>
+            <li>Launch ARIL. Solo mode starts the bundled local gateway automatically.</li>
+            <li>Open <strong>ARIL → Preferences → Subscription</strong> and sign in with OpenRouter or paste an API key.</li>
+          </ol>
+          <p>
+            <strong>Requirements:</strong> Apple Silicon Mac · macOS&nbsp;14 (Sonoma) or newer ·
+            an <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">OpenRouter</a> key with a small credit balance.
+          </p>
+          <p>
+            Builds are Developer ID signed and notarized. If an older unsigned build is blocked,
+            right-click the app → <strong>Open</strong>, or allow it in
+            <strong>System Settings → Privacy &amp; Security</strong>.
+          </p>
+        </section>
+
+        <section id="first-chat">
+          <h2>First chat</h2>
+          <ol>
+            <li>Type a prompt in the entry field at the bottom of the window.</li>
+            <li>Wait for the <strong>Intelligence</strong> panel — it grades the prompt, estimates tokens/cost, and recommends a model.</li>
+            <li>Press <strong>Return</strong> to send (or click the send button).</li>
+          </ol>
+          <p>
+            The status tray under the window shows gateway, database, OpenRouter credits,
+            session-cache size, the model in use, and the app version.
+          </p>
+        </section>
+
+        <section id="modes">
+          <h2>Auto · Manual · Judge</h2>
+          <ul>
+            <li><strong>Auto</strong> — Classifies the prompt and picks the mapped model. Prefer wins from Learning/Judge can promote a model for similar prompts.</li>
+            <li><strong>Manual</strong> — Locks the model you choose (via the status-tray model menu or Preferences → Models). Analysis still runs; the model is not swapped.</li>
+            <li><strong>Judge</strong> — Runs the same prompt on three capability-matched models, scores them, and lets you Prefer a winner for next time.</li>
+          </ul>
+        </section>
+
+        <section id="prompt-bar">
+          <h2>Prompt bar</h2>
+          <ul>
+            <li><strong>Return</strong> — send the prompt (or run a slash command).</li>
+            <li><strong>Shift+Return</strong> — insert a new line.</li>
+            <li><strong>↑ / ↓</strong> — recall recent prompts (slash commands are not stored in this history).</li>
+            <li><strong>Paperclip</strong> — attach images or files.</li>
+            <li><strong>Web</strong> — enable OpenRouter live web search for the next send (extra cost).</li>
+            <li>Model picker lives in the <strong>status tray</strong> (not inside the prompt field).</li>
+          </ul>
+        </section>
+
+        <section id="slash">
+          <h2>Slash commands</h2>
+          <p>Type <code>/</code> in an empty prompt to open the command palette. Anything starting with <code>/</code> is treated as a command — unknown commands are not sent to a model.</p>
+          <div class="help-table-wrap">
+            <table class="help-table">
+              <thead>
+                <tr><th>Command</th><th>What it does</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>/status</code></td><td>Gateway, OpenRouter, guardrails, cache, MCP, and latest release check</td></tr>
+                <tr><td><code>/version</code></td><td>Current app version and build</td></tr>
+                <tr><td><code>/update</code></td><td>Check for a newer notarized release (or use the sidebar Update button)</td></tr>
+                <tr><td><code>/web</code></td><td>Toggle web search (<code>on</code> / <code>off</code> / <code>status</code>)</td></tr>
+                <tr><td><code>/cache</code></td><td>Session-cache size; <code>compact</code> or <code>clear</code></td></tr>
+                <tr><td><code>/new</code></td><td>Start a new chat session</td></tr>
+                <tr><td><code>/clear</code></td><td>Clear the current transcript</td></tr>
+                <tr><td><code>/export</code></td><td>Export the session as Markdown</td></tr>
+                <tr><td><code>/nmap</code></td><td>Example prompts for the local Nmap MCP scanner</td></tr>
+                <tr><td><code>/codescan</code></td><td>Example prompts for the Semgrep code scanner</td></tr>
+                <tr><td><code>/help</code></td><td>List commands in chat</td></tr>
+                <tr><td><code>/reset</code></td><td>Delete all sessions and Learning data (asks to confirm)</td></tr>
+                <tr><td><code>/exit</code></td><td>Quit ARIL</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="preferences">
+          <h2>Preferences</h2>
+          <ul>
+            <li><strong>Subscription</strong> — OpenRouter sign-in or API key; local guardrails (sensitive-info redact, prompt-injection block).</li>
+            <li><strong>Models</strong> — Default and per-category mappings for Auto; browse the OpenRouter catalog.</li>
+            <li><strong>MCP</strong> — Enable managed local scanners (Nmap, Semgrep) or remote HTTP MCP servers.</li>
+            <li><strong>General</strong> — Solo gateway, budget caps, session cache, system prompt, menu-bar icon.</li>
+            <li><strong>Appearance</strong> — Themes including System (follows macOS).</li>
+          </ul>
+          <p>Toolbar shortcuts open Spend analysis, Learning, Model popularity, and Log analysis.</p>
+        </section>
+
+        <section id="mcp">
+          <h2>MCP tools</h2>
+          <p>
+            Turn on <strong>Use MCP servers</strong> in Preferences → MCP, enable a server, run <strong>Check</strong>,
+            then ask in Auto or Manual chat. Tool status can appear in the reply as <code>Using … · …</code>.
+            Judge mode does not use MCP.
+          </p>
+          <ul>
+            <li><strong>Nmap Scanner (local)</strong> — requires <code>brew install nmap</code>; only scan targets you own or are authorized to test.</li>
+            <li><strong>Code Scanner / Semgrep (local)</strong> — requires <code>brew install semgrep</code>.</li>
+          </ul>
+          <p>Managed servers store rotating bearer tokens in Application Support <code>.env</code> (same place as your OpenRouter key).</p>
+        </section>
+
+        <section id="sessions">
+          <h2>Sessions &amp; projects</h2>
+          <ul>
+            <li>Create sessions from the sidebar or with <code>/new</code> (⌘N).</li>
+            <li>Group sessions into <strong>Projects</strong>; project search is scoped, main search is global.</li>
+            <li>Export as Markdown from the sidebar, context menu, or <code>/export</code>.</li>
+            <li>Local data lives under <code>~/Library/Application Support/ARIL/</code>.</li>
+          </ul>
+        </section>
+
+        <section id="updates">
+          <h2>Updates</h2>
+          <p>
+            When a newer release is available, use the sidebar <strong>Update</strong> button or run <code>/update</code>.
+            You can always download the latest DMG from
+            <a href="/downloads/ARIL-latest.dmg">aril.host</a> or
+            <a href="https://github.com/fizzball/ARIL/releases" target="_blank" rel="noopener">GitHub Releases</a>.
+          </p>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>Troubleshooting</h2>
+          <div class="help-table-wrap">
+            <table class="help-table">
+              <thead>
+                <tr><th>Symptom</th><th>What to try</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Gateway offline / starting…</td>
+                  <td>Wait a few seconds; check Preferences → General (Solo); relaunch ARIL</td>
+                </tr>
+                <tr>
+                  <td>API key required</td>
+                  <td>Preferences → Subscription — connect OpenRouter or paste a key</td>
+                </tr>
+                <tr>
+                  <td>Port 8741 in use</td>
+                  <td>Quit other ARIL/gateway processes; relaunch</td>
+                </tr>
+                <tr>
+                  <td>Empty chat after reinstall</td>
+                  <td>History is in Application Support — restore that folder if you backed it up</td>
+                </tr>
+                <tr>
+                  <td>Nmap / Semgrep not found</td>
+                  <td><code>brew install nmap</code> or <code>brew install semgrep</code>, then re-enable the MCP preset</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            More detail:
+            <a href="https://github.com/fizzball/ARIL/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">INSTALL.md</a>
+            ·
+            <a href="https://github.com/fizzball/ARIL/blob/main/docs/FEATURES.md" target="_blank" rel="noopener">FEATURES.md</a>
+            ·
+            <a href="https://github.com/fizzball/ARIL/issues" target="_blank" rel="noopener">GitHub Issues</a>
+          </p>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>© 2026 Ramon Ali · ARIL</p>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/help/">Help</a>
+        <a href="https://github.com/fizzball/ARIL" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

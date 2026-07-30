@@ -977,6 +977,38 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Text") {
+                Picker("Size", selection: $theme.fontSize) {
+                    ForEach(AppFontSize.allCases) { size in
+                        Text(size.label).tag(size)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("Typeface", selection: $theme.fontFamily) {
+                    ForEach(AppFontFamily.allCases) { family in
+                        Text(family.label).tag(family)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("The quick brown fox jumps over the lazy dog.")
+                        .font(theme.bodyFont)
+                        .foregroundStyle(theme.palette.text)
+                    Text("Caption · status tray · sidebar metadata")
+                        .font(theme.captionFont)
+                        .foregroundStyle(theme.palette.textMuted)
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Font preview")
+
+                Text("Size and typeface apply to chat, the prompt bar, sidebar, and most chrome. Some icons and the title wordmark keep fixed styles.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding()
         .formStyle(.grouped)

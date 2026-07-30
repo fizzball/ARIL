@@ -52,7 +52,10 @@ struct ContentView: View {
         }
         .background(theme.palette.background)
         .background(WindowTitleVisibilityHidden())
+        .font(theme.bodyFont)
         .animation(.easeInOut(duration: 0.22), value: state.activeToolPanel)
+        .animation(.easeInOut(duration: 0.15), value: theme.fontSize)
+        .animation(.easeInOut(duration: 0.15), value: theme.fontFamily)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 ARILTitleWordmarkView()
