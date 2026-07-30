@@ -75,6 +75,8 @@ struct AboutView: View {
         ChangelogEntry(version: "0.4.11", changes: [
             "Skills preferences + /skills — Document Export (PDF/Word) and OS Access (local shell)",
             "Type @ in the prompt to pick a skill; skills also apply from context when enabled",
+            "Web Search moved to Preferences → General (on by default); /status shows its state",
+            "/reset keeps projects and project sessions; Preferences wipe warns it deletes projects too",
             "Adaptive mesh app icon; chat avatars tint by selected model",
             "Menu bar icon uses a high-contrast template mesh (pulses while busy)",
             "Website Help page at aril.host/help, linked from the macOS Help menu",
