@@ -142,7 +142,23 @@ jobs:
           cp "dist/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
           chmod 644 "website/downloads/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
           SIZE="$(stat -c%s "website/downloads/ARIL-latest.dmg")"
-          BUILD="$(plutil -extract CFBundleVersion raw dist/ARIL.app/Contents/Info.plist 2>/dev/null || true)"
+          # Ubuntu runners lack plutil — prefer Info.plist via Python, else project.yml.
+          BUILD="$(python3 - <<'PY'
+import pathlib, plistlib, sys
+p = pathlib.Path("dist/ARIL.app/Contents/Info.plist")
+if p.is_file():
+    try:
+        with p.open("rb") as f:
+            print(plistlib.load(f).get("CFBundleVersion") or "")
+            sys.exit(0)
+    except Exception:
+        pass
+print("")
+PY
+)"
+          if [[ -z "$BUILD" ]]; then
+            BUILD="$(grep -E 'CURRENT_PROJECT_VERSION:' apps/macos/project.yml | head -1 | awk '{print $2}' | tr -d '"')"
+          fi
           BUILD="${BUILD:-}"
           cat > website/downloads/latest.json <<EOF
           {
@@ -154,6 +170,7 @@ jobs:
             "requirements": "Apple Silicon Mac · macOS 14+ · OpenRouter key"
           }
           EOF
+          echo "Staged latest.json version=${VERSION} build=${BUILD} size=${SIZE}"
 
       - name: Deploy to aril.host
         env:

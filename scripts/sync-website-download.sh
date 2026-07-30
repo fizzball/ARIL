@@ -50,12 +50,22 @@ rm -f "$TMP"
 
 PUBLISHED="$(gh release view "$TAG" --repo "$REPO" --json publishedAt -q '.publishedAt' 2>/dev/null | cut -c1-10 || true)"
 
-# Prefer CFBundleVersion from a local Release app; else project.yml; else omit.
+# Resolve build for this VERSION — never trust a stale dist/ARIL.app from another release.
 BUILD=""
-if [[ -f "$ROOT/dist/ARIL.app/Contents/Info.plist" ]]; then
-  BUILD="$(plutil -extract CFBundleVersion raw "$ROOT/dist/ARIL.app/Contents/Info.plist" 2>/dev/null || true)"
-elif [[ -f "$ROOT/apps/macos/project.yml" ]]; then
-  BUILD="$(grep -E 'CURRENT_PROJECT_VERSION:' "$ROOT/apps/macos/project.yml" | head -1 | awk '{print $2}' | tr -d '"')"
+APP_PLIST="$ROOT/dist/ARIL.app/Contents/Info.plist"
+if [[ -f "$APP_PLIST" ]]; then
+  APP_VER="$(plutil -extract CFBundleShortVersionString raw "$APP_PLIST" 2>/dev/null || true)"
+  APP_BUILD="$(plutil -extract CFBundleVersion raw "$APP_PLIST" 2>/dev/null || true)"
+  if [[ "$APP_VER" == "${VERSION#v}" && -n "$APP_BUILD" ]]; then
+    BUILD="$APP_BUILD"
+  fi
+fi
+if [[ -z "$BUILD" && -f "$ROOT/apps/macos/project.yml" ]]; then
+  YML_VER="$(grep -E 'MARKETING_VERSION:' "$ROOT/apps/macos/project.yml" | head -1 | awk '{print $2}' | tr -d '"')"
+  YML_BUILD="$(grep -E 'CURRENT_PROJECT_VERSION:' "$ROOT/apps/macos/project.yml" | head -1 | awk '{print $2}' | tr -d '"')"
+  if [[ "$YML_VER" == "${VERSION#v}" && -n "$YML_BUILD" ]]; then
+    BUILD="$YML_BUILD"
+  fi
 fi
 
 if [[ -n "$BUILD" ]]; then
@@ -82,4 +92,4 @@ EOF
 fi
 
 echo "-> Wrote $DOWNLOADS/$DMG_NAME (${SIZE} bytes)"
-echo "-> Updated $DOWNLOADS/ARIL-latest.dmg and latest.json"
+echo "-> Updated $DOWNLOADS/ARIL-latest.dmg and latest.json (build=${BUILD:-unknown})"
