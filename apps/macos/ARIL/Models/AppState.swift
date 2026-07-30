@@ -3669,7 +3669,11 @@ final class AppState: ObservableObject {
 
     private func setPendingUpdate(_ release: AppUpdateService.LatestRelease?) {
         pendingUpdateRelease = release
-        availableUpdateVersion = release?.version
+        if let release {
+            availableUpdateVersion = AppUpdateService.displayLabel(version: release.version, build: release.build)
+        } else {
+            availableUpdateVersion = nil
+        }
     }
 
     /// Wipe ungrouped sessions and all Learning/judgement records. Projects and
@@ -3951,21 +3955,24 @@ final class AppState: ObservableObject {
 
         // Version
         let current = appVersion
+        let currentBuild = appBuild
+        let currentLabel = AppUpdateService.displayLabel(version: current, build: currentBuild.isEmpty ? nil : currentBuild)
         var versionMark = "✅"
         var versionDetail: String
-        if let latest = await fetchLatestReleaseTag() {
-            let latestClean = latest.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-            if AppUpdateService.isNewer(latestClean, than: current) {
+        if let release = try? await AppUpdateService.fetchLatestRelease() {
+            let latestLabel = AppUpdateService.displayLabel(version: release.version, build: release.build)
+            if AppUpdateService.isNewer(release, thanCurrentVersion: current, build: currentBuild) {
                 versionMark = "❌"
-                versionDetail = "\(current) installed · latest is \(latestClean) — click **Update** under sessions, or https://github.com/fizzball/ARIL/releases/latest"
-            } else if AppUpdateService.compareVersions(latestClean, current) == .orderedSame {
-                versionDetail = "\(current) (latest)"
+                versionDetail = "\(currentLabel) installed · latest is \(latestLabel) — click **Update** under sessions, or https://github.com/fizzball/ARIL/releases/latest"
+                setPendingUpdate(release)
+            } else if AppUpdateService.compareVersions(release.version, current) == .orderedSame {
+                versionDetail = "\(currentLabel) (latest)"
             } else {
-                versionDetail = "\(current) (ahead of published \(latestClean))"
+                versionDetail = "\(currentLabel) (ahead of published \(latestLabel))"
             }
         } else {
             versionMark = "❌"
-            versionDetail = "\(current) (latest release check unavailable)"
+            versionDetail = "\(currentLabel) (latest release check unavailable)"
         }
         lines.append("**Version** \(versionMark)")
         lines.append("- \(versionDetail)")
@@ -3986,14 +3993,17 @@ final class AppState: ObservableObject {
         updateSession(sid) { $0.messages.append(note) }
 
         let current = appVersion
+        let currentBuild = appBuild
+        let currentLabel = AppUpdateService.displayLabel(version: current, build: currentBuild.isEmpty ? nil : currentBuild)
         do {
             let release = try await AppUpdateService.fetchLatestRelease()
-            if !AppUpdateService.isNewer(release.version, than: current) {
+            let latestLabel = AppUpdateService.displayLabel(version: release.version, build: release.build)
+            if !AppUpdateService.isNewer(release, thanCurrentVersion: current, build: currentBuild) {
                 let text: String
                 if AppUpdateService.compareVersions(release.version, current) == .orderedSame {
-                    text = "**ARIL update**\n\nYou’re on **\(current)** — that’s the latest release."
+                    text = "**ARIL update**\n\nYou’re on **\(currentLabel)** — that’s the latest release."
                 } else {
-                    text = "**ARIL update**\n\nYou’re on **\(current)**, which is newer than the latest published release (**\(release.version)**). No install needed."
+                    text = "**ARIL update**\n\nYou’re on **\(currentLabel)**, which is newer than the latest published release (**\(latestLabel)**). No install needed."
                 }
                 updateLastAssistantNote(id: note.id, text: text)
                 updateNoteID = nil
@@ -4003,7 +4013,7 @@ final class AppState: ObservableObject {
             setPendingUpdate(release)
             updateLastAssistantNote(
                 id: note.id,
-                text: "**ARIL update**\n\nVersion **\(release.version)** is available (you have **\(current)**).\n\nClick **Update** under the session list to download \(release.dmgName) and install it to `/Applications`."
+                text: "**ARIL update**\n\n**\(latestLabel)** is available (you have **\(currentLabel)**).\n\nClick **Update** under the session list to download \(release.dmgName) and install it to `/Applications`."
             )
         } catch {
             updateLastAssistantNote(
@@ -4018,9 +4028,10 @@ final class AppState: ObservableObject {
     func checkForAppUpdateOnLaunch() async {
         guard !isUpdatingApp, pendingUpdateRelease == nil else { return }
         let current = appVersion
+        let currentBuild = appBuild
         do {
             let release = try await AppUpdateService.fetchLatestRelease()
-            guard AppUpdateService.isNewer(release.version, than: current) else { return }
+            guard AppUpdateService.isNewer(release, thanCurrentVersion: current, build: currentBuild) else { return }
             setPendingUpdate(release)
         } catch {
             // Silent on launch — `/update` and `/status` remain available.
@@ -4104,9 +4115,9 @@ final class AppState: ObservableObject {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
     }
 
-    /// Fetch the latest ARIL release tag from GitHub (nil on any failure).
-    private func fetchLatestReleaseTag() async -> String? {
-        (try? await AppUpdateService.fetchLatestRelease())?.tag
+    var appBuild: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     func send(promptOverride: String? = nil) {

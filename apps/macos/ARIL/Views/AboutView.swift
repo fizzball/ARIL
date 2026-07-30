@@ -72,6 +72,10 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.12", changes: [
+            "Update checker compares build numbers when the marketing version matches",
+            "/status Version line shows installed vs latest as 0.4.x (build N)",
+        ]),
         ChangelogEntry(version: "0.4.11", changes: [
             "Skills preferences + /skills — Document Export (PDF/Word) and OS Access (local shell)",
             "Type @ in the prompt to pick a skill; skills also apply from context when enabled",

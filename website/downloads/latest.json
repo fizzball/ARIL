@@ -1,7 +1,8 @@
 {
-  "version": "0.4.11",
+  "version": "0.4.12",
+  "build": "80",
   "file": "ARIL-latest.dmg",
   "published": "2026-07-30",
-  "size_bytes": 29327814,
+  "size_bytes": 0,
   "requirements": "Apple Silicon Mac · macOS 14+ · OpenRouter key"
 }

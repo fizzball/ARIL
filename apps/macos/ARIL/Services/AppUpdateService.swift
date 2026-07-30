@@ -1,12 +1,14 @@
 import Foundation
 import AppKit
 
-/// Checks GitHub for a newer ARIL release and installs the notarized DMG into `/Applications`.
+/// Checks GitHub / aril.host for a newer ARIL release and installs the notarized DMG into `/Applications`.
 enum AppUpdateService {
     struct LatestRelease: Equatable {
         let tag: String
         /// Marketing version without leading `v` (e.g. `0.4.2`).
         let version: String
+        /// CFBundleVersion when known (from aril.host `latest.json`); nil for GitHub-only fallback.
+        let build: String?
         let dmgURL: URL
         let dmgName: String
         let htmlURL: URL?
@@ -36,7 +38,66 @@ enum AppUpdateService {
         }
     }
 
+    /// Prefer aril.host metadata (includes build), then attach the GitHub DMG asset.
     static func fetchLatestRelease() async throws -> LatestRelease {
+        let github = try await fetchGitHubLatest()
+        if let site = try? await fetchSiteLatest(),
+           !site.version.isEmpty {
+            // Same marketing line as GitHub → keep GitHub DMG (CDN / Releases).
+            // Newer site marketing than GitHub tag is unusual; still prefer GitHub DMG when versions match.
+            let useGitHubDMG = compareVersions(site.version, github.version) != .orderedAscending
+            return LatestRelease(
+                tag: useGitHubDMG ? github.tag : "v\(site.version)",
+                version: site.version,
+                build: site.build,
+                dmgURL: useGitHubDMG ? github.dmgURL : site.dmgURL,
+                dmgName: useGitHubDMG ? github.dmgName : site.dmgName,
+                htmlURL: github.htmlURL ?? site.htmlURL
+            )
+        }
+        return github
+    }
+
+    private struct SiteLatest {
+        let version: String
+        let build: String?
+        let dmgURL: URL
+        let dmgName: String
+        let htmlURL: URL?
+    }
+
+    private static func fetchSiteLatest() async throws -> SiteLatest {
+        guard let url = URL(string: "https://aril.host/downloads/latest.json") else {
+            throw UpdateError.noRelease
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 12
+        req.setValue("ARIL-macOS", forHTTPHeaderField: "User-Agent")
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw UpdateError.network("aril.host returned \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = obj["version"] as? String else {
+            throw UpdateError.noRelease
+        }
+        let build = (obj["build"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let file = (obj["file"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "ARIL-latest.dmg"
+        guard let dmgURL = URL(string: "https://aril.host/downloads/\(file)") else {
+            throw UpdateError.noDMG
+        }
+        return SiteLatest(
+            version: version.trimmingCharacters(in: CharacterSet(charactersIn: "vV")),
+            build: (build?.isEmpty == false) ? build : nil,
+            dmgURL: dmgURL,
+            dmgName: file,
+            htmlURL: URL(string: "https://aril.host/#download")
+        )
+    }
+
+    private static func fetchGitHubLatest() async throws -> LatestRelease {
         guard let url = URL(string: "https://api.github.com/repos/fizzball/ARIL/releases/latest") else {
             throw UpdateError.noRelease
         }
@@ -71,10 +132,29 @@ enum AppUpdateService {
             throw UpdateError.noDMG
         }
         let html = (obj["html_url"] as? String).flatMap(URL.init(string:))
-        return LatestRelease(tag: tag, version: version, dmgURL: dmgURL, dmgName: dmgName, htmlURL: html)
+        return LatestRelease(
+            tag: tag,
+            version: version,
+            build: nil,
+            dmgURL: dmgURL,
+            dmgName: dmgName,
+            htmlURL: html
+        )
     }
 
-    /// True when `latest` is strictly newer than `current` (marketing versions like `0.4.1`).
+    /// True when the published release is strictly newer than the running app (marketing, then build).
+    static func isNewer(_ release: LatestRelease, thanCurrentVersion currentVersion: String, build currentBuild: String) -> Bool {
+        let cmp = compareVersions(release.version, currentVersion)
+        if cmp == .orderedDescending { return true }
+        if cmp == .orderedAscending { return false }
+        guard let latestBuild = release.build?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !latestBuild.isEmpty else {
+            return false
+        }
+        return compareBuild(latestBuild, currentBuild) == .orderedDescending
+    }
+
+    /// Legacy helper — marketing versions only (no build). Prefer `isNewer(_:thanCurrentVersion:build:)`.
     static func isNewer(_ latest: String, than current: String) -> Bool {
         compareVersions(latest, current) == .orderedDescending
     }
@@ -91,10 +171,23 @@ enum AppUpdateService {
         return .orderedSame
     }
 
+    static func compareBuild(_ a: String, _ b: String) -> ComparisonResult {
+        let x = Int(a.filter(\.isNumber)) ?? 0
+        let y = Int(b.filter(\.isNumber)) ?? 0
+        if x == y { return .orderedSame }
+        return x < y ? .orderedAscending : .orderedDescending
+    }
+
     private static func parseVersion(_ s: String) -> [Int] {
         let cleaned = s.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
             .split(separator: "-", maxSplits: 1).first.map(String.init) ?? s
         return cleaned.split(separator: ".").map { Int($0.filter(\.isNumber)) ?? 0 }
+    }
+
+    static func displayLabel(version: String, build: String?) -> String {
+        let v = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        guard let build, !build.isEmpty else { return v }
+        return "\(v) (build \(build))"
     }
 
     /// Download DMG, mount it, stage a post-quit installer, then terminate ARIL.

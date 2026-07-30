@@ -50,7 +50,27 @@ rm -f "$TMP"
 
 PUBLISHED="$(gh release view "$TAG" --repo "$REPO" --json publishedAt -q '.publishedAt' 2>/dev/null | cut -c1-10 || true)"
 
-cat > "$DOWNLOADS/latest.json" <<EOF
+# Prefer CFBundleVersion from a local Release app; else project.yml; else omit.
+BUILD=""
+if [[ -f "$ROOT/dist/ARIL.app/Contents/Info.plist" ]]; then
+  BUILD="$(plutil -extract CFBundleVersion raw "$ROOT/dist/ARIL.app/Contents/Info.plist" 2>/dev/null || true)"
+elif [[ -f "$ROOT/apps/macos/project.yml" ]]; then
+  BUILD="$(grep -E 'CURRENT_PROJECT_VERSION:' "$ROOT/apps/macos/project.yml" | head -1 | awk '{print $2}' | tr -d '"')"
+fi
+
+if [[ -n "$BUILD" ]]; then
+  cat > "$DOWNLOADS/latest.json" <<EOF
+{
+  "version": "${VERSION#v}",
+  "build": "${BUILD}",
+  "file": "ARIL-latest.dmg",
+  "published": "${PUBLISHED:-}",
+  "size_bytes": ${SIZE},
+  "requirements": "Apple Silicon Mac · macOS 14+ · OpenRouter key"
+}
+EOF
+else
+  cat > "$DOWNLOADS/latest.json" <<EOF
 {
   "version": "${VERSION#v}",
   "file": "ARIL-latest.dmg",
@@ -59,6 +79,7 @@ cat > "$DOWNLOADS/latest.json" <<EOF
   "requirements": "Apple Silicon Mac · macOS 14+ · OpenRouter key"
 }
 EOF
+fi
 
 echo "-> Wrote $DOWNLOADS/$DMG_NAME (${SIZE} bytes)"
 echo "-> Updated $DOWNLOADS/ARIL-latest.dmg and latest.json"

@@ -142,9 +142,12 @@ jobs:
           cp "dist/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
           chmod 644 "website/downloads/ARIL-${VERSION}.dmg" "website/downloads/ARIL-latest.dmg"
           SIZE="$(stat -c%s "website/downloads/ARIL-latest.dmg")"
+          BUILD="$(plutil -extract CFBundleVersion raw dist/ARIL.app/Contents/Info.plist 2>/dev/null || true)"
+          BUILD="${BUILD:-}"
           cat > website/downloads/latest.json <<EOF
           {
             "version": "${VERSION}",
+            "build": "${BUILD}",
             "file": "ARIL-latest.dmg",
             "published": "$(date -u +%Y-%m-%d)",
             "size_bytes": ${SIZE},
