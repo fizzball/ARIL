@@ -35,7 +35,9 @@ struct ChatDetailView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .padding(.horizontal, 24)
                         .padding(.bottom, 8)
-                } else if state.showIntelligencePanel, state.compareResults.isEmpty {
+                } else if state.showIntelligencePanel,
+                          state.compareResults.isEmpty,
+                          !state.skillMentionMenuVisible {
                     IntelligencePanelView()
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .padding(.horizontal, 24)
@@ -47,6 +49,7 @@ struct ChatDetailView: View {
                     .padding(.bottom, 10)
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.86), value: state.showIntelligencePanel)
+            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: state.skillMentionMenuVisible)
             .animation(.spring(response: 0.35, dampingFraction: 0.86), value: state.modelTestProgress)
             .animation(.easeInOut(duration: 0.28), value: isEmpty)
             .animation(.easeInOut(duration: 0.25), value: state.compareResults.count)

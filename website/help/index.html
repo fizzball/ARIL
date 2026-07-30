@@ -148,10 +148,12 @@
                 <tr><th>Command</th><th>What it does</th></tr>
               </thead>
               <tbody>
-                <tr><td><code>/status</code></td><td>Gateway, OpenRouter, guardrails, cache, MCP, and latest release check</td></tr>
+                <tr><td><code>/status</code></td><td>Gateway, OpenRouter, guardrails, cache, MCP, skills, and latest release check</td></tr>
                 <tr><td><code>/version</code></td><td>Current app version and build</td></tr>
                 <tr><td><code>/update</code></td><td>Check for a newer notarized release (or use the sidebar Update button)</td></tr>
                 <tr><td><code>/web</code></td><td>Toggle web search (<code>on</code> / <code>off</code> / <code>status</code>)</td></tr>
+                <tr><td><code>/skills</code></td><td>List or toggle skills (<code>list</code> / <code>enable</code> / <code>disable</code> [id])</td></tr>
+                <tr><td><code>/save</code></td><td>Save last reply as PDF or Word (<code>pdf</code> / <code>docx</code>; add <code>session</code> for the whole chat)</td></tr>
                 <tr><td><code>/cache</code></td><td>Session-cache size; <code>compact</code> or <code>clear</code></td></tr>
                 <tr><td><code>/new</code></td><td>Start a new chat session</td></tr>
                 <tr><td><code>/clear</code></td><td>Clear the current transcript</td></tr>
@@ -159,7 +161,7 @@
                 <tr><td><code>/nmap</code></td><td>Example prompts for the local Nmap MCP scanner</td></tr>
                 <tr><td><code>/codescan</code></td><td>Example prompts for the Semgrep code scanner</td></tr>
                 <tr><td><code>/help</code></td><td>List commands in chat</td></tr>
-                <tr><td><code>/reset</code></td><td>Delete all sessions and Learning data (asks to confirm)</td></tr>
+                <tr><td><code>/reset</code></td><td>Clear ungrouped sessions and Learning data; keeps projects and their sessions (asks to confirm)</td></tr>
                 <tr><td><code>/exit</code></td><td>Quit ARIL</td></tr>
               </tbody>
             </table>
@@ -172,6 +174,7 @@
             <li><strong>Subscription</strong> — OpenRouter sign-in or API key; local guardrails (sensitive-info redact, prompt-injection block).</li>
             <li><strong>Models</strong> — Default and per-category mappings for Auto; browse the OpenRouter catalog.</li>
             <li><strong>MCP</strong> — Enable managed local scanners (Nmap, Semgrep) or remote HTTP MCP servers.</li>
+            <li><strong>Skills</strong> — Local capabilities such as Document Export (PDF / Word via <code>/save</code>) and OS Access (local shell via context or <code>@OS</code>); master switch plus per-skill toggles. Type <code>@</code> in the prompt to pick a skill.</li>
             <li><strong>General</strong> — Solo gateway, budget caps, session cache, system prompt, menu-bar icon.</li>
             <li><strong>Appearance</strong> — Themes including System (follows macOS).</li>
           </ul>

@@ -330,11 +330,13 @@ final class ARILAPIClient {
     }
 
     /// Consume SSE from `/v1/chat/stream`.
+    /// Token / MCP callbacks are awaited so callers can apply UI updates on the MainActor
+    /// before the stream function returns (avoids racing post-stream skill fulfillment).
     func chatStream(
         baseURL: String,
         request: ChatRequest,
-        onToken: @escaping @Sendable (String) -> Void,
-        onMCPStatus: (@Sendable (String, String, String, String?) -> Void)? = nil
+        onToken: @escaping @Sendable (String) async -> Void,
+        onMCPStatus: (@Sendable (String, String, String, String?) async -> Void)? = nil
     ) async throws -> StreamDoneEvent {
         var req = URLRequest(url: try url(baseURL, path: "/v1/chat/stream"))
         req.httpMethod = "POST"
@@ -354,7 +356,7 @@ final class ARILAPIClient {
         var receivedTokens = false
         var lastModel: String?
 
-        func flushEvent() throws {
+        func flushEvent() async throws {
             let payload = dataLines.joined(separator: "\n")
             dataLines.removeAll()
             let name = eventName
@@ -366,13 +368,13 @@ final class ARILAPIClient {
                     if !token.content.isEmpty {
                         receivedTokens = true
                         if let model = token.model { lastModel = model }
-                        onToken(token.content)
+                        await onToken(token.content)
                     }
                 } else if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
                           let content = obj["content"] as? String,
                           !content.isEmpty {
                     receivedTokens = true
-                    onToken(content)
+                    await onToken(content)
                 }
             } else if name == "mcp_status" {
                 if let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] {
@@ -380,7 +382,7 @@ final class ARILAPIClient {
                     let tool = obj["tool"] as? String ?? "tool"
                     let phase = obj["phase"] as? String ?? "calling"
                     let note = obj["note"] as? String
-                    onMCPStatus?(server, tool, phase, note)
+                    await onMCPStatus?(server, tool, phase, note)
                 }
             } else if name == "done" {
                 // Soft-decode so a trailing schema quirk doesn't kill a successful stream.
@@ -420,29 +422,28 @@ final class ARILAPIClient {
                 continue
             }
             if trimmed.isEmpty {
-                try flushEvent()
+                try await flushEvent()
             }
         }
-        // Final event may arrive without a trailing blank line.
-        try flushEvent()
+        try await flushEvent()
 
-        if let done { return done }
-
-        // Connection closed after tokens — treat as a finished stream rather than a cryptic error.
-        if receivedTokens {
-            return StreamDoneEvent(
-                sessionId: request.sessionId ?? "",
-                model: lastModel ?? request.model ?? "unknown",
-                routeCategory: nil,
-                inputTokens: nil,
-                outputTokens: nil,
-                costUsd: nil,
-                cached: false,
-                latencyMs: nil,
-                preferenceReason: nil
-            )
+        guard let done else {
+            if receivedTokens {
+                return StreamDoneEvent(
+                    sessionId: request.sessionId ?? "",
+                    model: lastModel ?? request.model ?? "unknown",
+                    routeCategory: nil,
+                    inputTokens: nil,
+                    outputTokens: nil,
+                    costUsd: nil,
+                    cached: nil,
+                    latencyMs: nil,
+                    preferenceReason: nil
+                )
+            }
+            throw ARILAPIError.stream("Stream ended without a done event")
         }
-        throw ARILAPIError.stream("No response received from the model. Try sending again.")
+        return done
     }
 
     func compare(baseURL: String, request: CompareRequestDTO) async throws -> CompareResponseDTO {

@@ -27,6 +27,8 @@ struct SettingsView: View {
                 .tabItem { Label("Models", systemImage: "cpu") }
             mcpTab
                 .tabItem { Label("MCP", systemImage: "server.rack") }
+            skillsTab
+                .tabItem { Label("Skills", systemImage: "puzzlepiece.extension") }
             appearanceTab
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
@@ -276,6 +278,19 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Web Search") {
+                Toggle(
+                    "Web Search",
+                    isOn: Binding(
+                        get: { state.webSearchEnabled },
+                        set: { state.setWebSearchEnabled($0) }
+                    )
+                )
+                Text("When on (default), OpenRouter can use live web search on sends. Extra per-request fees may apply. You can also toggle with `/web`.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Menu bar") {
                 Toggle(
                     "Show ARIL in the menu bar",
@@ -511,13 +526,14 @@ struct SettingsView: View {
             }
 
             Section("Sessions") {
-                Text("Removes all chat history from this Mac and the local gateway.")
+                Text("Removes all chat history from this Mac and the local gateway, including every project and sessions inside projects. For ungrouped sessions only (keeping projects), use `/reset` in chat.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Delete all past sessions", role: .destructive) {
                     Task { await state.deleteAllSessions() }
                 }
-                .disabled(state.sessions.isEmpty)
+                .disabled(state.sessions.isEmpty && state.projects.isEmpty)
+                .help("Deletes all sessions and all projects. Prefer /reset to clear ungrouped sessions while keeping projects.")
             }
         }
         .padding()
@@ -758,6 +774,85 @@ struct SettingsView: View {
         .sheet(item: $mcpEditorTarget) { target in
             MCPServerEditorView(serverID: target.serverID)
                 .environmentObject(state)
+        }
+    }
+
+    private var skillsTab: some View {
+        Form {
+            Section("Skills") {
+                Toggle("Use skills", isOn: Binding(
+                    get: { state.skillsEnabled },
+                    set: { state.setSkillsEnabled($0) }
+                ))
+                Text("Skills are local ARIL capabilities (Document Export, OS Access). They are separate from MCP tool servers. When the master switch is off, no skill runs. Type `@` in the prompt to pick a skill explicitly; otherwise ARIL uses enabled skills from context.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                let enabled = state.skills.filter(\.enabled).count
+                Text("\(enabled) enabled · \(state.skills.count) available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Available skills") {
+                ForEach(state.skills) { skill in
+                    skillRow(skill)
+                }
+            }
+
+            Section("Commands") {
+                Text("`/skills list` — list skills and status")
+                    .font(.caption)
+                Text("`/skills enable|disable` — master switch")
+                    .font(.caption)
+                Text("`/skills enable|disable <id>` — one skill")
+                    .font(.caption)
+                Text("`@Document` or `/save pdf` / `/save docx` — Document Export (add `session` for the whole chat)")
+                    .font(.caption)
+                Text("`@OS dig aril.host` — OS Access (or ask for a shell command without @)")
+                    .font(.caption)
+                Text("Type `@` in the prompt for the skill picker")
+                    .font(.caption)
+            }
+        }
+        .padding()
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func skillRow(_ skill: SkillConfig) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(skill.name)
+                        .font(.headline)
+                    if skill.isBuiltIn {
+                        Text("Built-in")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.18))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    Text(skill.id)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Text(skill.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Toggle(
+                "Enabled",
+                isOn: Binding(
+                    get: { skill.enabled },
+                    set: { state.setSkillEnabled(id: skill.id, enabled: $0) }
+                )
+            )
+            .labelsHidden()
+            .disabled(!state.skillsEnabled)
+            .help(state.skillsEnabled ? "Enable this skill" : "Turn on Use skills first")
         }
     }
 

@@ -154,11 +154,11 @@ struct ContentView: View {
             isPresented: $state.showResetConfirmation
         ) {
             Button("Cancel", role: .cancel) {}
-            Button("Delete everything", role: .destructive) {
+            Button("Reset", role: .destructive) {
                 Task { await state.performReset() }
             }
         } message: {
-            Text("This permanently deletes ALL chat sessions and every Learning / judged database entry. This cannot be undone.")
+            Text("This deletes ungrouped chat sessions and every Learning / judged database entry. Projects and sessions inside projects are kept — delete a project from its sidebar right-click menu. This cannot be undone.")
         }
         .alert(
             "Session cache is large",

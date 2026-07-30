@@ -137,6 +137,9 @@ final class AppState: ObservableObject {
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
+    /// Master switch — when on, individually enabled skills are available.
+    @Published var skillsEnabled: Bool = true
+    @Published var skills: [SkillConfig] = []
     /// Managed Nmap MCP server lifecycle mirrors (for the Preferences UI).
     @Published var nmapServerRunning: Bool = false
     @Published var nmapInstalled: Bool = false
@@ -224,7 +227,7 @@ final class AppState: ObservableObject {
     @Published var estimatedLatencyMs: Int?
     @Published var preferredCompareModel: String?
     @Published var pendingAttachments: [PendingAttachment] = []
-    @Published var webSearchEnabled: Bool = false
+    @Published var webSearchEnabled: Bool = true
     /// Bumped to request MessageListView scroll to the latest message.
     @Published var scrollMessagesToBottomToken: Int = 0
 
@@ -383,8 +386,11 @@ final class AppState: ObservableObject {
             defaults.object(forKey: "aril.skipAnalysisOnJudgement") as? Bool ?? true
         showInMenuBar = defaults.object(forKey: "aril.showInMenuBar") as? Bool ?? false
         openLastSessionOnStartup = defaults.object(forKey: "aril.openLastSessionOnStartup") as? Bool ?? false
+        webSearchEnabled = defaults.object(forKey: "aril.webSearchEnabled") as? Bool ?? true
         mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
         mcpServers = Self.loadMCPServers()
+        skillsEnabled = defaults.object(forKey: "aril.skillsEnabled") as? Bool ?? true
+        skills = Self.loadSkills()
         systemPromptEnabled = defaults.object(forKey: "aril.systemPromptEnabled") as? Bool ?? false
         let storedPrompt = defaults.string(forKey: "aril.systemPrompt") ?? ""
         systemPrompt = storedPrompt
@@ -448,6 +454,11 @@ final class AppState: ObservableObject {
     func setOpenLastSessionOnStartup(_ enabled: Bool) {
         openLastSessionOnStartup = enabled
         UserDefaults.standard.set(enabled, forKey: "aril.openLastSessionOnStartup")
+    }
+
+    func setWebSearchEnabled(_ enabled: Bool) {
+        webSearchEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.webSearchEnabled")
     }
 
     func setBudgetEnabled(_ enabled: Bool) {
@@ -899,9 +910,28 @@ final class AppState: ObservableObject {
         ARIL renders Mermaid, SVG, and ASCII diagrams directly in this chat UI. When the user explicitly asks for a diagram or flowchart, emit a complete fenced code block (for example ```mermaid … ```) using valid Mermaid syntax (use `-->` for arrows, not `|>`). Do not say you cannot display graphics, and do not tell the user to paste into mermaid.live, VS Code, or other external tools. When MCP tools are available for the task, call those tools instead of inventing a Mermaid flowchart of the workflow.
         """
 
+    static let osAccessCapabilityNote = """
+        OS Access skill is available in this chat. When the user asks for local terminal/shell work — including natural language such as “list files in the current directory”, “show DNS for aril.host”, or “what’s my hostname” — translate that intent into a concrete shell command and emit exactly one fenced block per command:
+
+        ```aril-shell
+        ls -la
+        ```
+
+        Examples of intent → command: list files → `ls -la`; DNS lookup → `dig …` or `host …`; current user → `whoami`; disk usage → `df -h`. ARIL executes the command on the user’s Mac and returns stdout/stderr. Prefer real shell results over inventing output. Do not claim you lack shell access when this skill is available. Refuse destructive or irreversible commands. Keep commands focused; do not chain unrelated dangerous operations.
+        """
+
+    static let documentExportCapabilityNote = """
+        Document Export is a local ARIL skill. After your reply, ARIL opens a Save panel and writes a real PDF or Word (.docx) file on the user’s Mac from your message text.
+
+        Write the document body as clean, readable Markdown (title, short sections, lists as needed). Use prior chat context when the user asks to export “the results”, “the output”, or similar.
+
+        Do not invent a `@Document(...)` DSL, JSON schema, or pseudo-code annotation. Do not say you cannot generate PDF/Word files or that the user must use an external tool — ARIL performs the file write. Do not refuse the export.
+        """
+
     /// System prompt text to send with preview/chat when the feature is enabled.
-    var activeSystemPromptForAPI: String? {
+    func activeSystemPromptForAPI(extraNotes: [String] = []) -> String? {
         var parts: [String] = [Self.platformCapabilityNote]
+        parts.append(contentsOf: extraNotes)
         if systemPromptEnabled {
             let trimmed = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { parts.append(trimmed) }
@@ -909,15 +939,20 @@ final class AppState: ObservableObject {
         return parts.joined(separator: "\n\n")
     }
 
+    /// System prompt text to send with preview/chat when the feature is enabled.
+    var activeSystemPromptForAPI: String? {
+        activeSystemPromptForAPI()
+    }
+
     /// Build API messages for a send, injecting the global system prompt when enabled.
-    func messagesForAPI(from sessionMessages: [ChatMessage]) -> [APIChatMessage] {
+    func messagesForAPI(from sessionMessages: [ChatMessage], extraSystemNotes: [String] = []) -> [APIChatMessage] {
         var out = sessionMessages.map {
             let cleaned = ChatMessage.stripActualCostFooter($0.content)
             return APIChatMessage(role: $0.role.rawValue, content: Self.sanitizeContentForAPI(cleaned))
         }
         // Prefer a single leading system turn (Claude.md-style); drop any stored system noise.
         out.removeAll { $0.role == "system" }
-        if let system = activeSystemPromptForAPI {
+        if let system = activeSystemPromptForAPI(extraNotes: extraSystemNotes) {
             out.insert(APIChatMessage(role: "system", content: system), at: 0)
         }
         return out
@@ -956,6 +991,168 @@ final class AppState: ObservableObject {
     func setMCPEnabled(_ enabled: Bool) {
         mcpEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "aril.mcpEnabled")
+    }
+
+    func setSkillsEnabled(_ enabled: Bool) {
+        skillsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.skillsEnabled")
+    }
+
+    func setSkillEnabled(id: String, enabled: Bool) {
+        guard let idx = skills.firstIndex(where: { $0.id == id }) else { return }
+        skills[idx].enabled = enabled
+        saveSkills()
+    }
+
+    /// True when the master Skills switch is on and the named skill is enabled.
+    func isSkillActive(_ id: String) -> Bool {
+        skillsEnabled && (skills.first(where: { $0.id == id })?.enabled ?? false)
+    }
+
+    private func saveSkills() {
+        if let data = try? JSONEncoder().encode(skills) {
+            UserDefaults.standard.set(data, forKey: "aril.skills")
+        }
+    }
+
+    private static func loadSkills() -> [SkillConfig] {
+        let presets = SkillConfig.builtInPresets()
+        guard let data = UserDefaults.standard.data(forKey: "aril.skills"),
+              let saved = try? JSONDecoder().decode([SkillConfig].self, from: data)
+        else {
+            return presets
+        }
+        var byId = Dictionary(uniqueKeysWithValues: saved.map { ($0.id, $0) })
+        return presets.map { factory in
+            var row = factory
+            if let prior = byId[factory.id] {
+                row.enabled = prior.enabled
+                byId.removeValue(forKey: factory.id)
+            }
+            return row
+        }
+        // Future non-built-in skills would append remaining `byId` values here.
+    }
+
+    /// Parse `@Skill` tokens from a prompt and strip them for the model-facing text.
+    func parseSkillMentions(in prompt: String) -> SkillMentionParse {
+        let pattern = #"@([A-Za-z][A-Za-z0-9_-]*)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return SkillMentionParse(mentionedIds: [], cleanedPrompt: prompt, originalPrompt: prompt)
+        }
+        let ns = prompt as NSString
+        var ids: [String] = []
+        regex.enumerateMatches(in: prompt, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
+            guard let match, match.numberOfRanges > 1 else { return }
+            let token = ns.substring(with: match.range(at: 1))
+            if let skill = skills.first(where: { $0.matchesMention(token) }) {
+                if !ids.contains(skill.id) { ids.append(skill.id) }
+            }
+        }
+        let cleaned = regex.stringByReplacingMatches(
+            in: prompt,
+            range: NSRange(location: 0, length: ns.length),
+            withTemplate: ""
+        )
+        .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        return SkillMentionParse(
+            mentionedIds: ids,
+            cleanedPrompt: cleaned.isEmpty ? prompt : cleaned,
+            originalPrompt: prompt
+        )
+    }
+
+    /// Skills that may run for this turn: enabled skills, plus any @mentioned enabled skill
+    /// (mentions force the skill when context alone might not).
+    func activeSkillIdsForTurn(mentionedIds: [String]) -> Set<String> {
+        guard skillsEnabled else { return [] }
+        var ids = Set(skills.filter(\.enabled).map(\.id))
+        // Mentions of disabled skills are ignored (must enable in Preferences).
+        for mid in mentionedIds where skills.contains(where: { $0.id == mid && $0.enabled }) {
+            ids.insert(mid)
+        }
+        return ids
+    }
+
+    func skill(id: String) -> SkillConfig? {
+        skills.first { $0.id == id }
+    }
+
+    // MARK: - @ skill mention palette
+
+    @Published var skillMentionMenuIndex: Int = 0
+    @Published var skillMentionMenuDismissed: Bool = false
+
+    /// Incomplete `@token` at the end of the draft (nil when the palette should stay closed).
+    var activeSkillMentionQuery: String? {
+        // Slash commands own drafts that begin with `/`.
+        let text = draft
+        guard !text.hasPrefix("/") else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: #"@([A-Za-z0-9_-]*)$"#) else { return nil }
+        let ns = text as NSString
+        guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+              match.numberOfRanges > 1
+        else { return nil }
+        return ns.substring(with: match.range(at: 1))
+    }
+
+    /// Skills shown in the `@` submenu (enabled skills when the master switch is on).
+    var filteredSkillMentions: [SkillConfig] {
+        guard skillsEnabled, let query = activeSkillMentionQuery else { return [] }
+        let available = skills.filter(\.enabled)
+        if query.isEmpty { return available }
+        let q = query.lowercased()
+        return available.filter {
+            $0.id.lowercased().hasPrefix(q)
+                || $0.name.lowercased().hasPrefix(q)
+                || $0.mentionTags.contains { $0.lowercased().hasPrefix(q) }
+        }
+    }
+
+    var skillMentionMenuVisible: Bool {
+        historyNavIndex == nil
+            && !skillMentionMenuDismissed
+            && !slashMenuVisible
+            && !filteredSkillMentions.isEmpty
+    }
+
+    func skillMentionMenuMove(_ delta: Int) {
+        let items = filteredSkillMentions
+        guard !items.isEmpty else { return }
+        skillMentionMenuIndex = max(0, min(items.count - 1, skillMentionMenuIndex + delta))
+    }
+
+    /// Replace the trailing `@token` with the selected skill’s primary `@Tag `.
+    func insertSelectedSkillMention() {
+        let items = filteredSkillMentions
+        guard items.indices.contains(skillMentionMenuIndex) else { return }
+        let skill = items[skillMentionMenuIndex]
+        guard let regex = try? NSRegularExpression(pattern: #"@[A-Za-z0-9_-]*$"#) else { return }
+        let ns = draft as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: draft, range: range) else { return }
+        let replaced = regex.stringByReplacingMatches(
+            in: draft,
+            range: match.range,
+            withTemplate: "@\(skill.primaryMentionTag) "
+        )
+        setDraft(replaced)
+        skillMentionMenuIndex = 0
+        skillMentionMenuDismissed = false
+    }
+
+    func dismissSkillMentionMenu() {
+        skillMentionMenuDismissed = true
+    }
+
+    func onDraftChangedForSkillMention() {
+        if skillMentionMenuDismissed {
+            skillMentionMenuDismissed = false
+        }
+        if skillMentionMenuIndex >= filteredSkillMentions.count, !filteredSkillMentions.isEmpty {
+            skillMentionMenuIndex = 0
+        }
     }
 
     func updateMCPServer(_ server: MCPServerConfig) {
@@ -2506,6 +2703,7 @@ final class AppState: ObservableObject {
         draft = value
         noteDraftEditedFromTyping()
         onDraftChangedForSlash()
+        onDraftChangedForSkillMention()
         schedulePreview()
     }
 
@@ -2531,17 +2729,19 @@ final class AppState: ObservableObject {
     /// `/nmap` and `/codescan` summaries are overridden at runtime by
     /// `paletteCommands` to reflect whether their MCP server is enabled.
     static let slashCommands: [SlashCommand] = [
-        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, cache, Nmap, code scan, MCP, latest release"),
+        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, cache, Nmap, code scan, MCP, skills, latest release"),
         SlashCommand(id: "/update", summary: "Check for a newer ARIL release and install it to /Applications"),
         SlashCommand(id: "/nmap", summary: "Example Nmap prompts — port, host, and vuln scans"),
         SlashCommand(id: "/codescan", summary: "Example Semgrep prompts — scan a path or inline code"),
-        SlashCommand(id: "/web", summary: "Toggle web search (or /web on|off)"),
+        SlashCommand(id: "/web", summary: "Toggle web search (or /web on|off) — also Preferences → General"),
+        SlashCommand(id: "/skills", summary: "List or toggle skills — /skills list|enable|disable [id]"),
+        SlashCommand(id: "/save", summary: "Save last reply as PDF or Word (Document Export skill) — /save pdf|docx"),
         SlashCommand(id: "/cache", summary: "Session cache size — /cache compact|clear"),
         SlashCommand(id: "/export", summary: "Export the current session as Markdown"),
         SlashCommand(id: "/new", summary: "Start a new chat session"),
         SlashCommand(id: "/clear", summary: "Clear the current chat transcript"),
         SlashCommand(id: "/version", summary: "Show the current ARIL app version"),
-        SlashCommand(id: "/reset", summary: "Delete ALL sessions and Learning entries (asks to confirm)"),
+        SlashCommand(id: "/reset", summary: "Clear ungrouped sessions + Learning (keeps projects; asks to confirm)"),
         SlashCommand(id: "/exit", summary: "Quit ARIL"),
         SlashCommand(id: "/help", summary: "Show the list of commands"),
     ]
@@ -2574,6 +2774,21 @@ final class AppState: ObservableObject {
                     summary: codeScanServerEnabled
                         ? command.summary
                         : "Example Semgrep prompts — ⚠︎ Code Scan MCP server disabled"
+                )
+            case "/save":
+                return SlashCommand(
+                    id: command.id,
+                    summary: isSkillActive(SkillConfig.documentExportId)
+                        ? command.summary
+                        : "Save last reply as PDF/Word — ⚠︎ Document Export skill disabled"
+                )
+            case "/skills":
+                let enabledCount = skills.filter(\.enabled).count
+                return SlashCommand(
+                    id: command.id,
+                    summary: skillsEnabled
+                        ? "\(command.summary) — \(enabledCount)/\(skills.count) enabled"
+                        : "\(command.summary) — ⚠︎ skills master switch off"
                 )
             default:
                 return command
@@ -2696,6 +2911,16 @@ final class AppState: ObservableObject {
             setDraft("")
             runWebSearchCommand(arg: arg)
             return true
+        case "/skills", "/skill":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            runSkillsCommand(arg: arg)
+            return true
+        case "/save":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            runSaveDocumentCommand(arg: arg)
+            return true
         case "/cache":
             recordPromptHistory(trimmed)
             setDraft("")
@@ -2736,11 +2961,11 @@ final class AppState: ObservableObject {
     private func runWebSearchCommand(arg: String) {
         switch arg {
         case "", "toggle":
-            webSearchEnabled.toggle()
+            setWebSearchEnabled(!webSearchEnabled)
         case "on", "enable", "true", "1":
-            webSearchEnabled = true
+            setWebSearchEnabled(true)
         case "off", "disable", "false", "0":
-            webSearchEnabled = false
+            setWebSearchEnabled(false)
         case "status":
             break
         default:
@@ -2756,14 +2981,635 @@ final class AppState: ObservableObject {
         ]
         if webSearchEnabled {
             lines.append(
-                "OpenRouter web search is enabled for the next send (extra per-request fee may apply). Toggle off with `/web` or `/web off`."
+                "OpenRouter web search is enabled for sends (extra per-request fee may apply). Change in Preferences → General, or `/web off`."
             )
         } else {
             lines.append(
-                "Web search is off. Enable with `/web` or `/web on`."
+                "Web search is off. Enable in Preferences → General, or with `/web on`."
             )
         }
         appendLocalAssistantNote(lines.joined(separator: "\n"))
+    }
+
+    /// `/skills` — list skills or toggle master / per-skill enablement.
+    private func runSkillsCommand(arg: String) {
+        let tokens = arg.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        let head = (tokens.first ?? "").lowercased()
+        let target = tokens.dropFirst().joined(separator: " ")
+
+        if head.isEmpty || head == "list" || head == "status" {
+            appendLocalAssistantNote(skillsStatusNote())
+            return
+        }
+
+        let enabling = ["on", "enable", "true", "1"].contains(head)
+        let disabling = ["off", "disable", "false", "0"].contains(head)
+        if enabling || disabling {
+            if target.isEmpty {
+                setSkillsEnabled(enabling)
+                if enabling {
+                    appendLocalAssistantNote(
+                        "**Skills — on**\n\nIndividual skills can still be toggled in Preferences → Skills or with `/skills enable <id>`."
+                    )
+                } else {
+                    appendLocalAssistantNote(
+                        "**Skills — off**\n\nEnable again with `/skills enable` or Preferences → Skills."
+                    )
+                }
+                return
+            }
+            guard let skill = resolveSkill(target) else {
+                appendLocalAssistantNote("**Skills** — unknown skill `\(target)`. Use `/skills list`.")
+                return
+            }
+            if enabling, !skillsEnabled { setSkillsEnabled(true) }
+            setSkillEnabled(id: skill.id, enabled: enabling)
+            appendLocalAssistantNote(
+                enabling
+                    ? "**Skill enabled** — `\(skill.id)` (\(skill.name))."
+                    : "**Skill disabled** — `\(skill.id)` (\(skill.name))."
+            )
+            return
+        }
+
+        if let skill = resolveSkill(arg) {
+            let active = isSkillActive(skill.id)
+            appendLocalAssistantNote(
+                "**\(skill.name)** (`\(skill.id)`) — \(active ? "✅ active" : "○ inactive").\n\n\(skill.summary)"
+            )
+            return
+        }
+        appendLocalAssistantNote(
+            "**Skills** — unknown option `\(arg)`. Use `/skills`, `/skills list`, `/skills enable|disable`, or `/skills enable|disable <id>`."
+        )
+    }
+
+    private func resolveSkill(_ raw: String) -> SkillConfig? {
+        let q = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return nil }
+        return skills.first {
+            $0.id.lowercased() == q
+                || $0.name.lowercased() == q
+                || $0.id.lowercased().replacingOccurrences(of: "-", with: "") == q.replacingOccurrences(of: "-", with: "")
+                || $0.name.lowercased().contains(q)
+        }
+    }
+
+    private func skillsStatusNote() -> String {
+        var lines = [
+            "**ARIL skills**",
+            "",
+            "- Master switch: **\(skillsEnabled ? "on" : "off")** (Preferences → Skills)",
+            "",
+        ]
+        for skill in skills {
+            let mark: String
+            if !skillsEnabled {
+                mark = "○ inactive (master off)"
+            } else if skill.enabled {
+                mark = "✅ enabled"
+            } else {
+                mark = "○ disabled"
+            }
+            lines.append("- `\(skill.id)` — **\(skill.name)** · \(mark)")
+            lines.append("  \(skill.summary)")
+        }
+        lines.append("")
+        lines.append("Commands: `/skills list` · `/skills enable|disable` · `/skills enable|disable <id>`")
+        if isSkillActive(SkillConfig.documentExportId) {
+            lines.append("Document Export: `@Document` auto-saves after the reply, or use `/save pdf` / `/save docx` (add `session` for the whole chat).")
+        }
+        if isSkillActive(SkillConfig.osAccessId) {
+            lines.append("OS Access: ask for a shell command (e.g. `dig aril.host`) or force with `@OS`. Mentions: type `@` in the prompt.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `/save [session] pdf|docx` — Document Export skill.
+    private func runSaveDocumentCommand(arg: String) {
+        guard isSkillActive(SkillConfig.documentExportId) else {
+            appendLocalAssistantNote(
+                "**Document Export** is disabled. Enable it in Preferences → Skills or with `/skills enable document-export`."
+            )
+            return
+        }
+
+        let tokens = arg.split(separator: " ", omittingEmptySubsequences: true).map { $0.lowercased() }
+        var exportSession = false
+        var formatToken: String?
+        for token in tokens {
+            if token == "session" || token == "chat" {
+                exportSession = true
+            } else if DocumentExportFormat.parse(token) != nil {
+                formatToken = token
+            } else if !token.isEmpty {
+                appendLocalAssistantNote(
+                    "**Save** — unknown option `\(token)`. Use `/save pdf`, `/save docx`, or `/save session pdf`."
+                )
+                return
+            }
+        }
+
+        let format = DocumentExportFormat.parse(formatToken ?? "pdf") ?? .pdf
+        _ = exportViaDocumentSkill(format: format, wholeSession: exportSession)
+    }
+
+    /// Save panel for PDF/DOCX from the Document Export skill.
+    @discardableResult
+    func exportViaDocumentSkill(
+        format: DocumentExportFormat,
+        wholeSession: Bool = false,
+        assistantMessageID: UUID? = nil,
+        excludingAssistantID: UUID? = nil
+    ) -> Bool {
+        guard isSkillActive(SkillConfig.documentExportId) else {
+            lastError = "Document Export skill is disabled"
+            return false
+        }
+        let sid = selectedSessionID
+        guard let sid,
+              let session = sessions.first(where: { $0.id == sid })
+        else {
+            lastError = "No session to export"
+            return false
+        }
+
+        let title: String
+        let text: String
+        if wholeSession {
+            title = session.title.isEmpty ? "ARIL session" : session.title
+            text = session.markdownExport(
+                userLabel: userLabel,
+                assistantLabel: "ARIL",
+                appVersion: appVersionString
+            )
+        } else {
+            let message: ChatMessage? = {
+                if let aid = assistantMessageID {
+                    return session.messages.first(where: { $0.id == aid })
+                }
+                return session.messages.reversed().first(where: {
+                    $0.role == .assistant
+                        && $0.id != excludingAssistantID
+                        && Self.isExportableAssistantBody($0.bodyWithoutCostFooter)
+                })
+            }()
+            guard let message,
+                  Self.isExportableAssistantBody(message.bodyWithoutCostFooter)
+            else {
+                appendLocalAssistantNote("**Save** — no assistant reply to export yet. Send a prompt first, or use `/save session pdf`.")
+                return false
+            }
+            title = session.title.isEmpty ? "ARIL reply" : session.title
+            text = Self.sanitizeDocumentExportBody(message.bodyWithoutCostFooter)
+            guard !text.isEmpty else {
+                appendLocalAssistantNote("**Save** — nothing exportable in that reply.")
+                return false
+            }
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [format.utType]
+        panel.allowsOtherFileTypes = false
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = DocumentExportFormat.timestampedFilename(format: format)
+        panel.title = "Save as \(format.displayName)"
+        panel.message = wholeSession
+            ? "Save this chat session as a \(format.displayName) file."
+            : "Save the assistant reply as a \(format.displayName) file."
+        panel.prompt = "Save"
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+
+        do {
+            try DocumentExportService.write(text: text, title: title, format: format, to: url)
+            let scope = wholeSession ? "session" : "reply"
+            appendLocalAssistantNote(
+                "**Saved \(format.displayName)** — \(scope) written to `\(url.lastPathComponent)`."
+            )
+            return true
+        } catch {
+            lastError = "Could not save \(format.displayName): \(error.localizedDescription)"
+            appendLocalAssistantNote("**Save failed** — \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Prefer PDF unless the prompt clearly asks for Word/DOCX.
+    static func inferDocumentExportFormat(from prompt: String) -> DocumentExportFormat {
+        let lower = prompt.lowercased()
+        if lower.contains("docx") || lower.contains("word") || lower.contains(".doc") {
+            return .docx
+        }
+        return .pdf
+    }
+
+    /// Skip local status notes and empty shells when picking a prior reply to export.
+    static func isExportableAssistantBody(_ raw: String) -> Bool {
+        let body = sanitizeDocumentExportBody(raw)
+        guard !body.isEmpty else { return false }
+        let lower = body.lowercased()
+        if lower.hasPrefix("**saved ") { return false }
+        if lower.hasPrefix("**save**") { return false }
+        if lower.hasPrefix("**save failed**") { return false }
+        if lower.hasPrefix("**document export**") { return false }
+        return true
+    }
+
+    /// True when @Document is asking to save prior chat output, not author new substance.
+    static func isDocumentExportPriorIntent(_ cleanedPrompt: String) -> Bool {
+        let t = cleanedPrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if t.isEmpty { return true }
+
+        // Quoted payload → author new content (e.g. create a PDF with 'hello world').
+        if t.contains("'") || t.contains("\"")
+            || t.contains("\u{2018}") || t.contains("\u{2019}")
+            || t.contains("\u{201C}") || t.contains("\u{201D}") {
+            return false
+        }
+
+        // Bare format-only asks after @Document is stripped.
+        let bareFormats: Set<String> = [
+            "pdf", "docx", "word", "as pdf", "as docx", "as word",
+            "save", "export", "save pdf", "save docx", "export pdf", "export docx",
+            "save as pdf", "save as docx", "export as pdf", "export as docx",
+        ]
+        if bareFormats.contains(t) { return true }
+
+        let saveExport = t.contains("save") || t.contains("export")
+        let formatCue =
+            t.contains("pdf") || t.contains("docx") || t.contains("word")
+            || t.contains("document") || t.contains("file")
+        guard saveExport, formatCue else { return false }
+
+        // Must clearly refer to existing chat output — not “create a pdf with …”.
+        let priorRef =
+            t.contains("result") || t.contains("output") || t.contains("above")
+            || t.contains("previous") || t.contains("this") || t.contains("that")
+            || t.contains("reply") || t.contains("answer") || t.contains("response")
+            || t.contains("session") || t.contains("chat") || t.contains("conversation")
+            || t.contains("listing") || t.contains("files")
+
+        let inventNew =
+            t.contains("with ") || t.contains("containing") || t.contains("that says")
+            || t.contains("hello") || t.contains("create a") || t.contains("make a")
+            || t.contains("generate a") || t.contains("write a")
+
+        return priorRef && !inventNew
+    }
+
+    /// Drop invented `@Document(...)` stubs the model sometimes emits.
+    static func sanitizeDocumentExportBody(_ text: String) -> String {
+        var body = text
+        // Multi-line or single-line @Document(...) pseudo-calls.
+        if let regex = try? NSRegularExpression(
+            pattern: #"@Document\s*\((?:[^()]|\([^()]*\))*\)"#,
+            options: [.dotMatchesLineSeparators]
+        ) {
+            let range = NSRange(body.startIndex..<body.endIndex, in: body)
+            body = regex.stringByReplacingMatches(in: body, options: [], range: range, withTemplate: "")
+        }
+        return body
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// After @Document replies, open the Save panel for that assistant message.
+    private func fulfillDocumentExport(
+        sessionID: UUID,
+        assistantID: UUID,
+        userPrompt: String
+    ) {
+        guard isSkillActive(SkillConfig.documentExportId) else { return }
+        // Prefer exporting the just-finished reply; fall back to prior if empty.
+        let format = Self.inferDocumentExportFormat(from: userPrompt)
+        let live = sessions.first(where: { $0.id == sessionID })?
+            .messages.first(where: { $0.id == assistantID })?
+            .bodyWithoutCostFooter
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cleaned = Self.sanitizeDocumentExportBody(live)
+        if !cleaned.isEmpty {
+            // Replace invented DSL in the bubble so chat matches the exported file.
+            if cleaned != live {
+                updateSession(sessionID) { session in
+                    guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+                    let footer = String(session.messages[m].content.dropFirst(
+                        ChatMessage.stripActualCostFooter(session.messages[m].content).count
+                    ))
+                    session.messages[m].content = cleaned + footer
+                }
+            }
+            _ = exportViaDocumentSkill(format: format, assistantMessageID: assistantID)
+        } else {
+            _ = exportViaDocumentSkill(format: format, excludingAssistantID: assistantID)
+        }
+    }
+
+    /// Run shell commands discovered in the assistant reply (and/or inferred from an @OS prompt).
+    private func fulfillOSAccessShellBlocks(
+        sessionID: UUID,
+        assistantID: UUID,
+        contentOverride: String? = nil,
+        userPrompt: String? = nil
+    ) async {
+        guard isSkillActive(SkillConfig.osAccessId) else {
+            ShellAccessService.debugLog("fulfill abort: OS Access inactive (skills master/skill off)")
+            return
+        }
+        let live = sessions.first(where: { $0.id == sessionID })?
+            .messages.first(where: { $0.id == assistantID })?.content
+        let content = contentOverride ?? live ?? ""
+        ShellAccessService.debugLog(
+            "fulfill begin assistant=\(assistantID) contentChars=\(content.count) hasFence=\(content.localizedCaseInsensitiveContains("aril-shell")) promptChars=\(userPrompt?.count ?? -1)"
+        )
+        guard !content.isEmpty || !(userPrompt ?? "").isEmpty else {
+            ShellAccessService.debugLog("fulfill abort: empty content+prompt")
+            return
+        }
+
+        var commands = ShellAccessService.extractCommands(from: content)
+        ShellAccessService.debugLog("extractCommands -> \(commands)")
+
+        // Fallback: any fenced body that looks like argv (even wrong/missing language tag).
+        if commands.isEmpty {
+            let loose = looseFenceBodies(in: content).filter { ShellAccessService.looksLikeShellArgv($0) }
+            commands = loose
+            ShellAccessService.debugLog("looseFenceBodies -> \(commands)")
+        }
+
+        // Fallback: natural-language @OS / OS Access intent.
+        if commands.isEmpty, let prompt = userPrompt,
+           let inferred = ShellAccessService.inferCommand(fromNaturalLanguage: prompt) {
+            commands = [inferred]
+            ShellAccessService.debugLog("NL infer -> \(inferred)")
+        }
+
+        guard !commands.isEmpty else {
+            if content.localizedCaseInsensitiveContains("aril-shell") {
+                appendOSAccessNote(
+                    sessionID: sessionID,
+                    assistantID: assistantID,
+                    note: "**OS Access** — saw an `aril-shell` block but could not parse a command to run."
+                )
+                ShellAccessService.debugLog("fulfill: fence present but parse failed")
+            } else {
+                ShellAccessService.debugLog("fulfill: no commands")
+            }
+            return
+        }
+
+        let already = live ?? content
+        var executed: [String] = []
+        for command in commands {
+            if already.contains("**OS Access** · `\(command)`") {
+                ShellAccessService.debugLog("skip already-ran \(command)")
+                continue
+            }
+            if executed.contains(command) { continue }
+            executed.append(command)
+
+            appendOSAccessNote(
+                sessionID: sessionID,
+                assistantID: assistantID,
+                note: "**OS Access** · running `\(command)`…"
+            )
+
+            let block: String
+            do {
+                let result = try await ShellAccessService.run(command)
+                block = ShellAccessService.formatResult(result)
+                ShellAccessService.debugLog("ran \(command) exit=\(result.exitCode) outChars=\(result.stdout.count)")
+            } catch {
+                block = "**OS Access** · `\(command)`\n\nFailed: \(error.localizedDescription)"
+                ShellAccessService.debugLog("run failed \(command): \(error.localizedDescription)")
+            }
+
+            replaceOSAccessRunningNote(
+                sessionID: sessionID,
+                assistantID: assistantID,
+                command: command,
+                with: block
+            )
+        }
+
+        // Drop the model’s ```aril-shell``` fences — the OS Access result already names the command.
+        if !executed.isEmpty {
+            stripRedundantShellFences(
+                sessionID: sessionID,
+                assistantID: assistantID,
+                executedCommands: executed
+            )
+        }
+    }
+
+    /// Remove ```aril-shell``` / shell fences that duplicate commands we already ran.
+    private func stripRedundantShellFences(
+        sessionID: UUID,
+        assistantID: UUID,
+        executedCommands: [String]
+    ) {
+        let executed = Set(executedCommands.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        updateSession(sessionID) { session in
+            guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+            let current = session.messages[m].content
+            let body = ChatMessage.stripActualCostFooter(current)
+            let footer = String(current.dropFirst(body.count))
+            let cleaned = Self.removeShellFences(from: body, matching: executed)
+                .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            session.messages[m].content = cleaned.isEmpty ? footer.trimmingCharacters(in: .whitespacesAndNewlines) : cleaned + footer
+        }
+    }
+
+    /// Strip fenced shell blocks whose body is one of the executed commands (or any aril-shell fence).
+    private static func removeShellFences(from markdown: String, matching commands: Set<String>) -> String {
+        let lines = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        var out: [String] = []
+        var i = 0
+        while i < lines.count {
+            let opener = lines[i].trimmingCharacters(in: .whitespaces)
+            if opener.hasPrefix("```") {
+                let lang = String(opener.dropFirst(3))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let langToken = lang.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+                let shellLangs = ["aril-shell", "shell", "bash", "zsh", "console", "terminal", "sh"]
+                let isShell = shellLangs.contains { langToken == $0 || langToken.hasPrefix($0 + ":") }
+
+                // Same-line ```aril-shell cmd```
+                if isShell, opener.hasSuffix("```"), opener.count > 6 {
+                    let inner = String(opener.dropFirst(3).dropLast(3))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let parts = inner.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+                    if parts.count > 1 {
+                        let cmd = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if commands.contains(cmd) || langToken.hasPrefix("aril-shell") {
+                            i += 1
+                            continue
+                        }
+                    }
+                }
+
+                if isShell {
+                    var j = i + 1
+                    var body: [String] = []
+                    while j < lines.count {
+                        if lines[j].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                            j += 1
+                            break
+                        }
+                        body.append(lines[j])
+                        j += 1
+                    }
+                    let cmd = body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if commands.contains(cmd) || langToken.hasPrefix("aril-shell") {
+                        i = j
+                        continue
+                    }
+                }
+            }
+            out.append(lines[i])
+            i += 1
+        }
+        return out.joined(separator: "\n")
+    }
+
+    /// Bodies of all ``` fences regardless of language.
+    private func looseFenceBodies(in markdown: String) -> [String] {
+        let lines = markdown
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        var found: [String] = []
+        var i = 0
+        while i < lines.count {
+            let opener = lines[i].trimmingCharacters(in: .whitespaces)
+            i += 1
+            guard opener.hasPrefix("```") else { continue }
+            var body: [String] = []
+            while i < lines.count {
+                if lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                    i += 1
+                    break
+                }
+                body.append(lines[i])
+                i += 1
+            }
+            let text = body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { found.append(text) }
+        }
+        return found
+    }
+
+    private func appendOSAccessNote(sessionID: UUID, assistantID: UUID, note: String) {
+        updateSession(sessionID) { session in
+            guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+            let current = session.messages[m].content
+            let body = ChatMessage.stripActualCostFooter(current)
+            let footer = String(current.dropFirst(body.count))
+            let sep = (body.isEmpty || body.hasSuffix("\n")) ? "" : "\n"
+            session.messages[m].content = body + sep + "\n" + note + footer
+        }
+    }
+
+    private func replaceOSAccessRunningNote(
+        sessionID: UUID,
+        assistantID: UUID,
+        command: String,
+        with block: String
+    ) {
+        updateSession(sessionID) { session in
+            guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+            var text = session.messages[m].content
+            let running = "**OS Access** · running `\(command)`…"
+            if let range = text.range(of: running) {
+                text.replaceSubrange(range, with: block)
+            } else if !text.contains("**OS Access** · `\(command)`") {
+                let body = ChatMessage.stripActualCostFooter(text)
+                let footer = String(text.dropFirst(body.count))
+                let sep = (body.isEmpty || body.hasSuffix("\n")) ? "" : "\n"
+                text = body + sep + "\n" + block + footer
+            }
+            session.messages[m].content = text
+        }
+    }
+
+    /// Pull a concrete shell command from a cleaned user prompt (after @mentions are stripped).
+    /// Natural-language requests (e.g. “list files in current directory”) return nil so the
+    /// model can translate intent → command via ```aril-shell```.
+    private static func extractDirectShellCommand(from text: String) -> String? {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+
+        let leadIns = [
+            #"(?is)^(?:please\s+)?(?:can\s+you\s+)?(?:use\s+)?(?:to\s+)?(?:perform|run|execute)\s+(?:the\s+)?(?:following\s+)?(?:command\s*)?[:\-]?\s*"#,
+            #"(?is)^(?:please\s+)?run\s+(?:this\s+)?"#,
+        ]
+        for pattern in leadIns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(location: 0, length: (t as NSString).length)
+            if let match = regex.firstMatch(in: t, range: range), match.range.length > 0 {
+                t = (t as NSString).substring(from: match.range.length)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        if (t.hasPrefix("`") && t.hasSuffix("`")) || (t.hasPrefix("\"") && t.hasSuffix("\"")) || (t.hasPrefix("'") && t.hasSuffix("'")) {
+            t = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if t.contains("?") { return nil }
+        if t.components(separatedBy: .newlines).filter({ !$0.trimmingCharacters(in: .whitespaces).isEmpty }).count > 3 {
+            return nil
+        }
+
+        let tokens = t.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let firstRaw = tokens.first else { return nil }
+        let first = firstRaw.lowercased()
+
+        // Only short-circuit when the prompt already looks like a real argv[0].
+        // English verbs (“list”, “show”, …) must go to the model for translation.
+        let knownCommands: Set<String> = [
+            "ls", "dig", "host", "nslookup", "ping", "traceroute", "whoami", "id", "hostname",
+            "pwd", "df", "du", "ps", "top", "uname", "sw_vers", "date", "cal", "uptime",
+            "cat", "head", "tail", "wc", "file", "which", "type", "command", "echo", "printf",
+            "curl", "wget", "open", "stat", "find", "grep", "rg", "awk", "sed", "sort", "uniq",
+            "env", "printenv", "brew", "git", "ssh", "scp", "rsync", "nmap", "ifconfig",
+            "ip", "netstat", "lsof", "diskutil", "system_profiler", "defaults", "plutil",
+            "python3", "python", "node", "ruby", "perl", "swift", "bash", "zsh", "sh",
+        ]
+        let looksLikePath = first.hasPrefix("/") || first.hasPrefix("./") || first.hasPrefix("~/")
+        guard knownCommands.contains(first) || looksLikePath else { return nil }
+
+        // Reject prose that merely starts with a known word (e.g. “find out what…”).
+        let naturalFollowups: Set<String> = [
+            "out", "the", "a", "an", "my", "all", "me", "files", "file", "what", "which",
+            "how", "if", "whether", "any", "some", "this", "that", "current", "local",
+        ]
+        if tokens.count >= 2, naturalFollowups.contains(tokens[1].lowercased()) {
+            // Allow real commands like `find . -name` / `ls -la` / `dig aril.host`.
+            let second = tokens[1]
+            let okFlagOrTarget = second.hasPrefix("-")
+                || second.contains(".")
+                || second.hasPrefix("/")
+                || second.hasPrefix("~")
+                || second.hasPrefix("./")
+            if !okFlagOrTarget { return nil }
+        }
+
+        return t
+    }
+
+    private static func isBareShellPrompt(_ cleaned: String, command: String) -> Bool {
+        let c = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        if c.caseInsensitiveCompare(cmd) == .orderedSame { return true }
+        // Allow short wrappers like "run dig aril.host" after lead-in stripping already applied.
+        return c.count <= cmd.count + 12
     }
 
     /// `/cache` — report session-cache health; `compact` / `clear` match Preferences.
@@ -2826,15 +3672,60 @@ final class AppState: ObservableObject {
         availableUpdateVersion = release?.version
     }
 
-    /// Wipe every session and all Learning/judgement records. Destructive; only run
-    /// after the user confirms the `/reset` warning.
+    /// Wipe ungrouped sessions and all Learning/judgement records. Projects and
+    /// sessions filed under a project are kept — delete those via the sidebar
+    /// project context menu. Destructive; only run after the `/reset` warning.
     func performReset() async {
-        await deleteAllSessions()
+        await deleteUngroupedSessionsKeepingProjects()
         await deleteAllStoreRecords(includeWins: true)
         lastError = nil
-        appendLocalAssistantNote(
-            "**Reset complete** — all sessions and Learning entries were cleared."
-        )
+        let projectCount = projects.count
+        let kept = sessions.filter { $0.projectID != nil }.count
+        var detail = "**Reset complete** — ungrouped sessions and Learning entries were cleared."
+        if projectCount > 0 {
+            detail += " Kept \(projectCount) project\(projectCount == 1 ? "" : "s")"
+            if kept > 0 {
+                detail += " (\(kept) session\(kept == 1 ? "" : "s"))."
+            } else {
+                detail += "."
+            }
+            detail += " Delete a project from its sidebar right-click menu."
+        }
+        appendLocalAssistantNote(detail)
+    }
+
+    /// Remove sessions that are not filed under an existing project.
+    /// Does not call gateway `deleteAllSessions` (would wipe project sessions remotely).
+    private func deleteUngroupedSessionsKeepingProjects() async {
+        let projectIDs = Set(projects.map(\.id))
+        let kept = sessions.filter { session in
+            guard let pid = session.projectID else { return false }
+            return projectIDs.contains(pid)
+        }
+        let removedIDs = sessions
+            .map(\.id)
+            .filter { id in !kept.contains(where: { $0.id == id }) }
+
+        for id in removedIDs { deletedSessionIDs.insert(id) }
+        persistDeletedSessionIDs()
+
+        sessions = kept
+        if let selected = selectedSessionID, !kept.contains(where: { $0.id == selected }) {
+            selectedSessionID = nil
+        }
+        setDraft("")
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        compareResults = []
+        compareRouteCategory = nil
+        preferredCompareModel = nil
+        pendingAttachments = []
+        saveLocalSessions()
+
+        for id in removedIDs {
+            try? await client.deleteSession(baseURL: gatewayURL, id: id.uuidString.lowercased())
+        }
     }
 
     private var slashHelpText: String {
@@ -2946,95 +3837,138 @@ final class AppState: ObservableObject {
 
         var lines: [String] = ["### ARIL status", ""]
 
-        // Gateway
+        // Connectivity
+        let gatewayOK: Bool
+        var gatewayDetail: String
         if let health = try? await client.health(baseURL: gatewayURL) {
+            gatewayOK = true
             let ver = health.version ?? "?"
             let provider = health.chatProvider ?? "?"
-            lines.append("- **Gateway:** ✅ \(soloMode ? "Solo" : "Remote") · \(gatewayURL) · v\(ver) · provider \(provider)")
+            gatewayDetail = "\(soloMode ? "Solo" : "Remote") · \(gatewayURL) · v\(ver) · provider \(provider)"
         } else {
-            lines.append("- **Gateway:** ❌ not reachable at \(gatewayURL)")
+            gatewayOK = false
+            gatewayDetail = "not reachable at \(gatewayURL)"
         }
 
-        // OpenRouter
+        var openRouterOK = false
+        var openRouterDetail: String
         if openRouterConfigured {
             if let conn = try? await client.checkOpenRouterConnection(baseURL: gatewayURL) {
+                openRouterOK = conn.ready
                 let latency = conn.latencyMs.map { "\($0) ms" } ?? "—"
                 let credits = conn.creditsRemaining.map { String(format: "$%.2f", $0) } ?? "unknown"
-                lines.append("- **OpenRouter:** \(conn.ready ? "✅ ready" : "⚠️ not ready") · latency \(latency) · credits \(credits)")
+                openRouterDetail = "\(conn.ready ? "ready" : "not ready") · latency \(latency) · credits \(credits)"
             } else {
-                lines.append("- **OpenRouter:** ❌ connection check failed")
+                openRouterDetail = "connection check failed"
             }
         } else {
-            lines.append("- **OpenRouter:** ⚠️ no API key set (Preferences → Subscription)")
+            openRouterDetail = "no API key set (Preferences → Subscription)"
         }
 
-        // Local guardrails (Preferences → Subscription)
-        let sensitiveState = localGuardrailSensitiveInfo ? "✅ on (redact)" : "○ off"
-        let injectionState = localGuardrailPromptInjection ? "✅ on (block)" : "○ off"
-        lines.append("- **Sensitive Info guardrail:** \(sensitiveState)")
-        lines.append("- **Prompt Injection guardrail:** \(injectionState)")
+        let connectivityOK = gatewayOK && (openRouterConfigured ? openRouterOK : true)
+        lines.append("**Connectivity** \(connectivityOK ? "✅" : "❌")")
+        lines.append("- Gateway: \(gatewayDetail)")
+        lines.append("- OpenRouter: \(openRouterDetail)")
+        lines.append(
+            "- Web Search: \(webSearchEnabled ? "on" : "off") (Preferences → General, or `/web`)"
+        )
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
-        // Cache (session file + last prompt-cache outcome — same signals as the status footer)
+        // Guardrails
+        let guardrailsOn = localGuardrailSensitiveInfo || localGuardrailPromptInjection
+        lines.append("**Guardrails** \(guardrailsOn ? "✅" : "❌")")
+        lines.append(
+            "- Sensitive Info: \(localGuardrailSensitiveInfo ? "on (redact)" : "off")"
+        )
+        lines.append(
+            "- Prompt Injection: \(localGuardrailPromptInjection ? "on (block)" : "off")"
+        )
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        // Cache
         refreshSessionCacheStatus()
         let sessionHealth: String = {
             switch sessionCacheHealth {
-            case .healthy: return "✅ healthy"
-            case .ok: return "⚠️ ok (growing)"
-            case .warn: return "⚠️ warn (large)"
+            case .healthy: return "healthy"
+            case .ok: return "ok (growing)"
+            case .warn: return "warn (large)"
             }
         }()
-        lines.append("- **Session cache:** \(sessionHealth) · \(sessionCacheLabel)")
+        let cacheOK = sessionCacheHealth == .healthy || sessionCacheHealth == .ok
         let promptCacheLine: String = {
             switch lastCacheLabel {
             case "cached":
-                return "✅ last reply hit prompt cache"
+                return "last reply hit prompt cache"
             case "not cached":
-                return "○ last reply missed prompt cache"
+                return "last reply missed prompt cache"
             case "not eligible":
-                return "○ last reply not cache-eligible"
+                return "last reply not cache-eligible"
             default:
-                return "— no chat reply yet this launch"
+                return "no chat reply yet this launch"
             }
         }()
-        lines.append("- **Prompt cache:** \(promptCacheLine)")
+        lines.append("**Cache** \(cacheOK ? "✅" : "❌")")
+        lines.append("- Session: \(sessionHealth) · \(sessionCacheLabel)")
+        lines.append("- Prompt: \(promptCacheLine)")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
-        // Nmap managed server
+        // MCP
         refreshNmapInstalled()
-        let nmapState = nmapServerRunning ? "✅ running on port \(nmapServerManager.port)" : "○ stopped"
-        let nmapBin = nmapInstalled ? "nmap installed" : "nmap missing (brew install nmap)"
-        lines.append("- **Nmap MCP:** \(nmapState) · \(nmapBin)")
-
-        // Semgrep managed code-scan server
         refreshSemgrepInstalled()
-        let codeState = codeScanServerRunning ? "✅ running on port \(codeScanServerManager.port)" : "○ stopped"
+        let nmapState = nmapServerRunning ? "running on port \(nmapServerManager.port)" : "stopped"
+        let nmapBin = nmapInstalled ? "nmap installed" : "nmap missing (brew install nmap)"
+        let codeState = codeScanServerRunning ? "running on port \(codeScanServerManager.port)" : "stopped"
         let codeBin = semgrepInstalled ? "semgrep installed" : "semgrep missing (brew install semgrep)"
-        lines.append("- **Code Scan MCP:** \(codeState) · \(codeBin)")
+        let ready = mcpServers.filter(\.isReady).count
+        let enabled = mcpServers.filter(\.enabled).count
+        lines.append("**MCP** \(mcpEnabled ? "✅" : "❌")")
+        lines.append("- Servers: \(mcpEnabled ? "on" : "off") · \(ready) ready · \(enabled) enabled")
+        lines.append("- Nmap: \(nmapState) · \(nmapBin)")
+        lines.append("- Code Scan: \(codeState) · \(codeBin)")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
-
-        // MCP servers
-        if mcpEnabled {
-            let ready = mcpServers.filter(\.isReady).count
-            let enabled = mcpServers.filter(\.enabled).count
-            lines.append("- **MCP servers:** on · \(ready) ready · \(enabled) enabled")
+        // Skills
+        let enabledSkills = skills.filter(\.enabled)
+        let skillNames = enabledSkills.map(\.name).joined(separator: ", ")
+        let skillDetail = enabledSkills.isEmpty ? "none enabled" : skillNames
+        lines.append("**Skills** \(skillsEnabled ? "✅" : "❌")")
+        if skillsEnabled {
+            lines.append("- \(enabledSkills.count)/\(skills.count) enabled · \(skillDetail)")
         } else {
-            lines.append("- **MCP servers:** off")
+            lines.append("- off (\(enabledSkills.count)/\(skills.count) would be enabled)")
         }
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
-        // Latest release (GitHub)
+        // Version
         let current = appVersion
+        var versionMark = "✅"
+        var versionDetail: String
         if let latest = await fetchLatestReleaseTag() {
             let latestClean = latest.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
             if AppUpdateService.isNewer(latestClean, than: current) {
-                lines.append("- **Version:** ⚠️ \(current) installed · latest is \(latestClean) — click **Update** under sessions, or https://github.com/fizzball/ARIL/releases/latest")
+                versionMark = "❌"
+                versionDetail = "\(current) installed · latest is \(latestClean) — click **Update** under sessions, or https://github.com/fizzball/ARIL/releases/latest"
             } else if AppUpdateService.compareVersions(latestClean, current) == .orderedSame {
-                lines.append("- **Version:** ✅ \(current) (latest)")
+                versionDetail = "\(current) (latest)"
             } else {
-                // Running newer than published (dev / local build).
-                lines.append("- **Version:** \(current) (ahead of published \(latestClean))")
+                versionDetail = "\(current) (ahead of published \(latestClean))"
             }
         } else {
-            lines.append("- **Version:** \(current) (latest release check unavailable)")
+            versionMark = "❌"
+            versionDetail = "\(current) (latest release check unavailable)"
         }
+        lines.append("**Version** \(versionMark)")
+        lines.append("- \(versionDetail)")
 
         updateLastAssistantNote(id: noteID.id, text: lines.joined(separator: "\n"))
     }
@@ -3336,6 +4270,38 @@ final class AppState: ObservableObject {
 
         lastUserPromptForPrefer = sendText.isEmpty ? displayText : sendText
         let userDisplayNameForSend: String? = isRunningAutoEval ? Self.modelTestSenderLabel : nil
+
+        let skillMentions = parseSkillMentions(in: sendText)
+        let turnSkillIds = activeSkillIdsForTurn(mentionedIds: skillMentions.mentionedIds)
+        var skillSystemNotes: [String] = []
+        if turnSkillIds.contains(SkillConfig.osAccessId) {
+            skillSystemNotes.append(Self.osAccessCapabilityNote)
+            if skillMentions.mentionedIds.contains(SkillConfig.osAccessId) {
+                skillSystemNotes.append(
+                    "The user explicitly invoked @OS / OS Access for this turn. Interpret their request as an OS/shell task even when they use natural language (not a literal argv). Translate intent into the best shell command(s) and emit ```aril-shell``` blocks — for example “list files in current directory” → `ls -la`."
+                )
+            }
+        }
+        let documentMentioned = skillMentions.mentionedIds.contains(SkillConfig.documentExportId)
+            && turnSkillIds.contains(SkillConfig.documentExportId)
+        if documentMentioned {
+            skillSystemNotes.append(Self.documentExportCapabilityNote)
+            skillSystemNotes.append(
+                "The user invoked @Document / Document Export for this turn. Produce the document body in your reply; ARIL will open a Save dialog and write the PDF or Word file locally after you finish."
+            )
+        }
+
+        // Mentions while skills are off / skill disabled — warn once; do not execute skills.
+        let blockedSkillMentions = skillMentions.mentionedIds.filter { !isSkillActive($0) }
+        let skillsBlockedNote: String? = {
+            guard !blockedSkillMentions.isEmpty else { return nil }
+            let names = blockedSkillMentions.map { skill(id: $0)?.name ?? $0 }.joined(separator: ", ")
+            if !skillsEnabled {
+                return "**Skills are off** — \(names) will not run. Turn on **Use skills** in Preferences → Skills (or `/skills enable`)."
+            }
+            return "**Skill disabled** — \(names) is off. Enable it in Preferences → Skills (or `/skills enable <id>`)."
+        }()
+
         updateSession(sid) { session in
             session.messages.append(
                 ChatMessage(role: .user, content: displayText, displayName: userDisplayNameForSend)
@@ -3345,6 +4311,9 @@ final class AppState: ObservableObject {
                     (sendText.isEmpty ? pendingAttachments.first?.filename ?? "Attachment" : sendText).prefix(42)
                 )
             }
+        }
+        if let skillsBlockedNote {
+            appendLocalAssistantNote(skillsBlockedNote)
         }
         guard let idx = sessions.firstIndex(where: { $0.id == sid }) else { return }
         setDraft("")
@@ -3360,7 +4329,7 @@ final class AppState: ObservableObject {
         preferredCompareModel = nil
         lastCacheLabel = cacheEligible ? "not cached" : "not eligible"
 
-        let historyForAPI = messagesForAPI(from: sessions[idx].messages)
+        let historyForAPI = messagesForAPI(from: sessions[idx].messages, extraSystemNotes: skillSystemNotes)
 
         if Task.isCancelled { return }
 
@@ -3383,6 +4352,74 @@ final class AppState: ObservableObject {
             session.messages.append(ChatMessage(id: assistantID, role: .assistant, content: ""))
         }
         guard sessions.contains(where: { $0.id == sid }) else { return }
+
+        // @Document “save the results as PDF” — export the prior reply without a model turn.
+        // Skip when @OS is also in play so shell work can run first, then auto-export.
+        if documentMentioned,
+           turnSkillIds.contains(SkillConfig.documentExportId),
+           !skillMentions.mentionedIds.contains(SkillConfig.osAccessId),
+           attachmentsForSend.isEmpty,
+           Self.isDocumentExportPriorIntent(skillMentions.cleanedPrompt) {
+            let format = Self.inferDocumentExportFormat(from: skillMentions.cleanedPrompt)
+            updateSession(sid) { session in
+                session.messages.removeAll { $0.id == assistantID }
+            }
+            let exported = exportViaDocumentSkill(format: format)
+            if exported {
+                recordExchange(
+                    prompt: displayText,
+                    response: "document-export \(format.rawValue)",
+                    model: "document-export",
+                    mode: routeMode.label,
+                    status: .completed,
+                    latencyMs: lastLatencyMs
+                )
+            }
+            await persistSelectedSession()
+            await refreshHealth()
+            return
+        }
+
+        // Bare shell prompts: run immediately via OS Access and skip the model when
+        // the message is essentially just a command (optionally with @OS).
+        if turnSkillIds.contains(SkillConfig.osAccessId),
+           attachmentsForSend.isEmpty,
+           let directCmd = Self.extractDirectShellCommand(from: skillMentions.cleanedPrompt),
+           Self.isBareShellPrompt(skillMentions.cleanedPrompt, command: directCmd) {
+            updateSession(sid) { session in
+                if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                    session.messages[m].content = "**OS Access** · running `\(directCmd)`…\n"
+                }
+            }
+            do {
+                let result = try await ShellAccessService.run(directCmd)
+                let body = ShellAccessService.formatResult(result)
+                updateSession(sid) { session in
+                    if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                        session.messages[m].content = body
+                    }
+                }
+                recordExchange(
+                    prompt: displayText,
+                    response: body,
+                    model: "os-access",
+                    mode: routeMode.label,
+                    status: .completed,
+                    latencyMs: lastLatencyMs
+                )
+                await persistSelectedSession()
+                await refreshHealth()
+            } catch {
+                let msg = "**OS Access** failed — \(error.localizedDescription)"
+                updateSession(sid) { session in
+                    if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                        session.messages[m].content = msg
+                    }
+                }
+                lastError = error.localizedDescription
+            }
+            return
+        }
 
         let attachmentDTOs = attachmentsForSend.map {
             AttachmentDTO(
@@ -3432,18 +4469,18 @@ final class AppState: ObservableObject {
             mcpServers: mcpForRequest
         )
 
-        // Stream token UI updates are async; track receipt so we never fall back to
-        // /v1/chat after the gateway already wrote a chat_transaction.
+        // Stream token UI updates are applied on MainActor and awaited so post-stream
+        // skill fulfillment (OS Access) sees the complete reply text.
         let streamTokens = StreamTokenProbe()
+        let streamAssembly = StreamTextAssembly()
         do {
             let done = try await client.chatStream(
                 baseURL: gatewayURL,
                 request: request,
                 onToken: { [weak self] token in
                     streamTokens.mark()
-                    // Hop to MainActor per chunk so the bubble grows as SSE arrives
-                    // (do not buffer until `done`).
-                    Task { @MainActor in
+                    streamAssembly.append(token)
+                    await MainActor.run {
                         guard let self,
                               let i = self.sessions.firstIndex(where: { $0.id == sid }),
                               let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
@@ -3457,7 +4494,7 @@ final class AppState: ObservableObject {
                     }
                 },
                 onMCPStatus: { [weak self] server, tool, phase, note in
-                    Task { @MainActor in
+                    await MainActor.run {
                         guard let self,
                               let i = self.sessions.firstIndex(where: { $0.id == sid }),
                               let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
@@ -3482,6 +4519,7 @@ final class AppState: ObservableObject {
                             }
                         }()
                         guard !line.isEmpty else { return }
+                        streamAssembly.append(line)
                         var next = self.sessions
                         let existing = next[i].messages[m].content
                         if !existing.contains(line) {
@@ -3494,7 +4532,20 @@ final class AppState: ObservableObject {
             if Task.isCancelled { return }
             // Persist any generated image to disk before it gets stripped from history.
             persistInlineImages(sessionID: sid, assistantID: assistantID)
-            let streamedText = sessions.first(where: { $0.id == sid })?
+
+            // Prefer the assembled stream text if the session message is somehow shorter
+            // (guards against any remaining MainActor publish lag).
+            let assembled = streamAssembly.snapshot()
+            if !assembled.isEmpty {
+                updateSession(sid) { session in
+                    guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+                    if session.messages[m].content.count < assembled.count {
+                        session.messages[m].content = assembled
+                    }
+                }
+            }
+
+            var streamedText = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
             // Empty `done` (model returned nothing) — recover via non-stream once.
             // Server dedupes chat_transaction within 60s, so this stays Learning-safe.
@@ -3502,6 +4553,22 @@ final class AppState: ObservableObject {
                !streamTokens.sawTokens {
                 throw ARILAPIError.stream("No response received from the model. Try sending again.")
             }
+
+            // OS Access only when the skill is actually active (master + skill on).
+            // Mentions / ```aril-shell``` alone must not bypass Preferences → Skills.
+            let fulfillSource = assembled.count >= streamedText.count ? assembled : streamedText
+            let shouldFulfillOS = isSkillActive(SkillConfig.osAccessId)
+            if shouldFulfillOS {
+                await fulfillOSAccessShellBlocks(
+                    sessionID: sid,
+                    assistantID: assistantID,
+                    contentOverride: fulfillSource,
+                    userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                )
+                streamedText = sessions.first(where: { $0.id == sid })?
+                    .messages.first(where: { $0.id == assistantID })?.content ?? streamedText
+            }
+
             lastError = nil
             lastCacheLabel = (done.cached ?? false) ? "cached" : "not cached"
             if let ms = done.latencyMs {
@@ -3518,6 +4585,24 @@ final class AppState: ObservableObject {
                 inputTokens: done.inputTokens,
                 outputTokens: done.outputTokens
             )
+            if shouldFulfillOS {
+                await fulfillOSAccessShellBlocks(
+                    sessionID: sid,
+                    assistantID: assistantID,
+                    userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                )
+                streamedText = sessions.first(where: { $0.id == sid })?
+                    .messages.first(where: { $0.id == assistantID })?.content ?? streamedText
+            }
+            if documentMentioned {
+                fulfillDocumentExport(
+                    sessionID: sid,
+                    assistantID: assistantID,
+                    userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                )
+                streamedText = sessions.first(where: { $0.id == sid })?
+                    .messages.first(where: { $0.id == assistantID })?.content ?? streamedText
+            }
             recordExchange(
                 prompt: displayText,
                 response: streamedText,
@@ -3558,6 +4643,18 @@ final class AppState: ObservableObject {
             if alreadyHasContent || streamTokens.sawTokens {
                 lastError = nil
                 persistInlineImages(sessionID: sid, assistantID: assistantID)
+                let partialText = sessions.first(where: { $0.id == sid })?
+                    .messages.first(where: { $0.id == assistantID })?.content ?? ""
+                let assembled = streamAssembly.snapshot()
+                let source = assembled.count >= partialText.count ? assembled : partialText
+                if isSkillActive(SkillConfig.osAccessId) {
+                    await fulfillOSAccessShellBlocks(
+                        sessionID: sid,
+                        assistantID: assistantID,
+                        contentOverride: source,
+                        userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                    )
+                }
                 applyActualCost(
                     sessionID: sid,
                     assistantID: assistantID,
@@ -3566,6 +4663,20 @@ final class AppState: ObservableObject {
                     inputTokens: nil,
                     outputTokens: nil
                 )
+                if isSkillActive(SkillConfig.osAccessId) {
+                    await fulfillOSAccessShellBlocks(
+                        sessionID: sid,
+                        assistantID: assistantID,
+                        userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                    )
+                }
+                if documentMentioned {
+                    fulfillDocumentExport(
+                        sessionID: sid,
+                        assistantID: assistantID,
+                        userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                    )
+                }
                 let responseText = sessions.first(where: { $0.id == sid })?
                     .messages.first(where: { $0.id == assistantID })?.content ?? ""
                 recordExchange(
@@ -3589,6 +4700,14 @@ final class AppState: ObservableObject {
                     }
                 }
                 persistInlineImages(sessionID: sid, assistantID: assistantID)
+                if isSkillActive(SkillConfig.osAccessId) {
+                    await fulfillOSAccessShellBlocks(
+                        sessionID: sid,
+                        assistantID: assistantID,
+                        contentOverride: response.message.content,
+                        userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                    )
+                }
                 applyActualCost(
                     sessionID: sid,
                     assistantID: assistantID,
@@ -3597,6 +4716,20 @@ final class AppState: ObservableObject {
                     inputTokens: response.inputTokens,
                     outputTokens: response.outputTokens
                 )
+                if isSkillActive(SkillConfig.osAccessId) {
+                    await fulfillOSAccessShellBlocks(
+                        sessionID: sid,
+                        assistantID: assistantID,
+                        userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                    )
+                }
+                if documentMentioned {
+                    fulfillDocumentExport(
+                        sessionID: sid,
+                        assistantID: assistantID,
+                        userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
+                    )
+                }
                 if routeMode == .auto, !response.model.isEmpty {
                     selectedModel = response.model
                 }
@@ -4462,5 +5595,24 @@ private final class StreamTokenProbe: @unchecked Sendable {
         lock.lock()
         _saw = true
         lock.unlock()
+    }
+}
+
+/// Thread-safe concatenation of streamed reply text for post-stream skill fulfillment.
+private final class StreamTextAssembly: @unchecked Sendable {
+    private let lock = NSLock()
+    private var text = ""
+
+    func append(_ chunk: String) {
+        guard !chunk.isEmpty else { return }
+        lock.lock()
+        text += chunk
+        lock.unlock()
+    }
+
+    func snapshot() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return text
     }
 }

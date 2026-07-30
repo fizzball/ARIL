@@ -15,9 +15,16 @@ struct ARILApp: App {
                 .frame(minWidth: 980, minHeight: 640)
                 .task {
                     statusBar.setEnabled(appState.showInMenuBar)
+                    statusBar.setBusy(appState.isSending)
                 }
                 .onChange(of: appState.showInMenuBar) { _, enabled in
                     statusBar.setEnabled(enabled)
+                    if enabled {
+                        statusBar.setBusy(appState.isSending)
+                    }
+                }
+                .onChange(of: appState.isSending) { _, busy in
+                    statusBar.setBusy(busy)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     appState.shutdown()

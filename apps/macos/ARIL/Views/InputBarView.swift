@@ -12,11 +12,67 @@ struct InputBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if state.slashMenuVisible {
+            if state.skillMentionMenuVisible {
+                skillMentionPalette
+            } else if state.slashMenuVisible {
                 slashCommandPalette
             }
             inputCard
         }
+    }
+
+    private var skillMentionPalette: some View {
+        let skills = state.filteredSkillMentions
+        let selected = min(max(state.skillMentionMenuIndex, 0), max(skills.count - 1, 0))
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(skills.enumerated()), id: \.element.id) { idx, skill in
+                Button {
+                    state.skillMentionMenuIndex = idx
+                    state.insertSelectedSkillMention()
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("@\(skill.primaryMentionTag)")
+                            .font(ARILTheme.bodyFont)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(theme.palette.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(skill.name)
+                                .font(ARILTheme.captionFont)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(theme.palette.text)
+                            Text(skill.summary)
+                                .font(ARILTheme.captionFont)
+                                .foregroundStyle(theme.palette.textMuted)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        idx == selected
+                            ? theme.palette.accent.opacity(0.16)
+                            : Color.clear
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if idx < skills.count - 1 {
+                    Divider().opacity(0.4)
+                }
+            }
+        }
+        .background(theme.palette.backgroundElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(theme.palette.hairline, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(theme.palette.colorScheme == .dark ? 0.35 : 0.10), radius: 12, y: 4)
+        .frame(maxWidth: 520, alignment: .leading)
     }
 
     private var slashCommandPalette: some View {
@@ -89,13 +145,6 @@ struct InputBarView: View {
                             .foregroundStyle(theme.palette.accent)
                             .help("Detected prompt category")
                     }
-
-                    Toggle(isOn: $state.webSearchEnabled) {
-                        Text("Web")
-                            .font(ARILTheme.captionFont)
-                    }
-                    .toggleStyle(.checkbox)
-                    .help("Enable OpenRouter live web search for this send")
 
                     Spacer(minLength: 0)
                 }
@@ -191,6 +240,10 @@ struct InputBarView: View {
                         }
                     }
                     .onKeyPress(.upArrow) {
+                        if state.skillMentionMenuVisible {
+                            state.skillMentionMenuMove(-1)
+                            return .handled
+                        }
                         if state.slashMenuVisible {
                             state.slashMenuMove(-1)
                             return .handled
@@ -200,6 +253,10 @@ struct InputBarView: View {
                         return state.recallPreviousPrompt() ? .handled : .ignored
                     }
                     .onKeyPress(.downArrow) {
+                        if state.skillMentionMenuVisible {
+                            state.skillMentionMenuMove(1)
+                            return .handled
+                        }
                         if state.slashMenuVisible {
                             state.slashMenuMove(1)
                             return .handled
@@ -208,6 +265,10 @@ struct InputBarView: View {
                         return state.recallNextPrompt() ? .handled : .ignored
                     }
                     .onKeyPress(.tab) {
+                        if state.skillMentionMenuVisible {
+                            state.insertSelectedSkillMention()
+                            return .handled
+                        }
                         if state.slashMenuVisible {
                             state.insertSelectedSlash()
                             return .handled
@@ -215,6 +276,10 @@ struct InputBarView: View {
                         return .ignored
                     }
                     .onKeyPress(.escape) {
+                        if state.skillMentionMenuVisible {
+                            state.dismissSkillMentionMenu()
+                            return .handled
+                        }
                         if state.slashMenuVisible {
                             state.dismissSlashMenu()
                             return .handled
@@ -228,7 +293,9 @@ struct InputBarView: View {
                         return .handled
                     }
                     .onSubmit {
-                        if state.slashMenuVisible {
+                        if state.skillMentionMenuVisible {
+                            state.insertSelectedSkillMention()
+                        } else if state.slashMenuVisible {
                             state.executeSelectedSlash()
                         } else {
                             state.send()

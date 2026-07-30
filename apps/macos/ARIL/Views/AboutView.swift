@@ -73,7 +73,10 @@ struct AboutView: View {
 
     private static let changelog: [ChangelogEntry] = [
         ChangelogEntry(version: "0.4.11", changes: [
-            "New ARIL app icon and website logo based on the letter-A routing mark",
+            "Skills preferences + /skills — Document Export (PDF/Word) and OS Access (local shell)",
+            "Type @ in the prompt to pick a skill; skills also apply from context when enabled",
+            "Adaptive mesh app icon; chat avatars tint by selected model",
+            "Menu bar icon uses a high-contrast template mesh (pulses while busy)",
             "Website Help page at aril.host/help, linked from the macOS Help menu",
             "Preferences → Appearance: choose the app text size and typeface",
         ]),
@@ -126,7 +129,7 @@ struct AboutView: View {
         ]),
         ChangelogEntry(version: "0.4.4", changes: [
             "Session history no longer duplicates image turns on launch — client and gateway dedupe restored transcripts",
-            "Toolbar scroll-to-bottom button (↓) next to Web jumps to the latest message",
+            "Toolbar scroll-to-bottom button (↓) jumps to the latest message",
         ]),
         ChangelogEntry(version: "0.4.3", changes: [
             "Mermaid diagrams render reliably in-chat (classic WebKit loader); models are told ARIL can display diagrams so they stop pointing at mermaid.live",
