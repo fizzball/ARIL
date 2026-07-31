@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       skip_gateway:
-        description: "Skip gateway rebuild (use cached artifact — not recommended)"
+        description: "Skip gateway rebuild"
         required: false
         default: "false"
 
