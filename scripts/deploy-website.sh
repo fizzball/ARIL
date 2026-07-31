@@ -42,9 +42,21 @@ echo "-> Deploying website to ${USER}@${HOST}:${REMOTE} (port ${PORT})..."
 
 RSYNC_SSH="ssh -p ${PORT} -o StrictHostKeyChecking=accept-new"
 
-rsync -avz --delete --chmod=D755,F644 \
+# GNU rsync (Linux CI) supports --chmod=D755,F644; macOS/BSD rsync does not.
+RSYNC_CHMOD=()
+if rsync --help 2>&1 | grep -q -- '--chmod'; then
+  RSYNC_CHMOD=(--chmod=D755,F644)
+fi
+
+rsync -avz --delete "${RSYNC_CHMOD[@]}" \
   -e "$RSYNC_SSH" \
   "$WEB/" \
   "${USER}@${HOST}:${REMOTE}/"
+
+# Ensure the web server can read what we just published (needed when --chmod
+# is unavailable, or when the local umask created 700/600 paths).
+ssh -p "${PORT}" -o StrictHostKeyChecking=accept-new \
+  "${USER}@${HOST}" \
+  "find '${REMOTE}' -type d -exec chmod 755 {} \; ; find '${REMOTE}' -type f -exec chmod 644 {} \;"
 
 echo "-> Done. Site: https://aril.host/"
