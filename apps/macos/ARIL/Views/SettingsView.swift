@@ -291,6 +291,36 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Slow-response fallback") {
+                Picker(
+                    "First-token timeout",
+                    selection: Binding(
+                        get: { state.slowResponseFallbackSeconds },
+                        set: { state.setSlowResponseFallbackSeconds($0) }
+                    )
+                ) {
+                    Text("Off").tag(0)
+                    ForEach(Array(stride(from: 15, through: 300, by: 15)), id: \.self) { seconds in
+                        Text("\(seconds)s").tag(seconds)
+                    }
+                }
+                Text("When set (default 30s), Auto cancels a hang with no first token and retries once on a faster peer. Off disables fallback entirely. Judge is never switched.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Also use in Manual mode",
+                    isOn: Binding(
+                        get: { state.slowResponseFallbackInManual },
+                        set: { state.setSlowResponseFallbackInManual($0) }
+                    )
+                )
+                .disabled(state.slowResponseFallbackSeconds == 0)
+                Text("Manual stays on your locked model unless this is on and a timeout is set.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Menu bar") {
                 Toggle(
                     "Show ARIL in the menu bar",

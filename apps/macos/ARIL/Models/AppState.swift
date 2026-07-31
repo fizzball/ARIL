@@ -134,6 +134,10 @@ final class AppState: ObservableObject {
     @Published var showInMenuBar: Bool = false
     /// When on, reopen the most recent session on launch instead of starting fresh (Preferences).
     @Published var openLastSessionOnStartup: Bool = false
+    /// First-token watchdog: `0` = Off, else 15…300 seconds (default 30). Auto retries on a faster peer when set.
+    @Published var slowResponseFallbackSeconds: Int = 30
+    /// When on (and timeout is not Off), Manual mode also uses slow-response fallback.
+    @Published var slowResponseFallbackInManual: Bool = false
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
@@ -230,9 +234,15 @@ final class AppState: ObservableObject {
     @Published var webSearchEnabled: Bool = true
     /// Bumped to request MessageListView scroll to the latest message.
     @Published var scrollMessagesToBottomToken: Int = 0
+    /// Bumped to request MessageListView scroll to the first message.
+    @Published var scrollMessagesToTopToken: Int = 0
 
     func requestScrollMessagesToBottom() {
         scrollMessagesToBottomToken &+= 1
+    }
+
+    func requestScrollMessagesToTop() {
+        scrollMessagesToTopToken &+= 1
     }
     @Published var userDisplayName: String
     @Published var showRoutingAnalysis: Bool = false
@@ -324,6 +334,14 @@ final class AppState: ObservableObject {
         sessions.first { $0.id == selectedSessionID }
     }
 
+    /// True when the selected session has Incognito enabled.
+    var isIncognitoEnabled: Bool {
+        selectedSession?.incognitoEnabled ?? false
+    }
+
+    /// Prompt snippets captured during incognito sessions (for wiping Learning rows).
+    private var incognitoPromptSnippets: [UUID: Set<String>] = [:]
+
     var isAnalysing: Bool {
         if case .analysing = analysisStatus { return true }
         return isPreviewing
@@ -387,6 +405,11 @@ final class AppState: ObservableObject {
         showInMenuBar = defaults.object(forKey: "aril.showInMenuBar") as? Bool ?? false
         openLastSessionOnStartup = defaults.object(forKey: "aril.openLastSessionOnStartup") as? Bool ?? false
         webSearchEnabled = defaults.object(forKey: "aril.webSearchEnabled") as? Bool ?? true
+        slowResponseFallbackSeconds = Self.clampedSlowResponseFallbackSeconds(
+            defaults.object(forKey: "aril.slowResponseFallbackSeconds") as? Int ?? 30
+        )
+        slowResponseFallbackInManual =
+            defaults.object(forKey: "aril.slowResponseFallbackInManual") as? Bool ?? false
         mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
         mcpServers = Self.loadMCPServers()
         skillsEnabled = defaults.object(forKey: "aril.skillsEnabled") as? Bool ?? true
@@ -402,11 +425,14 @@ final class AppState: ObservableObject {
         loadDeletedSessionIDs()
         // Restore history synchronously so the first frame never looks empty.
         loadLocalSessions()
+        // Incognito never survives quit — clear any stale flag from older caches.
+        clearRestoredIncognitoFlags()
         handleSessionCacheOnLaunch()
         // Don't make first paint wait for gateway/bootstrap just to show a blank chat.
         if !openLastSessionOnStartup, sessions.first?.messages.isEmpty != true {
             createSession()
         }
+        ensureSelectableSession()
         // Seed built-in rates immediately so Preferences pricing isn’t blank
         // before the gateway answers (or when no OpenRouter key is configured).
         applyDefaultModelPricing()
@@ -459,6 +485,27 @@ final class AppState: ObservableObject {
     func setWebSearchEnabled(_ enabled: Bool) {
         webSearchEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "aril.webSearchEnabled")
+    }
+
+    /// Clamp first-token fallback timeout: `0` (Off) or `15…300`.
+    static func clampedSlowResponseFallbackSeconds(_ value: Int) -> Int {
+        if value <= 0 { return 0 }
+        if value < 15 { return 15 }
+        return min(300, value)
+    }
+
+    func setSlowResponseFallbackSeconds(_ value: Int) {
+        let clamped = Self.clampedSlowResponseFallbackSeconds(value)
+        slowResponseFallbackSeconds = clamped
+        UserDefaults.standard.set(clamped, forKey: "aril.slowResponseFallbackSeconds")
+        if clamped == 0 {
+            // Timeout Off — Manual opt-in is meaningless until a timeout is set again.
+        }
+    }
+
+    func setSlowResponseFallbackInManual(_ enabled: Bool) {
+        slowResponseFallbackInManual = enabled
+        UserDefaults.standard.set(enabled, forKey: "aril.slowResponseFallbackInManual")
     }
 
     func setBudgetEnabled(_ enabled: Bool) {
@@ -578,20 +625,23 @@ final class AppState: ObservableObject {
     }
 
     private func sanitizedSessionsForCache() -> [ChatSession] {
-        var cleaned = sessions
-        for i in cleaned.indices {
-            cleaned[i].deduplicateMessages()
-            cleaned[i].messages = cleaned[i].messages.map { message in
+        // Incognito sessions stay in memory for context but are never written to disk.
+        var cleaned: [ChatSession] = []
+        for session in sessions where !session.incognitoEnabled {
+            var copy = session
+            copy.deduplicateMessages()
+            copy.messages = copy.messages.map { message in
                 ChatMessage(role: message.role, content: Self.sanitizeContentForStorage(message.content))
             }
-            cleaned[i].recomputeTotalCost()
+            copy.recomputeTotalCost()
+            cleaned.append(copy)
         }
         return cleaned
     }
 
     private func sessionsNeedStorageSanitization(_ sessions: [ChatSession]) -> Bool {
         sessions.contains { session in
-            session.messages.contains { message in
+            !session.incognitoEnabled && session.messages.contains { message in
                 Self.sanitizeContentForStorage(message.content) != message.content
             }
         }
@@ -907,7 +957,7 @@ final class AppState: ObservableObject {
 
     /// Always-on note so models emit Mermaid fences instead of “I can’t render diagrams”.
     static let platformCapabilityNote = """
-        ARIL renders Mermaid, SVG, and ASCII diagrams directly in this chat UI. When the user explicitly asks for a diagram or flowchart, emit a complete fenced code block (for example ```mermaid … ```) using valid Mermaid syntax (use `-->` for arrows, not `|>`). Do not say you cannot display graphics, and do not tell the user to paste into mermaid.live, VS Code, or other external tools. When MCP tools are available for the task, call those tools instead of inventing a Mermaid flowchart of the workflow.
+        ARIL renders Mermaid, SVG, and ASCII diagrams, plus sandboxed HTML/JavaScript previews, directly in this chat UI. When the user explicitly asks for a diagram or flowchart, emit a complete fenced code block (for example ```mermaid … ```) using valid Mermaid syntax (use `-->` for arrows, not `|>`). For interactive HTML demos use ```html … ``` (or ```html-preview … ```). For runnable JavaScript snippets use ```js-preview … ``` or ```javascript-preview … ``` — plain ```javascript ``` stays as code only. Previews run offline in a sandbox (no network). Do not say you cannot display graphics or previews, and do not tell the user to paste into mermaid.live, CodePen, VS Code, or other external tools. When MCP tools are available for the task, call those tools instead of inventing a Mermaid flowchart of the workflow.
         """
 
     static let osAccessCapabilityNote = """
@@ -969,6 +1019,8 @@ final class AppState: ObservableObject {
         latencyMs: Int? = nil,
         errorMessage: String? = nil
     ) {
+        // Incognito — do not retain prompt/response text in the in-memory exchange log.
+        if isIncognitoEnabled { return }
         let entry = ExchangeLogEntry(
             prompt: prompt,
             response: response,
@@ -1454,6 +1506,7 @@ final class AppState: ObservableObject {
         if !openLastSessionOnStartup, sessions.first?.messages.isEmpty != true {
             createSession()
         }
+        ensureSelectableSession()
         saveLocalSessions()
         // Always keep default rates available; overlay live OpenRouter pricing only when a key is set.
         applyDefaultModelPricing()
@@ -1660,6 +1713,8 @@ final class AppState: ObservableObject {
     }
 
     func createSession() {
+        let previousID = selectedSessionID
+        let wipePrevious = selectedSession?.incognitoEnabled == true
         let session = ChatSession(title: "New session", messages: [])
         // Reassign the array so @Published / sidebar ForEach always refresh.
         var next = sessions
@@ -1677,6 +1732,9 @@ final class AppState: ObservableObject {
         saveLocalSessions()
         objectWillChange.send()
         Task { await persistSelectedSession() }
+        if wipePrevious, let previousID {
+            Task { await wipeIncognitoSession(previousID) }
+        }
     }
 
     /// Create a new session already filed under `projectID`.
@@ -1685,6 +1743,8 @@ final class AppState: ObservableObject {
             createSession()
             return
         }
+        let previousID = selectedSessionID
+        let wipePrevious = selectedSession?.incognitoEnabled == true
         let session = ChatSession(title: "New session", messages: [], projectID: projectID)
         var next = sessions
         next.insert(session, at: 0)
@@ -1702,6 +1762,132 @@ final class AppState: ObservableObject {
         saveLocalSessions()
         objectWillChange.send()
         Task { await persistSelectedSession() }
+        if wipePrevious, let previousID {
+            Task { await wipeIncognitoSession(previousID) }
+        }
+    }
+
+    /// Select a session, wiping the previous one when it was Incognito.
+    func selectSession(_ id: UUID) {
+        guard id != selectedSessionID else { return }
+        let previousID = selectedSessionID
+        let wipePrevious = selectedSession?.incognitoEnabled == true
+        selectedSessionID = id
+        setDraft("")
+        preview = nil
+        showIntelligencePanel = false
+        analysisStatus = .idle
+        compareResults = []
+        compareRouteCategory = nil
+        preferredCompareModel = nil
+        pendingAttachments = []
+        historyNavIndex = nil
+        historyStash = ""
+        objectWillChange.send()
+        if wipePrevious, let previousID {
+            Task { await wipeIncognitoSession(previousID) }
+        }
+    }
+
+    /// Toggle Incognito on the selected session (context stays; wipe on end/quit).
+    func setIncognitoEnabled(_ enabled: Bool) {
+        ensureSession()
+        guard let sid = selectedSessionID,
+              let idx = sessions.firstIndex(where: { $0.id == sid })
+        else { return }
+        var next = sessions
+        next[idx].incognitoEnabled = enabled
+        sessions = next
+        objectWillChange.send()
+    }
+
+    /// After wiping Incognito on quit, launch can restore an empty list or a dangling
+    /// selection — always land on a real session so the Incognito control stays usable.
+    private func ensureSelectableSession() {
+        if let selectedSessionID, sessions.contains(where: { $0.id == selectedSessionID }) {
+            return
+        }
+        if sessions.isEmpty {
+            createSession()
+        } else {
+            reconcileSelection()
+        }
+    }
+
+    /// Incognito is session-scoped and wiped on quit; never rehydrate the flag from disk.
+    private func clearRestoredIncognitoFlags() {
+        guard sessions.contains(where: \.incognitoEnabled) else { return }
+        var next = sessions
+        for i in next.indices where next[i].incognitoEnabled {
+            next[i].incognitoEnabled = false
+        }
+        sessions = next
+    }
+
+    private static func incognitoSnippet(from text: String) -> String {
+        String(
+            text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+                .prefix(120)
+        )
+    }
+
+    private func noteIncognitoPrompt(_ text: String, sessionID: UUID) {
+        let snippet = Self.incognitoSnippet(from: text)
+        guard !snippet.isEmpty else { return }
+        var set = incognitoPromptSnippets[sessionID] ?? []
+        set.insert(snippet)
+        incognitoPromptSnippets[sessionID] = set
+    }
+
+    /// Remove an Incognito session and its Learning/log references. Spend ledger is kept.
+    func wipeIncognitoSession(_ id: UUID) async {
+        let snippets = incognitoPromptSnippets[id] ?? []
+        // Also include user-message snippets still in memory (if the session hasn't been deleted yet).
+        var allSnippets = snippets
+        if let session = sessions.first(where: { $0.id == id }) {
+            for message in session.messages where message.role == .user {
+                let snip = Self.incognitoSnippet(from: message.bodyWithoutCostFooter)
+                if !snip.isEmpty { allSnippets.insert(snip) }
+            }
+        }
+        incognitoPromptSnippets[id] = nil
+
+        // Drop in-memory exchange log rows that quote these prompts.
+        if !allSnippets.isEmpty {
+            exchangeLog.removeAll { entry in
+                let snip = Self.incognitoSnippet(from: entry.prompt)
+                return allSnippets.contains(snip)
+                    || allSnippets.contains(where: { $0.hasPrefix(String(snip.prefix(40))) || snip.hasPrefix(String($0.prefix(40))) })
+            }
+        }
+
+        await wipeIncognitoStoreRecords(sessionID: id, snippets: allSnippets)
+        await deleteSession(id)
+    }
+
+    private func wipeIncognitoStoreRecords(sessionID: UUID, snippets: Set<String>) async {
+        let sid = sessionID.uuidString.lowercased()
+        if storeRecords.isEmpty {
+            await loadStoreBrowser()
+        }
+        let matches = storeRecords.filter { rec in
+            if (rec.sessionId ?? "").lowercased() == sid { return true }
+            guard !snippets.isEmpty else { return false }
+            let snippet = rec.promptSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
+            if snippets.contains(snippet) { return true }
+            return snippets.contains { known in
+                known.hasPrefix(String(snippet.prefix(40))) || snippet.hasPrefix(String(known.prefix(40)))
+            }
+        }
+        for rec in matches {
+            // Keep Prefer-win aggregates; only drop Learning rows that reference the chat.
+            guard rec.kind == "judgement" || rec.kind == "analysis_cache" || rec.kind == "chat_transaction"
+            else { continue }
+            try? await client.deleteStoreRecord(baseURL: gatewayURL, id: rec.id)
+            storeRecords.removeAll { $0.id == rec.id }
+            classifications.removeAll { $0.id == rec.id }
+        }
     }
 
     @discardableResult
@@ -2385,6 +2571,127 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(model, forKey: "aril.lastModel")
     }
 
+    /// Reasoning / deep-think models often need long TTFT — never auto-fallback them.
+    private static func isReasoningModelID(_ modelID: String) -> Bool {
+        let hay = modelID.lowercased()
+        if hay.contains("reason") || hay.contains("thinking") { return true }
+        if hay.contains("/o1") || hay.hasSuffix("-o1") || hay.contains("o1-") { return true }
+        if hay.contains("/o3") || hay.hasSuffix("-o3") || hay.contains("o3-") { return true }
+        if hay.contains("r1") && (hay.contains("deepseek") || hay.contains("reasoner")) { return true }
+        return false
+    }
+
+    /// Prefer snappy catalog leaves when analysis peers are unavailable.
+    private static func looksLikeFastFallbackModel(_ modelID: String) -> Bool {
+        let hay = modelID.lowercased()
+        if hay.contains("gpt-4.1-mini") || hay.contains("gpt-4o-mini") { return true }
+        if hay.contains("haiku") { return true }
+        if hay.contains("flash") { return true }
+        if hay.contains("gemini") && hay.contains("lite") { return true }
+        return false
+    }
+
+    /// Pick a different model after a first-token stall (one retry only).
+    private func resolveSlowResponseFallbackModel(stalledModel: String) -> String? {
+        let stalled = stalledModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let routes = preview?.routes ?? []
+
+        if let idx = routes.firstIndex(where: { $0.modelId == stalled }) {
+            for peer in routes.suffix(from: idx + 1) {
+                let id = peer.modelId
+                if id != stalled, !Self.isReasoningModelID(id) { return id }
+            }
+        } else if let peer = routes.first(where: {
+            $0.modelId != stalled && !Self.isReasoningModelID($0.modelId)
+        }) {
+            return peer.modelId
+        }
+
+        let preferred = [
+            "openai/gpt-4.1-mini",
+            "openai/gpt-4o-mini",
+            "google/gemini-2.5-flash",
+            "google/gemini-2.0-flash-001",
+            "anthropic/claude-3.5-haiku",
+            "anthropic/claude-3-haiku",
+        ]
+        for id in preferred where modelCatalog.contains(id) && id != stalled && !Self.isReasoningModelID(id) {
+            return id
+        }
+        if let fast = modelCatalog.first(where: {
+            $0 != stalled && Self.looksLikeFastFallbackModel($0) && !Self.isReasoningModelID($0)
+        }) {
+            return fast
+        }
+        return modelCatalog.first { $0 != stalled && !Self.isReasoningModelID($0) }
+    }
+
+    /// Stream with optional first-token watchdog. Throws `SlowResponseStallError` on stall cancel.
+    private func chatStreamWithSlowResponseWatchdog(
+        request: ChatRequest,
+        timeoutSeconds: Int,
+        expectedModel: String,
+        streamTokens: StreamTokenProbe,
+        streamMCP: StreamTokenProbe,
+        onToken: @escaping @Sendable (String) async -> Void,
+        onMCPStatus: @escaping @Sendable (String, String, String, String?) async -> Void
+    ) async throws -> StreamDoneEvent {
+        if timeoutSeconds <= 0 {
+            return try await client.chatStream(
+                baseURL: gatewayURL,
+                request: request,
+                onToken: { token in
+                    streamTokens.mark()
+                    await onToken(token)
+                },
+                onMCPStatus: { server, tool, phase, note in
+                    streamMCP.mark()
+                    await onMCPStatus(server, tool, phase, note)
+                }
+            )
+        }
+
+        return try await withThrowingTaskGroup(of: StreamDoneEvent?.self) { group in
+            group.addTask {
+                try await self.client.chatStream(
+                    baseURL: self.gatewayURL,
+                    request: request,
+                    onToken: { token in
+                        streamTokens.mark()
+                        await onToken(token)
+                    },
+                    onMCPStatus: { server, tool, phase, note in
+                        streamMCP.mark()
+                        await onMCPStatus(server, tool, phase, note)
+                    }
+                )
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
+                return nil
+            }
+
+            var finished: StreamDoneEvent?
+            while let item = try await group.next() {
+                if let done = item {
+                    group.cancelAll()
+                    finished = done
+                    break
+                }
+                // Watchdog fired — only stall-cancel when still silent (no tokens, no MCP).
+                if !streamTokens.sawTokens && !streamMCP.sawTokens {
+                    group.cancelAll()
+                    throw SlowResponseStallError(
+                        stalledModel: expectedModel,
+                        timeoutSeconds: timeoutSeconds
+                    )
+                }
+            }
+            if let finished { return finished }
+            throw CancellationError()
+        }
+    }
+
     /// Insert `model` at the top of the Manual shortlist. Caps at `maxModelCatalogSize`
     /// by dropping the oldest (last) entry when a new id is added.
     func promoteModelToCatalog(_ model: String) {
@@ -2550,6 +2857,7 @@ final class AppState: ObservableObject {
         defer { isPreviewing = false }
         do {
             let skip = forceFullAnalysis ? false : skipAnalysisOnJudgement
+            let writeJudgement = updateJudgement && !isIncognitoEnabled
             let result = try await client.preview(
                 baseURL: gatewayURL,
                 request: PreviewRequest(
@@ -2561,7 +2869,7 @@ final class AppState: ObservableObject {
                     routingProfile: APIRoutingProfile(routingProfile),
                     enhanceAlternatives: true,
                     skipAnalysisOnJudgement: skip,
-                    updateJudgement: updateJudgement,
+                    updateJudgement: writeJudgement,
                     systemPrompt: activeSystemPromptForAPI
                 )
             )
@@ -2571,7 +2879,7 @@ final class AppState: ObservableObject {
             if result.analysisSkipped == true {
                 lastJudgementSkipPrompt = text
                 pinnedFullAnalysisPrompt = ""
-            } else if updateJudgement || forceFullAnalysis {
+            } else if writeJudgement || forceFullAnalysis {
                 lastJudgementSkipPrompt = ""
                 pinnedFullAnalysisPrompt = text
             } else {
@@ -2586,7 +2894,7 @@ final class AppState: ObservableObject {
                 objectWillChange.send()
             }
             await refreshEstimatedLatency(for: result.recommendedModel)
-            if updateJudgement {
+            if writeJudgement {
                 await loadClassifications()
                 await loadStoreBrowser()
             }
@@ -2600,7 +2908,7 @@ final class AppState: ObservableObject {
     func redoAnalysis() async {
         lastJudgementSkipPrompt = ""
         pinnedFullAnalysisPrompt = ""
-        let writeJudgement = routeMode != .manual
+        let writeJudgement = routeMode != .manual && !isIncognitoEnabled
         await runPreview(forceFullAnalysis: true, updateJudgement: writeJudgement)
     }
 
@@ -4227,7 +4535,11 @@ final class AppState: ObservableObject {
         }
 
         if !sendText.isEmpty {
-            recordPromptHistory(sendText)
+            if isIncognitoEnabled, let sid = selectedSessionID {
+                noteIncognitoPrompt(sendText, sessionID: sid)
+            } else {
+                recordPromptHistory(sendText)
+            }
         }
 
         if promptOverride != nil {
@@ -4476,70 +4788,137 @@ final class AppState: ObservableObject {
             routingProfile: APIRoutingProfile(routingProfile),
             attachments: attachmentDTOs,
             webSearch: webSearchEnabled,
-            skipAutoJudgement: interruptedIdleAnalysis,
+            skipAutoJudgement: interruptedIdleAnalysis || isIncognitoEnabled,
             mcpServers: mcpForRequest
         )
 
         // Stream token UI updates are applied on MainActor and awaited so post-stream
         // skill fulfillment (OS Access) sees the complete reply text.
-        let streamTokens = StreamTokenProbe()
+        var streamTokens = StreamTokenProbe()
+        var streamMCP = StreamTokenProbe()
         let streamAssembly = StreamTextAssembly()
-        do {
-            let done = try await client.chatStream(
-                baseURL: gatewayURL,
-                request: request,
-                onToken: { [weak self] token in
-                    streamTokens.mark()
-                    streamAssembly.append(token)
-                    await MainActor.run {
-                        guard let self,
-                              let i = self.sessions.firstIndex(where: { $0.id == sid }),
-                              let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
-                        else { return }
-                        if self.generationPhase == .thinking {
-                            self.generationPhase = .streaming
+
+        let expectedModelForWatch = (
+            requestModel
+                ?? preview?.routes.first?.modelId
+                ?? preview?.recommendedModel
+                ?? selectedModel
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let timeoutSeconds = slowResponseFallbackSeconds
+        let watchdogEligible = timeoutSeconds > 0
+            && routeMode != .compare
+            && (routeMode == .auto || slowResponseFallbackInManual)
+            && !Self.isReasoningModelID(expectedModelForWatch)
+
+        let onToken: @Sendable (String) async -> Void = { [weak self] token in
+            streamAssembly.append(token)
+            await MainActor.run {
+                guard let self,
+                      let i = self.sessions.firstIndex(where: { $0.id == sid }),
+                      let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+                else { return }
+                if self.generationPhase == .thinking {
+                    self.generationPhase = .streaming
+                }
+                var next = self.sessions
+                next[i].messages[m].content += token
+                self.sessions = next
+            }
+        }
+        let onMCPStatus: @Sendable (String, String, String, String?) async -> Void = { [weak self] server, tool, phase, note in
+            await MainActor.run {
+                guard let self,
+                      let i = self.sessions.firstIndex(where: { $0.id == sid }),
+                      let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+                else { return }
+                if self.generationPhase == .thinking {
+                    self.generationPhase = .streaming
+                }
+                let line: String = {
+                    switch phase {
+                    case "preparing":
+                        if tool == "connect" {
+                            return "**MCP** · Connecting to \(server)…\n"
                         }
-                        var next = self.sessions
-                        next[i].messages[m].content += token
-                        self.sessions = next
+                        return "**MCP** · Asking model with tools…\n"
+                    case "calling":
+                        return "**MCP** · Using \(server) · `\(tool)`…\n"
+                    case "progress":
+                        let detail = (note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return detail.isEmpty ? "" : "  ↳ \(detail)\n"
+                    default:
+                        return ""
                     }
-                },
-                onMCPStatus: { [weak self] server, tool, phase, note in
-                    await MainActor.run {
-                        guard let self,
-                              let i = self.sessions.firstIndex(where: { $0.id == sid }),
-                              let m = self.sessions[i].messages.firstIndex(where: { $0.id == assistantID })
-                        else { return }
-                        if self.generationPhase == .thinking {
-                            self.generationPhase = .streaming
-                        }
-                        let line: String = {
-                            switch phase {
-                            case "preparing":
-                                if tool == "connect" {
-                                    return "**MCP** · Connecting to \(server)…\n"
-                                }
-                                return "**MCP** · Asking model with tools…\n"
-                            case "calling":
-                                return "**MCP** · Using \(server) · `\(tool)`…\n"
-                            case "progress":
-                                let detail = (note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                                return detail.isEmpty ? "" : "  ↳ \(detail)\n"
-                            default:
-                                return ""
-                            }
-                        }()
-                        guard !line.isEmpty else { return }
-                        streamAssembly.append(line)
-                        var next = self.sessions
-                        let existing = next[i].messages[m].content
-                        if !existing.contains(line) {
-                            next[i].messages[m].content = existing + line
-                            self.sessions = next
-                        }
+                }()
+                guard !line.isEmpty else { return }
+                streamAssembly.append(line)
+                var next = self.sessions
+                let existing = next[i].messages[m].content
+                if !existing.contains(line) {
+                    next[i].messages[m].content = existing + line
+                    self.sessions = next
+                }
+            }
+        }
+
+        do {
+            let done: StreamDoneEvent
+            do {
+                done = try await chatStreamWithSlowResponseWatchdog(
+                    request: request,
+                    timeoutSeconds: watchdogEligible ? timeoutSeconds : 0,
+                    expectedModel: expectedModelForWatch.isEmpty ? selectedModel : expectedModelForWatch,
+                    streamTokens: streamTokens,
+                    streamMCP: streamMCP,
+                    onToken: onToken,
+                    onMCPStatus: onMCPStatus
+                )
+            } catch let stall as SlowResponseStallError {
+                guard !Task.isCancelled,
+                      let fallback = resolveSlowResponseFallbackModel(stalledModel: stall.stalledModel),
+                      fallback != stall.stalledModel
+                else {
+                    throw ARILAPIError.stream(
+                        "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s."
+                    )
+                }
+                let note = "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s — retrying with \(fallback)…"
+                updateSession(sid) { session in
+                    if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                        session.messages[m].content = note + "\n\n"
                     }
                 }
-            )
+                streamAssembly.reset()
+                streamAssembly.append(note + "\n\n")
+                streamTokens = StreamTokenProbe()
+                streamMCP = StreamTokenProbe()
+                if routeMode == .auto {
+                    selectedModel = fallback
+                }
+                let retryRequest = ChatRequest(
+                    messages: historyForAPI,
+                    model: fallback,
+                    temperature: temperature,
+                    routeMode: .manual,
+                    useCache: true,
+                    sessionId: sid.uuidString.lowercased(),
+                    previewId: nil,
+                    routingProfile: APIRoutingProfile(routingProfile),
+                    attachments: attachmentDTOs,
+                    webSearch: webSearchEnabled,
+                    skipAutoJudgement: interruptedIdleAnalysis || isIncognitoEnabled,
+                    mcpServers: mcpForRequest
+                )
+                done = try await chatStreamWithSlowResponseWatchdog(
+                    request: retryRequest,
+                    timeoutSeconds: 0,
+                    expectedModel: fallback,
+                    streamTokens: streamTokens,
+                    streamMCP: streamMCP,
+                    onToken: onToken,
+                    onMCPStatus: onMCPStatus
+                )
+            }
             if Task.isCancelled { return }
             // Persist any generated image to disk before it gets stripped from history.
             persistInlineImages(sessionID: sid, assistantID: assistantID)
@@ -5411,6 +5790,59 @@ final class AppState: ObservableObject {
 
     func shutdown() {
         stopHealthPolling()
+        // Wipe Incognito sessions before saving — spend ledger is left intact.
+        let incognitoIDs = sessions.filter(\.incognitoEnabled).map(\.id)
+        if !incognitoIDs.isEmpty {
+            for id in incognitoIDs {
+                deletedSessionIDs.insert(id)
+            }
+            persistDeletedSessionIDs()
+            // Capture snippets before removing sessions from memory.
+            var snippetMap: [UUID: Set<String>] = [:]
+            for id in incognitoIDs {
+                var set = incognitoPromptSnippets[id] ?? []
+                if let session = sessions.first(where: { $0.id == id }) {
+                    for message in session.messages where message.role == .user {
+                        let snip = Self.incognitoSnippet(from: message.bodyWithoutCostFooter)
+                        if !snip.isEmpty { set.insert(snip) }
+                    }
+                }
+                snippetMap[id] = set
+                incognitoPromptSnippets[id] = nil
+            }
+            sessions.removeAll { $0.incognitoEnabled }
+            if let sel = selectedSessionID, !sessions.contains(where: { $0.id == sel }) {
+                selectedSessionID = sessions.first?.id
+            }
+            // Best-effort gateway wipe before process exit (keep spend ledger).
+            let group = DispatchGroup()
+            let base = gatewayURL
+            let api = client
+            let recordsSnapshot = storeRecords
+            for id in incognitoIDs {
+                let sid = id.uuidString.lowercased()
+                let snippets = snippetMap[id] ?? []
+                group.enter()
+                Task {
+                    defer { group.leave() }
+                    try? await api.deleteSession(baseURL: base, id: sid)
+                    let matches = recordsSnapshot.filter { rec in
+                        if (rec.sessionId ?? "").lowercased() == sid { return true }
+                        let snippet = rec.promptSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return snippets.contains(snippet)
+                            || snippets.contains {
+                                $0.hasPrefix(String(snippet.prefix(40))) || snippet.hasPrefix(String($0.prefix(40)))
+                            }
+                    }
+                    for rec in matches where rec.kind == "judgement"
+                        || rec.kind == "analysis_cache"
+                        || rec.kind == "chat_transaction" {
+                        try? await api.deleteStoreRecord(baseURL: base, id: rec.id)
+                    }
+                }
+            }
+            _ = group.wait(timeout: .now() + 4)
+        }
         // Discard any sessions the user started but never sent a prompt into.
         if sessions.contains(where: { $0.messages.isEmpty }) {
             sessions.removeAll { $0.messages.isEmpty }
@@ -5527,18 +5959,39 @@ final class AppState: ObservableObject {
 
     private func saveLocalSessions() {
         let cleaned = sanitizedSessionsForCache()
-        let beforeCounts = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.messages.count) })
-        let afterCounts = Dictionary(uniqueKeysWithValues: cleaned.map { ($0.id, $0.messages.count) })
-        if beforeCounts != afterCounts || sessionsNeedStorageSanitization(sessions) {
-            sessions = cleaned
-            noteSessionsChanged()
+        // Apply image/payload sanitization to live non-incognito sessions only —
+        // never replace in-memory Incognito transcripts (needed for context).
+        if sessionsNeedStorageSanitization(sessions) {
+            var live = sessions
+            var changed = false
+            for i in live.indices where !live[i].incognitoEnabled {
+                live[i].deduplicateMessages()
+                let newMessages = live[i].messages.map { message in
+                    ChatMessage(role: message.role, content: Self.sanitizeContentForStorage(message.content))
+                }
+                if newMessages.map(\.content) != live[i].messages.map(\.content) {
+                    live[i].messages = newMessages
+                    live[i].recomputeTotalCost()
+                    changed = true
+                }
+            }
+            if changed {
+                sessions = live
+                noteSessionsChanged()
+            }
         }
         writeLocalSessionsFile(cleaned)
     }
 
     private func writeLocalSessionsFile(_ cleaned: [ChatSession]) {
+        let selected: UUID? = {
+            if let sel = selectedSessionID, cleaned.contains(where: { $0.id == sel }) {
+                return sel
+            }
+            return cleaned.first?.id
+        }()
         let cache = LocalSessionsCache(
-            selectedSessionID: selectedSessionID,
+            selectedSessionID: selected,
             sessions: cleaned,
             projects: projects,
             expandedProjectIDs: Array(expandedProjectIDs)
@@ -5567,6 +6020,9 @@ final class AppState: ObservableObject {
         if deletedSessionIDs.contains(session.id) { return }
         // Don't persist a brand-new session that has no messages yet — it is discarded on exit.
         if session.messages.isEmpty { return }
+        // Incognito: keep chat in memory for context, but do not write history to disk/gateway.
+        // Gateway chat turns still occur; wipeIncognitoSession deletes them on end/quit.
+        if session.incognitoEnabled { return }
         session.deduplicateMessages()
         if let i = sessions.firstIndex(where: { $0.id == session.id }),
            sessions[i].messages.count != session.messages.count {
@@ -5621,9 +6077,21 @@ private final class StreamTextAssembly: @unchecked Sendable {
         lock.unlock()
     }
 
+    func reset() {
+        lock.lock()
+        text = ""
+        lock.unlock()
+    }
+
     func snapshot() -> String {
         lock.lock()
         defer { lock.unlock() }
         return text
     }
+}
+
+/// Thrown when the first-token watchdog cancels a silent stream.
+private struct SlowResponseStallError: Error {
+    let stalledModel: String
+    let timeoutSeconds: Int
 }

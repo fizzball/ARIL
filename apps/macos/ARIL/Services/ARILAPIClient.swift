@@ -350,6 +350,27 @@ final class ARILAPIClient {
             throw ARILAPIError.badStatus(http.statusCode, "stream failed")
         }
 
+        // Drop the socket promptly when the caller cancels (TTFT watchdog / Stop).
+        return try await withTaskCancellationHandler {
+            try await Self.consumeChatStream(
+                bytes: bytes,
+                request: request,
+                decoder: decoder,
+                onToken: onToken,
+                onMCPStatus: onMCPStatus
+            )
+        } onCancel: {
+            bytes.task.cancel()
+        }
+    }
+
+    private static func consumeChatStream(
+        bytes: URLSession.AsyncBytes,
+        request: ChatRequest,
+        decoder: JSONDecoder,
+        onToken: @escaping @Sendable (String) async -> Void,
+        onMCPStatus: (@Sendable (String, String, String, String?) async -> Void)?
+    ) async throws -> StreamDoneEvent {
         var eventName = "message"
         var dataLines: [String] = []
         var done: StreamDoneEvent?

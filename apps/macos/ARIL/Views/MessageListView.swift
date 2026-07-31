@@ -7,6 +7,7 @@ struct MessageListView: View {
     @EnvironmentObject private var theme: ThemeStore
 
     private let bottomAnchorID = "aril.message.bottom"
+    private let topAnchorID = "aril.message.top"
 
     private var messages: [ChatMessage] {
         guard let id = state.selectedSessionID,
@@ -28,6 +29,9 @@ struct MessageListView: View {
                 // Do NOT bind `.id` to content length: that recreates the whole list on
                 // every stream token and makes replies look like they arrive in one shot.
                 VStack(alignment: .leading, spacing: 16) {
+                    Color.clear
+                        .frame(height: 1)
+                        .id(topAnchorID)
                     ForEach(messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -55,6 +59,9 @@ struct MessageListView: View {
             .onChange(of: state.scrollMessagesToBottomToken) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
+            .onChange(of: state.scrollMessagesToTopToken) { _, _ in
+                scrollToTop(proxy: proxy, animated: true)
+            }
         }
     }
 
@@ -66,6 +73,26 @@ struct MessageListView: View {
                 }
             } else {
                 proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
+        }
+    }
+
+    private func scrollToTop(proxy: ScrollViewProxy, animated: Bool) {
+        DispatchQueue.main.async {
+            if let firstID = messages.first?.id {
+                if animated {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(firstID, anchor: .top)
+                    }
+                } else {
+                    proxy.scrollTo(firstID, anchor: .top)
+                }
+            } else if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(topAnchorID, anchor: .top)
+                }
+            } else {
+                proxy.scrollTo(topAnchorID, anchor: .top)
             }
         }
     }

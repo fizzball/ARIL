@@ -125,45 +125,91 @@ struct InputBarView: View {
 
     private var inputCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                HStack(spacing: 10) {
-                    Picker("Mode", selection: Binding(
-                        get: { state.routeMode },
-                        set: { state.changeRouteMode(to: $0) }
-                    )) {
-                        ForEach(RouteMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
+            HStack(spacing: 10) {
+                Picker("Mode", selection: Binding(
+                    get: { state.routeMode },
+                    set: { state.changeRouteMode(to: $0) }
+                )) {
+                    ForEach(RouteMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 260)
+                .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge classifies the prompt and compares 3 models with the same capability.")
+
+                if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
+                    Text(cat.label.uppercased())
+                        .font(ARILTheme.captionFont)
+                        .foregroundStyle(theme.palette.accent)
+                        .help("Detected prompt category")
+                }
+
+                Toggle(isOn: Binding(
+                    get: { state.isIncognitoEnabled },
+                    set: { state.setIncognitoEnabled($0) }
+                )) {
+                    HStack(spacing: 4) {
+                        IncognitoGhostIcon()
+                            .frame(width: 12, height: 14)
+                        Text("Incognito")
+                            .font(ARILTheme.captionFont)
+                    }
+                    .foregroundStyle(
+                        state.isIncognitoEnabled
+                            ? theme.palette.accent
+                            : theme.palette.textMuted
+                    )
+                }
+                .toggleStyle(.checkbox)
+                .help("Incognito — while enabled, prompts are not stored in history, Learning, or logs. Chat context stays for this session; everything is wiped when the session ends or ARIL quits. Monthly and weekly spend totals are still kept.")
+                .accessibilityLabel("Incognito")
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 6) {
+                    Button {
+                        state.requestScrollMessagesToTop()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(theme.palette.backgroundElevated)
+                                .frame(width: 28, height: 28)
+                            Circle()
+                                .stroke(theme.palette.hairline, lineWidth: 1)
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(theme.palette.accent)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 260)
-                    .help("Auto routes models. Manual keeps your pick (analysed, not swapped). Judge classifies the prompt and compares 3 models with the same capability.")
+                    .buttonStyle(.plain)
+                    .disabled(state.selectedSession?.messages.isEmpty != false)
+                    .opacity(state.selectedSession?.messages.isEmpty != false ? 0.45 : 1)
+                    .help("Scroll to the start of this session")
+                    .accessibilityLabel("Scroll to top")
 
-                    if let cat = state.preview?.classification.primary, state.analysisStatus == .ready {
-                        Text(cat.label.uppercased())
-                            .font(ARILTheme.captionFont)
-                            .foregroundStyle(theme.palette.accent)
-                            .help("Detected prompt category")
+                    Button {
+                        state.requestScrollMessagesToBottom()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(theme.palette.backgroundElevated)
+                                .frame(width: 28, height: 28)
+                            Circle()
+                                .stroke(theme.palette.hairline, lineWidth: 1)
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(theme.palette.accent)
+                        }
                     }
-
-                    Spacer(minLength: 0)
+                    .buttonStyle(.plain)
+                    .disabled(state.selectedSession?.messages.isEmpty != false)
+                    .opacity(state.selectedSession?.messages.isEmpty != false ? 0.45 : 1)
+                    .help("Scroll to the latest message")
+                    .accessibilityLabel("Scroll to bottom")
                 }
-
-                Button {
-                    state.requestScrollMessagesToBottom()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(theme.palette.accentStrong)
-                            .frame(width: 28, height: 28)
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(theme.palette.background)
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Scroll to the latest message")
-                .accessibilityLabel("Scroll to bottom")
             }
 
             if !state.pendingAttachments.isEmpty {
@@ -325,10 +371,10 @@ struct InputBarView: View {
                     } label: {
                         ZStack {
                             Circle()
-                                .fill(theme.palette.accentStrong)
+                                .fill(theme.palette.preferredHighlight)
                                 .frame(width: 28, height: 28)
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 12, weight: .bold))
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(theme.palette.background)
                         }
                     }

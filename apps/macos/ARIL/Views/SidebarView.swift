@@ -301,7 +301,7 @@ struct SidebarView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            state.selectedSessionID = session.id
+            state.selectSession(session.id)
         }
     }
 
@@ -441,6 +441,12 @@ private struct SessionRow: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
+                    if session.incognitoEnabled {
+                        IncognitoGhostIcon()
+                            .frame(width: 10, height: 12)
+                            .foregroundStyle(theme.palette.accent)
+                            .help("Incognito session — wiped when it ends or ARIL quits")
+                    }
                     titleLabel
                         .font(ARILTheme.bodyFont)
                         .foregroundStyle(theme.palette.text)

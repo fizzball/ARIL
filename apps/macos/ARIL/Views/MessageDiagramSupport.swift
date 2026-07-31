@@ -10,6 +10,8 @@ enum MessageSegment {
     case mermaid(String)
     case svg(String)
     case ascii(String)
+    case htmlPreview(String)
+    case jsPreview(String)
 }
 
 enum MessageContentParser {
@@ -149,13 +151,18 @@ enum MessageContentParser {
             return .svg(sanitizeSVG(body))
         case "ascii", "asciiart", "asc", "figlet", "ansi":
             return .ascii(body)
+        case "html", "htm", "html-preview", "preview":
+            return .htmlPreview(body)
+        case "js-preview", "javascript-preview":
+            return .jsPreview(body)
         case "xml" where body.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased().hasPrefix("<svg"):
             return .svg(sanitizeSVG(body))
         case "text", "plaintext", "":
             return autoDetect(body)
         default:
-            // Named languages (python, json, …) stay as plain fenced text.
+            // Named languages (python, json, javascript, …) stay as plain fenced text
+            // unless they use an explicit *-preview tag.
             return nil
         }
     }
@@ -163,6 +170,9 @@ enum MessageContentParser {
     private static func autoDetect(_ body: String) -> MessageSegment? {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
+        if HTMLPreviewBuilder.looksLikeFullHTMLDocument(trimmed) {
+            return .htmlPreview(trimmed)
+        }
         if lower.hasPrefix("<svg") {
             return .svg(sanitizeSVG(trimmed))
         }
@@ -325,6 +335,10 @@ struct AssistantMarkdownContent: View {
                     SVGDiagramView(source: source)
                 case .ascii(let source):
                     ASCIIArtView(source: source)
+                case .htmlPreview(let source):
+                    HTMLPreviewView(source: source, kind: .html)
+                case .jsPreview(let source):
+                    HTMLPreviewView(source: source, kind: .javascript)
                 }
             }
         }

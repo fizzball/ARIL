@@ -69,6 +69,7 @@
           <li><a href="#first-chat">First chat</a></li>
           <li><a href="#modes">Auto · Manual · Judge</a></li>
           <li><a href="#prompt-bar">Prompt bar</a></li>
+          <li><a href="#previews">In-chat previews</a></li>
           <li><a href="#skills">Skills</a></li>
           <li><a href="#slash">Slash commands</a></li>
           <li><a href="#preferences">Preferences</a></li>
@@ -140,6 +141,15 @@
           </ul>
         </section>
 
+        <section id="previews">
+          <h2>In-chat previews</h2>
+          <ul>
+            <li><strong>Mermaid / SVG / ASCII</strong> — fenced blocks render as diagrams in the reply.</li>
+            <li><strong>HTML</strong> — <code>```html</code> (or <code>```html-preview</code>) runs in a sandboxed WebKit view with no network access.</li>
+            <li><strong>JavaScript</strong> — use <code>```js-preview</code> or <code>```javascript-preview</code> for a runnable sandbox; plain <code>```javascript</code> stays as code only.</li>
+          </ul>
+        </section>
+
         <section id="skills">
           <h2>Skills</h2>
           <p>
@@ -199,7 +209,7 @@
         <section id="preferences">
           <h2>Preferences</h2>
           <ul>
-            <li><strong>General</strong> — Solo gateway, <strong>Web Search</strong> (on by default), budget caps, session cache, menu-bar icon. <strong>Delete all past sessions</strong> removes every session <em>and</em> all projects — for everyday cleanup use <code>/reset</code> instead.</li>
+            <li><strong>General</strong> — Solo gateway, <strong>Web Search</strong> (on by default), <strong>Slow-response fallback</strong> (first-token timeout, default 30s; optional for Manual), budget caps, session cache, menu-bar icon. <strong>Delete all past sessions</strong> removes every session <em>and</em> all projects — for everyday cleanup use <code>/reset</code> instead.</li>
             <li><strong>Subscription</strong> — OpenRouter sign-in or API key; local guardrails (sensitive-info redact, prompt-injection block).</li>
             <li><strong>Models</strong> — Default and per-category mappings for Auto; browse the OpenRouter catalog.</li>
             <li><strong>MCP</strong> — Enable managed local scanners (Nmap, Semgrep) or remote HTTP MCP servers.</li>

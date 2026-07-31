@@ -168,6 +168,9 @@ struct ChatSession: Identifiable, Hashable, Codable {
     var totalCostUsd: Double
     /// Optional folder grouping in the sidebar (local only).
     var projectID: UUID?
+    /// When true, chat context stays in memory for the session but history, Learning,
+    /// and logs for this session are wiped when it ends or ARIL quits. Spend is kept.
+    var incognitoEnabled: Bool
 
     init(
         id: UUID = UUID(),
@@ -175,7 +178,8 @@ struct ChatSession: Identifiable, Hashable, Codable {
         messages: [ChatMessage],
         updatedAt: Date = .now,
         totalCostUsd: Double = 0,
-        projectID: UUID? = nil
+        projectID: UUID? = nil,
+        incognitoEnabled: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -183,10 +187,11 @@ struct ChatSession: Identifiable, Hashable, Codable {
         self.updatedAt = updatedAt
         self.totalCostUsd = totalCostUsd
         self.projectID = projectID
+        self.incognitoEnabled = incognitoEnabled
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, messages, updatedAt, totalCostUsd, projectID
+        case id, title, messages, updatedAt, totalCostUsd, projectID, incognitoEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -197,6 +202,7 @@ struct ChatSession: Identifiable, Hashable, Codable {
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         totalCostUsd = try c.decodeIfPresent(Double.self, forKey: .totalCostUsd) ?? 0
         projectID = try c.decodeIfPresent(UUID.self, forKey: .projectID)
+        incognitoEnabled = try c.decodeIfPresent(Bool.self, forKey: .incognitoEnabled) ?? false
         if totalCostUsd == 0 {
             recomputeTotalCost()
         }
