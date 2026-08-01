@@ -13,6 +13,9 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     SidebarView()
+                        // Empty title — otherwise collapsing the sidebar surfaces the
+                        // bundle name (“ARIL”) next to the custom wordmark.
+                        .navigationTitle("")
                         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
                 } detail: {
                     VStack(spacing: 0) {
@@ -37,6 +40,7 @@ struct ContentView: View {
 
                         ChatDetailView()
                     }
+                    .navigationTitle("")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -51,11 +55,14 @@ struct ContentView: View {
             StatusFooterView()
         }
         .background(theme.palette.background)
-        .background(WindowTitleVisibilityHidden())
+        .background(WindowTitleVisibilityHidden(refreshToken: columnVisibility))
         .font(theme.bodyFont)
         .animation(.easeInOut(duration: 0.22), value: state.activeToolPanel)
         .animation(.easeInOut(duration: 0.15), value: theme.fontSize)
         .animation(.easeInOut(duration: 0.15), value: theme.fontFamily)
+        .onChange(of: columnVisibility) { _, _ in
+            WindowTitleHiding.hide(in: NSApp.keyWindow)
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 ARILTitleWordmarkView()

@@ -149,7 +149,26 @@ private enum FlourishKind: CaseIterable {
 }
 
 /// Hides the native window title string so the custom wordmark can own that spot.
-struct WindowTitleVisibilityHidden: NSViewRepresentable {
+enum WindowTitleHiding {
+    static func hide(in window: NSWindow?) {
+        guard let window else { return }
+        if window.titleVisibility != .hidden {
+            window.titleVisibility = .hidden
+        }
+        if !window.title.isEmpty {
+            window.title = ""
+        }
+        if window.subtitle.isEmpty == false {
+            window.subtitle = ""
+        }
+    }
+}
+
+/// Re-applies title hiding when `refreshToken` changes (e.g. sidebar collapse), because
+/// macOS often resurfaces the bundle name (“ARIL”) beside toolbar items.
+struct WindowTitleVisibilityHidden<Token: Equatable>: NSViewRepresentable {
+    var refreshToken: Token
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -162,19 +181,26 @@ struct WindowTitleVisibilityHidden: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.attach(to: nsView)
+        WindowTitleHiding.hide(in: nsView.window ?? NSApp.keyWindow)
     }
 
     final class Coordinator {
         private var observers: [NSObjectProtocol] = []
+        private var titleObservation: NSKeyValueObservation?
         private weak var window: NSWindow?
 
         func attach(to view: NSView) {
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let view else { return }
-                self.apply(to: view.window)
+                WindowTitleHiding.hide(in: view.window)
                 guard let window = view.window, window !== self.window else { return }
                 self.teardown()
                 self.window = window
+                self.titleObservation = window.observe(\.title, options: [.new]) { win, _ in
+                    if !win.title.isEmpty {
+                        WindowTitleHiding.hide(in: win)
+                    }
+                }
                 let center = NotificationCenter.default
                 for name in [
                     NSWindow.didBecomeKeyNotification,
@@ -184,8 +210,8 @@ struct WindowTitleVisibilityHidden: NSViewRepresentable {
                         forName: name,
                         object: window,
                         queue: .main
-                    ) { [weak self] _ in
-                        self?.apply(to: window)
+                    ) { _ in
+                        WindowTitleHiding.hide(in: window)
                     }
                     self.observers.append(token)
                 }
@@ -198,18 +224,9 @@ struct WindowTitleVisibilityHidden: NSViewRepresentable {
                 center.removeObserver(token)
             }
             observers.removeAll()
+            titleObservation?.invalidate()
+            titleObservation = nil
             window = nil
-        }
-
-        private func apply(to window: NSWindow?) {
-            guard let window else { return }
-            // Empty title + hidden visibility prevents a second "ARIL" next to the wordmark.
-            if window.titleVisibility != .hidden {
-                window.titleVisibility = .hidden
-            }
-            if !window.title.isEmpty {
-                window.title = ""
-            }
         }
 
         deinit {
