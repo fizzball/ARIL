@@ -10,9 +10,7 @@ struct AboutView: View {
                 ARILLogoImage(size: 56)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("ARIL")
-                        .font(ARILTheme.bodyFont.weight(.semibold))
-                        .foregroundStyle(theme.palette.text)
+                    ARILWordmarkImage(height: 22)
                     Text("Adaptive Routing Intelligence Layer")
                         .font(ARILTheme.captionFont)
                         .foregroundStyle(theme.palette.accent)

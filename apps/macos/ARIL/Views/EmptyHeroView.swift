@@ -12,10 +12,7 @@ struct EmptyHeroView: View {
                 .scaleEffect(appeared ? 1 : 0.92)
                 .offset(y: appeared ? 0 : 6)
 
-            Text("ARIL")
-                .font(ARILTheme.wordmarkFont)
-                .foregroundStyle(theme.palette.text)
-                .tracking(4)
+            ARILWordmarkImage(height: 48)
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 8)
 

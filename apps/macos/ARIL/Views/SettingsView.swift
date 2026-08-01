@@ -1130,7 +1130,7 @@ struct SettingsView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Font preview")
 
-                Text("Size and typeface apply to chat, the prompt bar, sidebar, and most chrome. Some icons and the title wordmark keep fixed styles.")
+                Text("Size and typeface apply to chat, the prompt bar, sidebar, and most chrome. Some icons and the brand wordmark keep fixed styles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

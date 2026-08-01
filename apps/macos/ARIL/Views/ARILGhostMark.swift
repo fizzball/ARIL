@@ -94,6 +94,20 @@ struct ARILLogoImage: View {
     }
 }
 
+/// Cyan/white wordmark from Assets (`ARILWordmark`) — replaces typographic “ARIL” on the empty hero.
+struct ARILWordmarkImage: View {
+    var height: CGFloat = 44
+
+    var body: some View {
+        Image("ARILWordmark")
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(height: height)
+            .accessibilityLabel("ARIL")
+    }
+}
+
 /// Vector adaptive mesh: candidate nodes + highlighted best path (input → selected).
 struct ARILMeshMark: View {
     var style: ARILMeshStyle = .fullColor
