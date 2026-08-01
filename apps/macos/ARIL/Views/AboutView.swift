@@ -70,6 +70,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.16", changes: [
+            "OS Access asks for inline Run / Cancel before executing a local shell command",
+            "Non-responsive model bypass — skip models that stall on first token (Preferences duration or permanent); clear list anytime",
+            "Empty fallback replies after a timeout no longer leave a blank assistant bubble",
+        ]),
         ChangelogEntry(version: "0.4.15", changes: [
             "Cyan ARIL wordmark on the empty hero, title bar, and About panel (matches aril.host)",
             "Collapsed sidebar no longer shows a duplicate system “ARIL” title beside the wordmark",
