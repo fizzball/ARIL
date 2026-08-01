@@ -170,6 +170,13 @@ def _norm_content(content: str | None) -> str:
     )
     text = re.sub(r"!\[[^\]]*\]\(file://[^)]+\)", "![img](file)", text, flags=re.IGNORECASE)
     text = re.sub(r"!\[[^\]]*\]\(data:image/[^)]+\)", "![img](data)", text, flags=re.IGNORECASE)
+    # Same logical image turn after a client mistakenly stored the strip placeholder.
+    text = re.sub(
+        r"!\[[^\]]*\]\(omitted-from-context\)",
+        "![img](data)",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -184,6 +191,8 @@ def _content_richness(content: str | None) -> int:
         score += 100_000
     if "data:image" in text:
         score += 40_000
+    if "omitted-from-context" in text:
+        score -= 80_000
     if "<svg" in text.lower():
         score += 20_000
     return score
@@ -238,10 +247,19 @@ def upsert_session(payload: SessionUpsert) -> SessionDetail | None:
         )
         existing = _SESSIONS.get(sid)
         old_msgs = _dedupe_messages(list((existing or {}).get("messages") or []))
-        # Prefer the longer unique history. Equal length → prefer the client payload
-        # (often has file:// images the gateway already normalized the same way).
+        # Prefer the longer unique history. Equal length → keep the richer message at
+        # each index so a late client upsert with omitted-from-context cannot clobber
+        # a gateway file:// image from record_chat_turn.
         if old_msgs and len(new_msgs) < len(old_msgs):
             new_msgs = old_msgs
+        elif old_msgs and len(new_msgs) == len(old_msgs):
+            merged: list[dict] = []
+            for old, new in zip(old_msgs, new_msgs):
+                if _content_richness(new.get("content")) >= _content_richness(old.get("content")):
+                    merged.append(new)
+                else:
+                    merged.append(old)
+            new_msgs = merged
         row = {
             "title": payload.title or (existing or {}).get("title") or "Untitled",
             "updated_at": _now(),

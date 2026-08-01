@@ -611,6 +611,7 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         var score = min(body.count, 50_000)
         if content.contains("file://") { score += 100_000 }
         if content.contains("data:image") { score += 40_000 }
+        if content.contains("omitted-from-context") { score -= 80_000 }
         if body.lowercased().contains("<svg") { score += 20_000 }
         return score
     }

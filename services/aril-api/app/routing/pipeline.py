@@ -103,9 +103,9 @@ ATTACHED_IMAGE_HINTS = re.compile(
 # Text-to-image / generative intent (checked before generic vision)
 IMAGE_GEN_HINTS = re.compile(
     r"("
-    r"\b(generate|create|draw|paint|make|design|render|illustrate)\b.{0,40}\b(image|picture|illustration|photo|artwork|logo|icon|portrait|scene)\b"
+    r"\b(generate|create|draw|paint|make|design|render|illustrate)\b.{0,40}\b(image|picture|illustration|photo|artwork|logo|icon|portrait|scene|bitmap|pixel\s*art)\b"
     r"|"
-    r"\b(image|picture|illustration|artwork|logo)\b.{0,20}\b(of|showing|depicting|with)\b"
+    r"\b(image|picture|illustration|artwork|logo|bitmap|pixel\s*art)\b.{0,20}\b(of|showing|depicting|with)\b"
     r"|"
     r"\b(text[\s-]?to[\s-]?image|dall[\s-]?e|stable diffusion|flux)\b"
     r")",

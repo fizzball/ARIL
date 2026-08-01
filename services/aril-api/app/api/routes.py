@@ -56,6 +56,7 @@ from app.providers.base import ProviderMessage, ProviderResult, get_chat_provide
 from app.providers.messages import (
     attachments_to_provider_messages,
     context_limits,
+    persist_inline_images,
     sanitize_content_for_context,
 )
 from app.routing.pipeline import (
@@ -84,6 +85,18 @@ from app.mcp import (
 )
 
 router = APIRouter(prefix="/v1")
+
+
+def _sse_token_content(content: str) -> str:
+    """Persist inline images before SSE so clients never receive multi-MB data URLs.
+
+    Large `data:image…;base64,…` payloads often fail client-side JSON/SSE parsing and
+    then get replaced with `omitted-from-context`, which shows as bare 'Generated image'
+    text in the chat. Writing to disk and streaming a short `file://` link avoids that.
+    """
+    if not content or "data:image/" not in content:
+        return content
+    return persist_inline_images(content)
 
 
 def _resolve_model(
@@ -418,8 +431,9 @@ async def chat(req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     session_id = req.session_id or str(uuid.uuid4())
-    # Return full content to the client (may include generated image data URLs).
-    assistant = ChatMessage(role="assistant", content=result.content)
+    # Persist images before returning so the HTTP body stays small (file:// links).
+    client_content = _sse_token_content(result.content)
+    assistant = ChatMessage(role="assistant", content=client_content)
     session_store.record_chat_turn(
         session_id,
         title=last_user[:42] if last_user else "New session",
@@ -629,9 +643,10 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
             # Tool loop already produced the final text via non-stream completes.
             if (tool_result.content or "").strip():
-                parts.append(tool_result.content)
+                slim = _sse_token_content(tool_result.content)
+                parts.append(slim)
                 payload = json.dumps(
-                    {"content": tool_result.content, "model": tool_result.model or model}
+                    {"content": slim, "model": tool_result.model or model}
                 )
                 yield f"event: token\ndata: {payload}\n\n"
             else:
@@ -644,9 +659,10 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                         generate_image=generate_image,
                     ):
                         if chunk.content:
-                            parts.append(chunk.content)
+                            slim = _sse_token_content(chunk.content)
+                            parts.append(slim)
                             payload = json.dumps(
-                                {"content": chunk.content, "model": chunk.model or model}
+                                {"content": slim, "model": chunk.model or model}
                             )
                             yield f"event: token\ndata: {payload}\n\n"
                         if chunk.input_tokens or chunk.output_tokens or chunk.cost_usd:
@@ -677,8 +693,9 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     generate_image=generate_image,
                 ):
                     if chunk.content:
-                        parts.append(chunk.content)
-                        payload = json.dumps({"content": chunk.content, "model": chunk.model or model})
+                        slim = _sse_token_content(chunk.content)
+                        parts.append(slim)
+                        payload = json.dumps({"content": slim, "model": chunk.model or model})
                         yield f"event: token\ndata: {payload}\n\n"
                     if chunk.input_tokens or chunk.output_tokens or chunk.cost_usd:
                         meta["input_tokens"] = chunk.input_tokens or meta["input_tokens"]
@@ -715,8 +732,9 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 yield f"event: error\ndata: {err}\n\n"
                 return
             full = result.content
-            parts = [full]
-            payload = json.dumps({"content": full, "model": result.model or model})
+            slim = _sse_token_content(full)
+            parts = [slim]
+            payload = json.dumps({"content": slim, "model": result.model or model})
             yield f"event: token\ndata: {payload}\n\n"
             meta["input_tokens"] = result.input_tokens or meta["input_tokens"]
             meta["output_tokens"] = result.output_tokens or meta["output_tokens"]

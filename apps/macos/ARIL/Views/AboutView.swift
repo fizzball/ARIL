@@ -74,7 +74,7 @@ struct AboutView: View {
     private static let changelog: [ChangelogEntry] = [
         ChangelogEntry(version: "0.4.13", changes: [
             "Incognito mode — ghost checkbox beside Auto/Manual/Judge; keeps context, wipes history on session end or quit, preserves spend totals",
-            "Slow-response fallback — Preferences timeout (default 30s) retries Auto on a faster peer when no first token arrives; optional for Manual",
+            "Slow-response fallback — Preferences timeout (default 30s) retries Auto on a faster peer when no first token arrives; skips image-gen / reasoning; optional for Manual",
             "Sandboxed HTML/JS previews — ```html``` / ```js-preview``` fences run offline in-chat (no network)",
             "Scroll to top / bottom controls; Send uses a paper-plane icon and highlight color",
         ]),

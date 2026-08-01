@@ -304,7 +304,7 @@ struct SettingsView: View {
                         Text("\(seconds)s").tag(seconds)
                     }
                 }
-                Text("When set (default 30s), Auto cancels a hang with no first token and retries once on a faster peer. Off disables fallback entirely. Judge is never switched.")
+                Text("When set (default 30s), Auto cancels a hang with no first token and retries once on a faster peer. Off disables fallback entirely. Judge, reasoning models, and image-generation turns are never switched.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

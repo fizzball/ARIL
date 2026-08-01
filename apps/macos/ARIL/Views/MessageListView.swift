@@ -297,6 +297,12 @@ struct MarkdownImageView: View {
             }
         }
         .task(id: urlString) {
+            if urlString == "omitted-from-context" || urlString.contains("omitted-from-context") {
+                nsImage = nil
+                imageData = nil
+                fileExtension = "png"
+                return
+            }
             let loaded = Self.loadImage(from: urlString)
             nsImage = loaded.image
             imageData = loaded.data

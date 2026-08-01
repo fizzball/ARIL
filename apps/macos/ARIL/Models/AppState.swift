@@ -711,6 +711,25 @@ final class AppState: ObservableObject {
         let hay = modelID.lowercased()
         return hay.contains("image") || hay.contains("dall-e") || hay.contains("flux")
             || hay.contains("gpt-image") || hay.contains("imagen")
+            || hay.contains("seedream") || hay.contains("sourceful")
+    }
+
+    /// Mirrors gateway `IMAGE_GEN_HINTS` — image turns return one blob after a long TTFT,
+    /// so slow-response fallback must not cancel them mid-generation.
+    private static func looksLikeImageGenPrompt(_ prompt: String) -> Bool {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 3 else { return false }
+        let patterns = [
+            #"\b(generate|create|draw|paint|make|design|render|illustrate)\b.{0,40}\b(image|picture|illustration|photo|artwork|logo|icon|portrait|scene|bitmap|pixel\s*art)\b"#,
+            #"\b(image|picture|illustration|artwork|logo|bitmap|pixel\s*art)\b.{0,20}\b(of|showing|depicting|with)\b"#,
+            #"\b(text[\s-]?to[\s-]?image|dall[\s-]?e|stable diffusion|flux)\b"#,
+        ]
+        for pattern in patterns {
+            if text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     private func estimateOutgoingCostUsd() -> Double {
@@ -2538,6 +2557,20 @@ final class AppState: ObservableObject {
         var winner: ChatSession
         if b.messages.count != a.messages.count {
             winner = b.messages.count > a.messages.count ? b : a
+        } else if a.messages.count == b.messages.count, !a.messages.isEmpty {
+            // Same length: pick the richer message at each index so a local
+            // omitted-from-context placeholder cannot beat a gateway file:// image.
+            var merged = a
+            var messages = a.messages
+            for i in messages.indices where i < b.messages.count {
+                if ChatMessage.contentRichness(b.messages[i].content)
+                    > ChatMessage.contentRichness(messages[i].content) {
+                    messages[i] = b.messages[i]
+                }
+            }
+            merged.messages = messages
+            merged.updatedAt = max(a.updatedAt, b.updatedAt)
+            winner = merged
         } else {
             let aPlace = placeholderCount(a)
             let bPlace = placeholderCount(b)
@@ -4805,10 +4838,16 @@ final class AppState: ObservableObject {
                 ?? selectedModel
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         let timeoutSeconds = slowResponseFallbackSeconds
+        // Image generation completes as a single non-stream payload (often >30s TTFT).
+        // Cancelling mid-wait and retrying a text peer breaks bitmap/image output.
+        let imageGenTurn = looksLikeImageGenModel(expectedModelForWatch)
+            || Self.looksLikeImageGenPrompt(displayText)
+            || (preview?.recommendedModel).map(looksLikeImageGenModel) == true
         let watchdogEligible = timeoutSeconds > 0
             && routeMode != .compare
             && (routeMode == .auto || slowResponseFallbackInManual)
             && !Self.isReasoningModelID(expectedModelForWatch)
+            && !imageGenTurn
 
         let onToken: @Sendable (String) async -> Void = { [weak self] token in
             streamAssembly.append(token)
@@ -4920,11 +4959,9 @@ final class AppState: ObservableObject {
                 )
             }
             if Task.isCancelled { return }
-            // Persist any generated image to disk before it gets stripped from history.
-            persistInlineImages(sessionID: sid, assistantID: assistantID)
-
             // Prefer the assembled stream text if the session message is somehow shorter
-            // (guards against any remaining MainActor publish lag).
+            // (guards against any remaining MainActor publish lag). Must run *before*
+            // image persistence — assembled still holds inline data: URLs.
             let assembled = streamAssembly.snapshot()
             if !assembled.isEmpty {
                 updateSession(sid) { session in
@@ -4934,6 +4971,12 @@ final class AppState: ObservableObject {
                     }
                 }
             }
+            // Write inline base64 images to disk as file:// *after* assembly merge so
+            // sanitizeContentForStorage cannot later replace them with omitted-from-context.
+            persistInlineImages(sessionID: sid, assistantID: assistantID)
+            // If the stream never carried the bitmap (SSE/JSON drop), adopt the gateway's
+            // already-persisted file:// copy of this turn.
+            await healOmittedImagesFromGateway(sessionID: sid, assistantID: assistantID)
 
             var streamedText = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
@@ -5277,45 +5320,70 @@ final class AppState: ObservableObject {
         accrueDailySpend(cost, model: model)
     }
 
-    /// Drop embedded base64 images / huge blobs from outbound context (UI keeps originals).
+    /// Persist a slim copy of history while keeping actual-cost footers for session totals.
+    /// Inline `data:image` payloads are rewritten to on-disk `file://` links (not omitted) so
+    /// generated bitmaps survive local cache + gateway upsert.
+    nonisolated static func sanitizeContentForStorage(_ content: String) -> String {
+        guard !content.isEmpty else { return content }
+        let withFiles = rewriteInlineImagesToFiles(content, directory: generatedImagesDirectoryURL())
+        return sanitizeBulkyPayloads(
+            withFiles,
+            truncateAt: 48_000,
+            truncationMarker: "\n\n…[truncated for storage]",
+            stripDataImages: false
+        )
+    }
+
+    /// Shared Application Support folder for generated bitmaps (gateway + client).
+    nonisolated static func generatedImagesDirectoryURL() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("ARIL/GeneratedImages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Drop embedded base64 images / huge blobs from outbound model context (UI keeps originals).
     nonisolated static func sanitizeContentForAPI(_ content: String) -> String {
         guard !content.isEmpty else { return content }
         var text = ChatMessage.stripActualCostFooter(content)
-        text = sanitizeBulkyPayloads(text, truncateAt: 24_000, truncationMarker: "\n\n…[truncated for model context]")
+        text = sanitizeBulkyPayloads(
+            text,
+            truncateAt: 24_000,
+            truncationMarker: "\n\n…[truncated for model context]",
+            stripDataImages: true
+        )
         return text
-    }
-
-    /// Persist a slim copy of history while keeping actual-cost footers for session totals.
-    nonisolated static func sanitizeContentForStorage(_ content: String) -> String {
-        guard !content.isEmpty else { return content }
-        return sanitizeBulkyPayloads(content, truncateAt: 48_000, truncationMarker: "\n\n…[truncated for storage]")
     }
 
     nonisolated private static func sanitizeBulkyPayloads(
         _ content: String,
         truncateAt maxChars: Int,
-        truncationMarker: String
+        truncationMarker: String,
+        stripDataImages: Bool
     ) -> String {
         var text = content
-        if let md = try? NSRegularExpression(
-            pattern: #"!\[[^\]]*\]\(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+\)"#,
-            options: [.caseInsensitive]
-        ) {
-            text = md.stringByReplacingMatches(
-                in: text,
-                range: NSRange(text.startIndex..., in: text),
-                withTemplate: "![Generated image](omitted-from-context)"
-            )
-        }
-        if let raw = try? NSRegularExpression(
-            pattern: #"data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{200,}"#,
-            options: [.caseInsensitive]
-        ) {
-            text = raw.stringByReplacingMatches(
-                in: text,
-                range: NSRange(text.startIndex..., in: text),
-                withTemplate: "data:image/(omitted-from-context)"
-            )
+        if stripDataImages {
+            if let md = try? NSRegularExpression(
+                pattern: #"!\[[^\]]*\]\(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+\)"#,
+                options: [.caseInsensitive]
+            ) {
+                text = md.stringByReplacingMatches(
+                    in: text,
+                    range: NSRange(text.startIndex..., in: text),
+                    withTemplate: "![Generated image](omitted-from-context)"
+                )
+            }
+            if let raw = try? NSRegularExpression(
+                pattern: #"data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{200,}"#,
+                options: [.caseInsensitive]
+            ) {
+                text = raw.stringByReplacingMatches(
+                    in: text,
+                    range: NSRange(text.startIndex..., in: text),
+                    withTemplate: "data:image/(omitted-from-context)"
+                )
+            }
         }
         if text.count > maxChars {
             // Preserve a trailing actual-cost footer when truncating.
@@ -5336,15 +5404,6 @@ final class AppState: ObservableObject {
         return text
     }
 
-    /// On-disk home for generated images so they survive app restarts.
-    private var generatedImagesDir: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("ARIL/GeneratedImages", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     /// Write any inline base64 images in an assistant message to disk and rewrite the
     /// stored content to reference stable `file://` URLs. Inline `data:` images are
     /// stripped from both persisted history and model context, so persisting them as
@@ -5355,7 +5414,7 @@ final class AppState: ObservableObject {
               let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
         else { return false }
         let original = sessions[i].messages[m].content
-        let rewritten = Self.rewriteInlineImagesToFiles(original, directory: generatedImagesDir)
+        let rewritten = Self.rewriteInlineImagesToFiles(original, directory: Self.generatedImagesDirectoryURL())
         guard rewritten != original else { return false }
         var next = sessions
         next[i].messages[m].content = rewritten
@@ -5363,9 +5422,36 @@ final class AppState: ObservableObject {
         return true
     }
 
+    /// When the client only has `omitted-from-context`, pull the gateway session and
+    /// adopt any richer assistant turn (usually a `file://` GeneratedImages link).
+    private func healOmittedImagesFromGateway(sessionID sid: UUID, assistantID: UUID) async {
+        guard let i = sessions.firstIndex(where: { $0.id == sid }),
+              let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+        else { return }
+        let local = sessions[i].messages[m].content
+        guard local.contains("omitted-from-context") || local.contains("data:image/") else { return }
+        do {
+            let detail = try await client.getSession(
+                baseURL: gatewayURL,
+                id: sid.uuidString.lowercased()
+            )
+            let remoteAssistants = detail.messages.filter { $0.role == "assistant" }
+            guard let best = remoteAssistants.max(by: {
+                ChatMessage.contentRichness($0.content) < ChatMessage.contentRichness($1.content)
+            }) else { return }
+            guard ChatMessage.contentRichness(best.content) > ChatMessage.contentRichness(local) else { return }
+            var next = sessions
+            next[i].messages[m].content = best.content
+            sessions = next
+            saveLocalSessions()
+        } catch {
+            // Best-effort heal only.
+        }
+    }
+
     /// Replace `![alt](data:image/...;base64,...)` with file-backed links, writing the
     /// decoded bytes into `directory`. Content without inline images is returned as-is.
-    static func rewriteInlineImagesToFiles(_ content: String, directory: URL) -> String {
+    nonisolated static func rewriteInlineImagesToFiles(_ content: String, directory: URL) -> String {
         guard content.contains("data:image/") else { return content }
         guard let regex = try? NSRegularExpression(
             pattern: #"!\[([^\]]*)\]\(data:image\/([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)\)"#,
@@ -5398,7 +5484,7 @@ final class AppState: ObservableObject {
         return mutable as String
     }
 
-    private static func imageExtension(forMime mime: String) -> String {
+    nonisolated private static func imageExtension(forMime mime: String) -> String {
         if mime.contains("jpeg") || mime.contains("jpg") { return "jpg" }
         if mime.contains("gif") { return "gif" }
         if mime.contains("webp") { return "webp" }
