@@ -72,6 +72,12 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.14", changes: [
+            "Project files — attach Word/Excel/PDF/RTF/CSV/Markdown to a Project; sessions retrieve excerpts into context",
+            "Project Files sheet — Show in Finder; Search… moved to the project context menu",
+            "Project sessions use a distinct sidebar selection tint; OS Access no longer lists the Mac home for “list project files”",
+            "Fix generated images vanishing into omitted-from-context placeholders",
+        ]),
         ChangelogEntry(version: "0.4.13", changes: [
             "Incognito mode — ghost checkbox beside Auto/Manual/Judge; keeps context, wipes history on session end or quit, preserves spend totals",
             "Slow-response fallback — Preferences timeout (default 30s) retries Auto on a faster peer when no first token arrives; skips image-gen / reasoning; optional for Manual",

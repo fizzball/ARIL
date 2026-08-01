@@ -4,7 +4,7 @@ High-level capabilities of the Adaptive Routing Intelligent Layer macOS client.
 
 ## macOS native AI chat client
 
-SwiftUI app with multi-session chat history (create/delete sessions, sidebar session list). Group sessions into **Projects** (folders); project search is scoped to that project’s sessions, while the main sidebar search covers all sessions. Export a session as **Markdown** via the sidebar export control, context menu, or `/export`. Slash commands include `/web` (toggle web search) and `/cache` / `/cache compact` / `/cache clear` for local session-cache health.
+SwiftUI app with multi-session chat history (create/delete sessions, sidebar session list). Group sessions into **Projects** (folders); right-click a project for **Search…** (scoped to that project’s sessions), while the main sidebar search covers all sessions. Attach **Project files** (Word, Excel, PDF, RTF, CSV, Markdown) via the project context menu — text is extracted locally and relevant excerpts are injected into the system prompt for sessions in that project. Export a session as **Markdown** via the sidebar export control, context menu, or `/export`. Slash commands include `/web` (toggle web search) and `/cache` / `/cache compact` / `/cache clear` for local session-cache health.
 
 ## Local “Solo” gateway
 

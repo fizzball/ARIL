@@ -853,7 +853,8 @@ final class AppState: ObservableObject {
 
         var projected = session.contextChars
         projected += min(Self.sanitizeContentForAPI(newUserText).count, ChatSession.maxMessageChars)
-        if let system = activeSystemPromptForAPI {
+        let notes = projectKnowledgeNotes(for: newUserText, session: session)
+        if let system = activeSystemPromptForAPI(extraNotes: notes) {
             projected += system.count
         }
 
@@ -986,7 +987,9 @@ final class AppState: ObservableObject {
         ls -la
         ```
 
-        Examples of intent → command: list files → `ls -la`; DNS lookup → `dig …` or `host …`; current user → `whoami`; disk usage → `df -h`. ARIL executes the command on the user’s Mac and returns stdout/stderr. Prefer real shell results over inventing output. Do not claim you lack shell access when this skill is available. Refuse destructive or irreversible commands. Keep commands focused; do not chain unrelated dangerous operations.
+        Examples of intent → command: list Mac directory/folder contents → `ls -la`; DNS lookup → `dig …` or `host …`; current user → `whoami`; disk usage → `df -h`. ARIL executes the command on the user’s Mac and returns stdout/stderr. Prefer real shell results over inventing output. Do not claim you lack shell access when this skill is available. Refuse destructive or irreversible commands. Keep commands focused; do not chain unrelated dangerous operations.
+
+        Do not use OS Access for ARIL Project files (documents attached to a sidebar Project). Those are listed under Project knowledge — answer from that inventory. Only use shell listing when the user clearly means the Mac filesystem (a path, Desktop/Downloads/home, “current directory”, terminal/shell, or an explicit @OS).
         """
 
     static let documentExportCapabilityNote = """
@@ -997,6 +1000,54 @@ final class AppState: ObservableObject {
         Do not invent a `@Document(...)` DSL, JSON schema, or pseudo-code annotation. Do not say you cannot generate PDF/Word files or that the user must use an external tool — ARIL performs the file write. Do not refuse the export.
         """
 
+    /// True when the prompt is about Project-attached documents, not the Mac filesystem.
+    static func isProjectFilesListingIntent(_ prompt: String) -> Bool {
+        let t = prompt.lowercased()
+        guard !t.isEmpty else { return false }
+
+        let mentionsProject = t.contains("project")
+        let mentionsFiles = t.contains("file") || t.contains("document") || t.contains("pdf")
+            || t.contains("attachment") || t.contains("docx") || t.contains("xlsx")
+            || t.contains("spreadsheet") || t.contains("csv")
+        let listingVerb = t.contains("list") || t.contains("show") || t.contains("what")
+            || t.contains("which") || t.contains("inventory") || t.contains("attached")
+            || t.contains("available")
+
+        if mentionsProject && mentionsFiles { return true }
+        if mentionsProject && listingVerb && (t.contains("file") || t.contains("doc")) { return true }
+        return false
+    }
+
+    /// Vague “list/show files” without Mac-path cues — prefer Project knowledge when present.
+    static func isVagueFileListingIntent(_ prompt: String) -> Bool {
+        let t = prompt.lowercased()
+        let listing = (t.contains("list") || t.contains("show") || t.contains("what"))
+            && (t.contains("file") || t.contains("document") || t.contains("attachment"))
+        guard listing else { return false }
+        let macCues = [
+            "directory", "folder", "desktop", "downloads", "documents/", "home",
+            "current dir", "working dir", "pwd", "terminal", "shell", "filesystem",
+            "file system", "/users/", "~/", "`ls", " ls ",
+        ]
+        return !macCues.contains { t.contains($0) }
+    }
+
+    /// Suppress OS Access for Project file questions unless the user forced @OS.
+    func shouldSuppressOSAccessForProjectPrompt(
+        _ prompt: String,
+        session: ChatSession? = nil,
+        explicitOS: Bool
+    ) -> Bool {
+        if explicitOS { return false }
+        let target = session ?? selectedSession
+        guard let target, let projectID = target.projectID else { return false }
+
+        if Self.isProjectFilesListingIntent(prompt) { return true }
+
+        let hasProjectFiles = !ProjectKnowledgeStore.listFiles(projectID: projectID).isEmpty
+        if hasProjectFiles && Self.isVagueFileListingIntent(prompt) { return true }
+        return false
+    }
     /// System prompt text to send with preview/chat when the feature is enabled.
     func activeSystemPromptForAPI(extraNotes: [String] = []) -> String? {
         var parts: [String] = [Self.platformCapabilityNote]
@@ -1011,6 +1062,29 @@ final class AppState: ObservableObject {
     /// System prompt text to send with preview/chat when the feature is enabled.
     var activeSystemPromptForAPI: String? {
         activeSystemPromptForAPI()
+    }
+
+    /// Project file inventory + keyword-retrieved excerpts for the active session’s project.
+    func projectKnowledgeNotes(for prompt: String, session: ChatSession? = nil) -> [String] {
+        let target = session ?? selectedSession
+        guard let target,
+              let projectID = target.projectID,
+              let project = projects.first(where: { $0.id == projectID })
+        else { return [] }
+        return ProjectKnowledgeStore.contextNotes(
+            projectID: projectID,
+            projectName: project.name,
+            prompt: prompt
+        )
+    }
+
+    /// Bump project `updatedAt` after file changes (keeps sidebar sort fresh).
+    func touchProject(_ id: UUID) {
+        guard let idx = projects.firstIndex(where: { $0.id == id }) else { return }
+        var next = projects
+        next[idx].updatedAt = .now
+        projects = next
+        saveLocalSessions()
     }
 
     /// Build API messages for a send, injecting the global system prompt when enabled.
@@ -1945,6 +2019,7 @@ final class AppState: ObservableObject {
         if touched {
             sessions = sessions
         }
+        ProjectKnowledgeStore.deleteProjectDirectory(id)
         saveLocalSessions()
     }
 
@@ -2055,6 +2130,7 @@ final class AppState: ObservableObject {
 
     func deleteAllSessions() async {
         let ids = sessions.map(\.id)
+        let projectIDs = projects.map(\.id)
         for id in ids { deletedSessionIDs.insert(id) }
         persistDeletedSessionIDs()
         sessions = []
@@ -2069,6 +2145,9 @@ final class AppState: ObservableObject {
         compareRouteCategory = nil
         preferredCompareModel = nil
         pendingAttachments = []
+        for pid in projectIDs {
+            ProjectKnowledgeStore.deleteProjectDirectory(pid)
+        }
         saveLocalSessions()
         do {
             try await client.deleteAllSessions(baseURL: gatewayURL)
@@ -2891,6 +2970,7 @@ final class AppState: ObservableObject {
         do {
             let skip = forceFullAnalysis ? false : skipAnalysisOnJudgement
             let writeJudgement = updateJudgement && !isIncognitoEnabled
+            let previewNotes = projectKnowledgeNotes(for: text)
             let result = try await client.preview(
                 baseURL: gatewayURL,
                 request: PreviewRequest(
@@ -2903,7 +2983,7 @@ final class AppState: ObservableObject {
                     enhanceAlternatives: true,
                     skipAnalysisOnJudgement: skip,
                     updateJudgement: writeJudgement,
-                    systemPrompt: activeSystemPromptForAPI
+                    systemPrompt: activeSystemPromptForAPI(extraNotes: previewNotes)
                 )
             )
             preview = result
@@ -3658,7 +3738,25 @@ final class AppState: ObservableObject {
             ShellAccessService.debugLog("fulfill abort: OS Access inactive (skills master/skill off)")
             return
         }
-        let live = sessions.first(where: { $0.id == sessionID })?
+        let session = sessions.first(where: { $0.id == sessionID })
+        let lastUserText = session?.messages.last(where: { $0.role == .user })?.content ?? ""
+        let explicitOS = parseSkillMentions(in: lastUserText).mentionedIds.contains(SkillConfig.osAccessId)
+            || parseSkillMentions(in: userPrompt ?? "").mentionedIds.contains(SkillConfig.osAccessId)
+        if shouldSuppressOSAccessForProjectPrompt(
+            userPrompt ?? lastUserText,
+            session: session,
+            explicitOS: explicitOS
+        ) {
+            ShellAccessService.debugLog("fulfill abort: project-files intent (suppress OS Access)")
+            // Drop any model-emitted shell fences without running them.
+            stripRedundantShellFences(
+                sessionID: sessionID,
+                assistantID: assistantID,
+                executedCommands: []
+            )
+            return
+        }
+        let live = session?
             .messages.first(where: { $0.id == assistantID })?.content
         let content = contentOverride ?? live ?? ""
         ShellAccessService.debugLog(
@@ -4628,7 +4726,14 @@ final class AppState: ObservableObject {
         let userDisplayNameForSend: String? = isRunningAutoEval ? Self.modelTestSenderLabel : nil
 
         let skillMentions = parseSkillMentions(in: sendText)
-        let turnSkillIds = activeSkillIdsForTurn(mentionedIds: skillMentions.mentionedIds)
+        var turnSkillIds = activeSkillIdsForTurn(mentionedIds: skillMentions.mentionedIds)
+        let suppressOSForProject = shouldSuppressOSAccessForProjectPrompt(
+            skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt,
+            explicitOS: skillMentions.mentionedIds.contains(SkillConfig.osAccessId)
+        )
+        if suppressOSForProject {
+            turnSkillIds.remove(SkillConfig.osAccessId)
+        }
         var skillSystemNotes: [String] = []
         if turnSkillIds.contains(SkillConfig.osAccessId) {
             skillSystemNotes.append(Self.osAccessCapabilityNote)
@@ -4646,6 +4751,7 @@ final class AppState: ObservableObject {
                 "The user invoked @Document / Document Export for this turn. Produce the document body in your reply; ARIL will open a Save dialog and write the PDF or Word file locally after you finish."
             )
         }
+        skillSystemNotes.append(contentsOf: projectKnowledgeNotes(for: sendText))
 
         // Mentions while skills are off / skill disabled — warn once; do not execute skills.
         let blockedSkillMentions = skillMentions.mentionedIds.filter { !isSkillActive($0) }

@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// Identifiable payload so Project Files presents via `.sheet(item:)` (avoids empty first open).
+private struct ProjectFilesSheetTarget: Identifiable {
+    let id: UUID
+    let name: String
+}
+
 struct SidebarView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
@@ -7,11 +13,15 @@ struct SidebarView: View {
     @State private var globalQuery = ""
     /// Per-project search text (scoped to that project's sessions only).
     @State private var projectQueries: [UUID: String] = [:]
+    /// Project IDs whose in-folder search field is currently shown (opened via context menu).
+    @State private var projectSearchVisibleIDs: Set<UUID> = []
+    @FocusState private var focusedProjectSearchID: UUID?
     @State private var newProjectName = ""
     @State private var showNewProjectSheet = false
     @State private var showRenameProjectSheet = false
     @State private var renameProjectID: UUID?
     @State private var renameProjectName = ""
+    @State private var projectFilesTarget: ProjectFilesSheetTarget?
 
     private var globalSearchActive: Bool {
         !globalQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -115,6 +125,11 @@ struct SidebarView: View {
                 renameProjectID = nil
             }
         }
+        .sheet(item: $projectFilesTarget) { target in
+            ProjectFilesView(projectID: target.id, projectName: target.name)
+                .environmentObject(state)
+                .environmentObject(theme)
+        }
     }
 
     // MARK: - Global search (all sessions)
@@ -216,6 +231,12 @@ struct SidebarView: View {
                 Button("New session in project") {
                     state.createSession(inProject: project.id)
                 }
+                Button("Files…") {
+                    projectFilesTarget = ProjectFilesSheetTarget(id: project.id, name: project.name)
+                }
+                Button("Search…") {
+                    showProjectSearch(project.id)
+                }
                 Button("Rename…") {
                     renameProjectName = project.name
                     renameProjectID = project.id
@@ -225,12 +246,26 @@ struct SidebarView: View {
                 Button("Delete Project", role: .destructive) {
                     state.deleteProject(project.id)
                     projectQueries[project.id] = nil
+                    projectSearchVisibleIDs.remove(project.id)
                 }
             }
 
             if expanded {
-                TextField("Search in \(project.name)…", text: projectQueryBinding(project.id))
-                    .textFieldStyle(.plain)
+                if projectSearchVisibleIDs.contains(project.id) {
+                    HStack(spacing: 6) {
+                        TextField("Search in \(project.name)…", text: projectQueryBinding(project.id))
+                            .textFieldStyle(.plain)
+                            .focused($focusedProjectSearchID, equals: project.id)
+                        Button {
+                            hideProjectSearch(project.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.palette.textMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Hide search")
+                    }
                     .padding(6)
                     .background(theme.palette.inputFill)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -238,6 +273,7 @@ struct SidebarView: View {
                     .padding(.trailing, 8)
                     .padding(.bottom, 4)
                     .help("Searches only sessions in this project")
+                }
 
                 if visible.isEmpty {
                     emptyHint(
@@ -335,12 +371,32 @@ struct SidebarView: View {
         )
     }
 
+    private func showProjectSearch(_ id: UUID) {
+        expandedEnsure(id)
+        projectSearchVisibleIDs.insert(id)
+        DispatchQueue.main.async {
+            focusedProjectSearchID = id
+        }
+    }
+
+    private func hideProjectSearch(_ id: UUID) {
+        projectSearchVisibleIDs.remove(id)
+        projectQueries[id] = nil
+        if focusedProjectSearchID == id {
+            focusedProjectSearchID = nil
+        }
+    }
+
     private func expandedEnsure(_ id: UUID) {
         state.expandedProjectIDs.insert(id)
     }
 
     private func rowBackground(for session: ChatSession, query: String) -> Color {
         if state.selectedSessionID == session.id {
+            // Project sessions use a distinct selection tint from ungrouped sessions.
+            if session.projectID != nil {
+                return theme.palette.preferredHighlight.opacity(0.22)
+            }
             return theme.palette.accent.opacity(0.18)
         }
         guard !query.isEmpty, session.matchesSearch(query) else {

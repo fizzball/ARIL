@@ -217,6 +217,11 @@ enum ShellAccessService {
         let t = text.lowercased()
         guard !t.isEmpty else { return nil }
 
+        // Project documents ≠ Mac directory listing.
+        if t.contains("project") && (t.contains("file") || t.contains("document") || t.contains("pdf")) {
+            return nil
+        }
+
         if t.contains("list") && (t.contains("file") || t.contains("dir") || t.contains("directory") || t.contains("folder") || t.contains("lookup")) {
             return "ls -la"
         }
