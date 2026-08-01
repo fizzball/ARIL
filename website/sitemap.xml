@@ -3,13 +3,13 @@
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://aril.host/</loc>
-    <lastmod>2026-07-30</lastmod>
+    <lastmod>2026-08-01</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <image:image>
       <image:loc>https://aril.host/assets/screenshots/home.jpg</image:loc>
       <image:title>ARIL home screen</image:title>
-      <image:caption>ARIL macOS app with session sidebar and prompt entry</image:caption>
+      <image:caption>ARIL 0.4.14 macOS app with Projects sidebar and empty session hero</image:caption>
     </image:image>
     <image:image>
       <image:loc>https://aril.host/assets/screenshots/intelligence.jpg</image:loc>
@@ -19,10 +19,30 @@
       <image:loc>https://aril.host/assets/screenshots/chat.jpg</image:loc>
       <image:title>ARIL chat with cost footer</image:title>
     </image:image>
+    <image:image>
+      <image:loc>https://aril.host/assets/screenshots/judge.jpg</image:loc>
+      <image:title>ARIL Judge mode</image:title>
+    </image:image>
+    <image:image>
+      <image:loc>https://aril.host/assets/screenshots/spend.jpg</image:loc>
+      <image:title>ARIL spend analysis</image:title>
+    </image:image>
+    <image:image>
+      <image:loc>https://aril.host/assets/screenshots/models.jpg</image:loc>
+      <image:title>ARIL OpenRouter model picker</image:title>
+    </image:image>
+    <image:image>
+      <image:loc>https://aril.host/assets/screenshots/skills.jpg</image:loc>
+      <image:title>ARIL Skills preferences</image:title>
+    </image:image>
+    <image:image>
+      <image:loc>https://aril.host/assets/screenshots/mcp.jpg</image:loc>
+      <image:title>ARIL MCP scanners</image:title>
+    </image:image>
   </url>
   <url>
     <loc>https://aril.host/help/</loc>
-    <lastmod>2026-07-30</lastmod>
+    <lastmod>2026-08-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
