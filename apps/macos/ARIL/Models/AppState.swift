@@ -60,6 +60,26 @@ enum ContextLimitDecision {
     case cancel
 }
 
+/// OS Access command waiting for inline Run / Cancel in the chat bubble.
+struct PendingOSAccessApproval: Identifiable, Equatable {
+    let id: UUID
+    let sessionID: UUID
+    let assistantMessageID: UUID
+    let command: String
+
+    init(
+        id: UUID = UUID(),
+        sessionID: UUID,
+        assistantMessageID: UUID,
+        command: String
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.assistantMessageID = assistantMessageID
+        self.command = command
+    }
+}
+
 /// Local `sessions-cache.json` size band for footer colour and launch warnings.
 enum SessionCacheHealth: Equatable, Comparable {
     case healthy
@@ -138,6 +158,14 @@ final class AppState: ObservableObject {
     @Published var slowResponseFallbackSeconds: Int = 30
     /// When on (and timeout is not Off), Manual mode also uses slow-response fallback.
     @Published var slowResponseFallbackInManual: Bool = false
+    /// Master switch — skip models that recently timed out (Auto / Judge / fallback).
+    @Published var modelBypassEnabled: Bool = true
+    /// Minutes to bypass a model after a timeout (ignored when permanent-on-timeout is on).
+    @Published var modelBypassMinutes: Int = ModelBypassStore.defaultMinutes
+    /// When on, a timeout permanently bypasses the model until cleared in Preferences.
+    @Published var modelBypassPermanentOnTimeout: Bool = false
+    /// Active non-responsive model bypasses (expired entries are pruned on load / mark).
+    @Published var bypassedModels: [BypassedModelEntry] = []
     /// Master switch — when on, enabled MCP server entries are considered configured.
     @Published var mcpEnabled: Bool = false
     @Published var mcpServers: [MCPServerConfig] = []
@@ -291,6 +319,8 @@ final class AppState: ObservableObject {
     @Published var budgetConfirmMessage: String?
     /// Context-window limit dialog message; nil when no prompt is showing.
     @Published var contextLimitMessage: String?
+    /// OS Access commands awaiting inline Run / Cancel in the assistant bubble.
+    @Published var pendingOSAccessApprovals: [PendingOSAccessApproval] = []
     /// On-disk session cache size for the status footer.
     @Published var sessionCacheBytes: Int = 0
     @Published var sessionCacheLabel: String = "—"
@@ -320,6 +350,7 @@ final class AppState: ObservableObject {
     /// Skip budget UI while Learning → Run Selected Model Test is driving sends.
     private var budgetBypassForEval: Bool = false
     private var contextLimitContinuation: CheckedContinuation<ContextLimitDecision, Never>?
+    private var osAccessApprovalContinuations: [UUID: CheckedContinuation<Bool, Never>] = [:]
     /// Sessions where the user chose "Continue" past the context warning — don't nag again.
     private var contextWarnAcknowledged: Set<UUID> = []
     /// Periodic footer health probe (gateway / database / OpenRouter).
@@ -410,6 +441,14 @@ final class AppState: ObservableObject {
         )
         slowResponseFallbackInManual =
             defaults.object(forKey: "aril.slowResponseFallbackInManual") as? Bool ?? false
+        modelBypassEnabled = defaults.object(forKey: ModelBypassStore.enabledKey) as? Bool ?? true
+        modelBypassMinutes = ModelBypassStore.clampedMinutes(
+            defaults.object(forKey: ModelBypassStore.minutesKey) as? Int
+                ?? ModelBypassStore.defaultMinutes
+        )
+        modelBypassPermanentOnTimeout =
+            defaults.object(forKey: ModelBypassStore.permanentKey) as? Bool ?? false
+        bypassedModels = ModelBypassStore.loadEntries(from: defaults)
         mcpEnabled = defaults.object(forKey: "aril.mcpEnabled") as? Bool ?? false
         mcpServers = Self.loadMCPServers()
         skillsEnabled = defaults.object(forKey: "aril.skillsEnabled") as? Bool ?? true
@@ -508,6 +547,77 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(enabled, forKey: "aril.slowResponseFallbackInManual")
     }
 
+    func setModelBypassEnabled(_ enabled: Bool) {
+        modelBypassEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: ModelBypassStore.enabledKey)
+    }
+
+    func setModelBypassMinutes(_ value: Int) {
+        let clamped = ModelBypassStore.clampedMinutes(value)
+        modelBypassMinutes = clamped
+        UserDefaults.standard.set(clamped, forKey: ModelBypassStore.minutesKey)
+    }
+
+    func setModelBypassPermanentOnTimeout(_ enabled: Bool) {
+        modelBypassPermanentOnTimeout = enabled
+        UserDefaults.standard.set(enabled, forKey: ModelBypassStore.permanentKey)
+    }
+
+    /// Model IDs currently excluded from Auto / Judge / stall fallback.
+    func activeExcludedModelIDs() -> [String] {
+        pruneExpiredModelBypasses()
+        guard modelBypassEnabled else { return [] }
+        return bypassedModels.map(\.modelID)
+    }
+
+    func isModelBypassed(_ modelID: String) -> Bool {
+        let id = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty, modelBypassEnabled else { return false }
+        pruneExpiredModelBypasses()
+        return bypassedModels.contains { $0.modelID == id }
+    }
+
+    /// After a first-token stall, optionally bypass `modelID` for the configured period (or permanently).
+    func markModelNonResponsive(_ modelID: String, reason: String = "No first token (timeout)") {
+        guard modelBypassEnabled else { return }
+        let id = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        pruneExpiredModelBypasses()
+        let now = Date()
+        let expires: Date? = modelBypassPermanentOnTimeout
+            ? nil
+            : now.addingTimeInterval(TimeInterval(modelBypassMinutes * 60))
+        let entry = BypassedModelEntry(
+            modelID: id,
+            bypassedAt: now,
+            expiresAt: expires,
+            reason: reason
+        )
+        var next = bypassedModels.filter { $0.modelID != id }
+        next.insert(entry, at: 0)
+        bypassedModels = next
+        ModelBypassStore.saveEntries(bypassedModels)
+    }
+
+    func clearModelBypass(_ modelID: String) {
+        let id = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        bypassedModels = bypassedModels.filter { $0.modelID != id }
+        ModelBypassStore.saveEntries(bypassedModels)
+    }
+
+    func clearAllModelBypasses() {
+        bypassedModels = []
+        ModelBypassStore.saveEntries(bypassedModels)
+    }
+
+    func pruneExpiredModelBypasses() {
+        let before = bypassedModels
+        let active = before.filter(\.isActive)
+        guard active.count != before.count else { return }
+        bypassedModels = active
+        ModelBypassStore.saveEntries(active)
+    }
+
     func setBudgetEnabled(_ enabled: Bool) {
         budgetEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "aril.budget.enabled")
@@ -537,6 +647,44 @@ final class AppState: ObservableObject {
         return await withCheckedContinuation { continuation in
             budgetConfirmContinuation = continuation
             budgetConfirmMessage = message
+        }
+    }
+
+    /// Inline Run / Cancel for a proposed OS Access command.
+    func respondToOSAccessApproval(id: UUID, allow: Bool) {
+        pendingOSAccessApprovals.removeAll { $0.id == id }
+        let cont = osAccessApprovalContinuations.removeValue(forKey: id)
+        cont?.resume(returning: allow)
+    }
+
+    /// Pending approvals shown under a specific assistant bubble.
+    func pendingOSAccessApprovals(forAssistantMessageID id: UUID) -> [PendingOSAccessApproval] {
+        pendingOSAccessApprovals.filter { $0.assistantMessageID == id }
+    }
+
+    private func requestOSAccessApproval(
+        sessionID: UUID,
+        assistantID: UUID,
+        command: String
+    ) async -> Bool {
+        let entry = PendingOSAccessApproval(
+            sessionID: sessionID,
+            assistantMessageID: assistantID,
+            command: command
+        )
+        return await withCheckedContinuation { continuation in
+            osAccessApprovalContinuations[entry.id] = continuation
+            pendingOSAccessApprovals.append(entry)
+        }
+    }
+
+    private func cancelPendingOSAccessApprovals() {
+        let pending = pendingOSAccessApprovals
+        pendingOSAccessApprovals = []
+        for entry in pending {
+            if let cont = osAccessApprovalContinuations.removeValue(forKey: entry.id) {
+                cont.resume(returning: false)
+            }
         }
     }
 
@@ -2706,16 +2854,21 @@ final class AppState: ObservableObject {
     /// Pick a different model after a first-token stall (one retry only).
     private func resolveSlowResponseFallbackModel(stalledModel: String) -> String? {
         let stalled = stalledModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let excluded = Set(activeExcludedModelIDs() + [stalled])
         let routes = preview?.routes ?? []
 
+        func allowed(_ id: String) -> Bool {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty
+                && !excluded.contains(trimmed)
+                && !Self.isReasoningModelID(trimmed)
+        }
+
         if let idx = routes.firstIndex(where: { $0.modelId == stalled }) {
-            for peer in routes.suffix(from: idx + 1) {
-                let id = peer.modelId
-                if id != stalled, !Self.isReasoningModelID(id) { return id }
+            for peer in routes.suffix(from: idx + 1) where allowed(peer.modelId) {
+                return peer.modelId
             }
-        } else if let peer = routes.first(where: {
-            $0.modelId != stalled && !Self.isReasoningModelID($0.modelId)
-        }) {
+        } else if let peer = routes.first(where: { allowed($0.modelId) }) {
             return peer.modelId
         }
 
@@ -2727,15 +2880,15 @@ final class AppState: ObservableObject {
             "anthropic/claude-3.5-haiku",
             "anthropic/claude-3-haiku",
         ]
-        for id in preferred where modelCatalog.contains(id) && id != stalled && !Self.isReasoningModelID(id) {
+        for id in preferred where modelCatalog.contains(id) && allowed(id) {
             return id
         }
         if let fast = modelCatalog.first(where: {
-            $0 != stalled && Self.looksLikeFastFallbackModel($0) && !Self.isReasoningModelID($0)
+            allowed($0) && Self.looksLikeFastFallbackModel($0)
         }) {
             return fast
         }
-        return modelCatalog.first { $0 != stalled && !Self.isReasoningModelID($0) }
+        return modelCatalog.first { allowed($0) }
     }
 
     /// Stream with optional first-token watchdog. Throws `SlowResponseStallError` on stall cancel.
@@ -2787,12 +2940,17 @@ final class AppState: ObservableObject {
             while let item = try await group.next() {
                 if let done = item {
                     group.cancelAll()
+                    // Drain so the sibling sleep task doesn't surface CancellationError.
+                    while let _ = try? await group.next() {}
                     finished = done
                     break
                 }
                 // Watchdog fired — only stall-cancel when still silent (no tokens, no MCP).
                 if !streamTokens.sawTokens && !streamMCP.sawTokens {
                     group.cancelAll()
+                    // Wait for the cancelled stream socket to finish tearing down before
+                    // the caller starts a fallback request on the shared URLSession.
+                    while let _ = try? await group.next() {}
                     throw SlowResponseStallError(
                         stalledModel: expectedModel,
                         timeoutSeconds: timeoutSeconds
@@ -2802,6 +2960,23 @@ final class AppState: ObservableObject {
             if let finished { return finished }
             throw CancellationError()
         }
+    }
+
+    /// True when assistant text is only the slow-response fallback notice (no model reply yet).
+    private static func isSlowResponseFallbackNoticeOnly(_ content: String) -> Bool {
+        let body = ChatMessage.stripActualCostFooter(content)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return false }
+        let lower = body.lowercased()
+        guard lower.hasPrefix("no response from "),
+              lower.contains("retrying with ")
+        else { return false }
+        let nonEmptyLines = body
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        // Notice is a single line; a real reply adds further content.
+        return nonEmptyLines.count <= 1
     }
 
     /// Insert `model` at the top of the Manual shortlist. Caps at `maxModelCatalogSize`
@@ -2983,7 +3158,8 @@ final class AppState: ObservableObject {
                     enhanceAlternatives: true,
                     skipAnalysisOnJudgement: skip,
                     updateJudgement: writeJudgement,
-                    systemPrompt: activeSystemPromptForAPI(extraNotes: previewNotes)
+                    systemPrompt: activeSystemPromptForAPI(extraNotes: previewNotes),
+                    excludedModels: activeExcludedModelIDs()
                 )
             )
             preview = result
@@ -3800,18 +3976,51 @@ final class AppState: ObservableObject {
 
         let already = live ?? content
         var executed: [String] = []
+        var decided: [String] = []
         for command in commands {
             if already.contains("**OS Access** · `\(command)`") {
                 ShellAccessService.debugLog("skip already-ran \(command)")
                 continue
             }
-            if executed.contains(command) { continue }
-            executed.append(command)
+            if decided.contains(command) { continue }
+            decided.append(command)
 
             appendOSAccessNote(
                 sessionID: sessionID,
                 assistantID: assistantID,
-                note: "**OS Access** · running `\(command)`…"
+                note: "**OS Access** · wants to run `\(command)` — waiting for approval"
+            )
+
+            let allowed = await requestOSAccessApproval(
+                sessionID: sessionID,
+                assistantID: assistantID,
+                command: command
+            )
+            if Task.isCancelled {
+                replaceOSAccessPendingNote(
+                    sessionID: sessionID,
+                    assistantID: assistantID,
+                    command: command,
+                    with: "**OS Access** · `\(command)` — cancelled"
+                )
+                break
+            }
+            guard allowed else {
+                replaceOSAccessPendingNote(
+                    sessionID: sessionID,
+                    assistantID: assistantID,
+                    command: command,
+                    with: "**OS Access** · `\(command)` — declined"
+                )
+                ShellAccessService.debugLog("declined \(command)")
+                continue
+            }
+
+            replaceOSAccessPendingNote(
+                sessionID: sessionID,
+                assistantID: assistantID,
+                command: command,
+                with: "**OS Access** · running `\(command)`…"
             )
 
             let block: String
@@ -3824,20 +4033,21 @@ final class AppState: ObservableObject {
                 ShellAccessService.debugLog("run failed \(command): \(error.localizedDescription)")
             }
 
-            replaceOSAccessRunningNote(
+            replaceOSAccessPendingNote(
                 sessionID: sessionID,
                 assistantID: assistantID,
                 command: command,
                 with: block
             )
+            executed.append(command)
         }
 
         // Drop the model’s ```aril-shell``` fences — the OS Access result already names the command.
-        if !executed.isEmpty {
+        if !decided.isEmpty {
             stripRedundantShellFences(
                 sessionID: sessionID,
                 assistantID: assistantID,
-                executedCommands: executed
+                executedCommands: decided
             )
         }
     }
@@ -3955,7 +4165,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func replaceOSAccessRunningNote(
+    private func replaceOSAccessPendingNote(
         sessionID: UUID,
         assistantID: UUID,
         command: String,
@@ -3964,10 +4174,19 @@ final class AppState: ObservableObject {
         updateSession(sessionID) { session in
             guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
             var text = session.messages[m].content
-            let running = "**OS Access** · running `\(command)`…"
-            if let range = text.range(of: running) {
-                text.replaceSubrange(range, with: block)
-            } else if !text.contains("**OS Access** · `\(command)`") {
+            let candidates = [
+                "**OS Access** · wants to run `\(command)` — waiting for approval",
+                "**OS Access** · running `\(command)`…",
+            ]
+            var replaced = false
+            for running in candidates {
+                if let range = text.range(of: running) {
+                    text.replaceSubrange(range, with: block)
+                    replaced = true
+                    break
+                }
+            }
+            if !replaced, !text.contains("**OS Access** · `\(command)`") {
                 let body = ChatMessage.stripActualCostFooter(text)
                 let footer = String(text.dropFirst(body.count))
                 let sep = (body.isEmpty || body.hasSuffix("\n")) ? "" : "\n"
@@ -4584,6 +4803,7 @@ final class AppState: ObservableObject {
     func stopGeneration() {
         sendTask?.cancel()
         sendTask = nil
+        cancelPendingOSAccessApprovals()
         endGenerationTracking(error: "Generation stopped")
     }
 
@@ -4842,12 +5062,35 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Bare shell prompts: run immediately via OS Access and skip the model when
-        // the message is essentially just a command (optionally with @OS).
+        // Bare shell prompts: skip the model when the message is essentially just a
+        // command (optionally with @OS) — still require inline approval before run.
         if turnSkillIds.contains(SkillConfig.osAccessId),
            attachmentsForSend.isEmpty,
            let directCmd = Self.extractDirectShellCommand(from: skillMentions.cleanedPrompt),
            Self.isBareShellPrompt(skillMentions.cleanedPrompt, command: directCmd) {
+            updateSession(sid) { session in
+                if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                    session.messages[m].content =
+                        "**OS Access** · wants to run `\(directCmd)` — waiting for approval\n"
+                }
+            }
+            let allowed = await requestOSAccessApproval(
+                sessionID: sid,
+                assistantID: assistantID,
+                command: directCmd
+            )
+            guard allowed, !Task.isCancelled else {
+                updateSession(sid) { session in
+                    if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
+                        session.messages[m].content =
+                            allowed
+                            ? "**OS Access** · `\(directCmd)` — cancelled"
+                            : "**OS Access** · `\(directCmd)` — declined"
+                    }
+                }
+                await persistSelectedSession()
+                return
+            }
             updateSession(sid) { session in
                 if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
                     session.messages[m].content = "**OS Access** · running `\(directCmd)`…\n"
@@ -4928,7 +5171,8 @@ final class AppState: ObservableObject {
             attachments: attachmentDTOs,
             webSearch: webSearchEnabled,
             skipAutoJudgement: interruptedIdleAnalysis || isIncognitoEnabled,
-            mcpServers: mcpForRequest
+            mcpServers: mcpForRequest,
+            excludedModels: activeExcludedModelIDs()
         )
 
         // Stream token UI updates are applied on MainActor and awaited so post-stream
@@ -5006,8 +5250,12 @@ final class AppState: ObservableObject {
             }
         }
 
+        // Set when slow-response fallback picks a peer — used by non-stream recovery too.
+        var fallbackModelForRecovery: String?
+
         do {
             let done: StreamDoneEvent
+            var usedSlowResponseFallback = false
             do {
                 done = try await chatStreamWithSlowResponseWatchdog(
                     request: request,
@@ -5019,6 +5267,10 @@ final class AppState: ObservableObject {
                     onMCPStatus: onMCPStatus
                 )
             } catch let stall as SlowResponseStallError {
+                markModelNonResponsive(
+                    stall.stalledModel,
+                    reason: "No first token after \(stall.timeoutSeconds)s"
+                )
                 guard !Task.isCancelled,
                       let fallback = resolveSlowResponseFallbackModel(stalledModel: stall.stalledModel),
                       fallback != stall.stalledModel
@@ -5040,19 +5292,23 @@ final class AppState: ObservableObject {
                 if routeMode == .auto {
                     selectedModel = fallback
                 }
+                fallbackModelForRecovery = fallback
+                usedSlowResponseFallback = true
                 let retryRequest = ChatRequest(
                     messages: historyForAPI,
                     model: fallback,
                     temperature: temperature,
                     routeMode: .manual,
-                    useCache: true,
+                    // Avoid serving a stale empty/partial cache entry after the stalled attempt.
+                    useCache: false,
                     sessionId: sid.uuidString.lowercased(),
                     previewId: nil,
                     routingProfile: APIRoutingProfile(routingProfile),
                     attachments: attachmentDTOs,
                     webSearch: webSearchEnabled,
                     skipAutoJudgement: interruptedIdleAnalysis || isIncognitoEnabled,
-                    mcpServers: mcpForRequest
+                    mcpServers: mcpForRequest,
+                    excludedModels: activeExcludedModelIDs()
                 )
                 done = try await chatStreamWithSlowResponseWatchdog(
                     request: retryRequest,
@@ -5086,11 +5342,18 @@ final class AppState: ObservableObject {
 
             var streamedText = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
-            // Empty `done` (model returned nothing) — recover via non-stream once.
+            // Empty model reply (or stall-notice only) — recover via non-stream once.
             // Server dedupes chat_transaction within 60s, so this stays Learning-safe.
-            if streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               !streamTokens.sawTokens {
-                throw ARILAPIError.stream("No response received from the model. Try sending again.")
+            let replyMissing = !streamTokens.sawTokens && (
+                streamedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || Self.isSlowResponseFallbackNoticeOnly(streamedText)
+            )
+            if replyMissing {
+                throw ARILAPIError.stream(
+                    usedSlowResponseFallback
+                        ? "Fallback model returned no response. Try sending again."
+                        : "No response received from the model. Try sending again."
+                )
             }
 
             // OS Access only when the skill is actually active (master + skill on).
@@ -5156,7 +5419,8 @@ final class AppState: ObservableObject {
         } catch is CancellationError {
             let partial = sessions.first(where: { $0.id == sid })?
                 .messages.first(where: { $0.id == assistantID })?.content ?? ""
-            if !partial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !partial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !Self.isSlowResponseFallbackNoticeOnly(partial) {
                 recordExchange(
                     prompt: displayText,
                     response: partial,
@@ -5167,19 +5431,26 @@ final class AppState: ObservableObject {
                 )
             }
             updateSession(sid) { session in
-                session.messages.removeAll { $0.id == assistantID && $0.content.isEmpty }
+                session.messages.removeAll {
+                    $0.id == assistantID && (
+                        $0.content.isEmpty || Self.isSlowResponseFallbackNoticeOnly($0.content)
+                    )
+                }
             }
         } catch {
             if Task.isCancelled { return }
             // Prefer the streamed reply when any tokens arrived. Only fall back to
             // /v1/chat on zero-token failures; server dedupes duplicate Learning rows.
+            // Stall-notice-only content must NOT count as a successful reply.
             let alreadyHasContent: Bool = {
+                guard streamTokens.sawTokens else { return false }
                 guard let session = sessions.first(where: { $0.id == sid }),
                       let msg = session.messages.first(where: { $0.id == assistantID })
                 else { return false }
-                return !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let body = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !body.isEmpty && !Self.isSlowResponseFallbackNoticeOnly(body)
             }()
-            if alreadyHasContent || streamTokens.sawTokens {
+            if alreadyHasContent {
                 lastError = nil
                 persistInlineImages(sessionID: sid, assistantID: assistantID)
                 let partialText = sessions.first(where: { $0.id == sid })?
@@ -5232,10 +5503,39 @@ final class AppState: ObservableObject {
                 return
             }
             do {
-                let response = try await client.chat(baseURL: gatewayURL, request: request)
+                // After a stall, recover with the fallback peer — not the original Auto request.
+                let recoveryRequest: ChatRequest = {
+                    if let fallback = fallbackModelForRecovery {
+                        return ChatRequest(
+                            messages: historyForAPI,
+                            model: fallback,
+                            temperature: temperature,
+                            routeMode: .manual,
+                            useCache: false,
+                            sessionId: sid.uuidString.lowercased(),
+                            previewId: nil,
+                            routingProfile: APIRoutingProfile(routingProfile),
+                            attachments: attachmentDTOs,
+                            webSearch: webSearchEnabled,
+                            skipAutoJudgement: interruptedIdleAnalysis || isIncognitoEnabled,
+                            mcpServers: mcpForRequest,
+                            excludedModels: activeExcludedModelIDs()
+                        )
+                    }
+                    return request
+                }()
+                let response = try await client.chat(baseURL: gatewayURL, request: recoveryRequest)
+                let noticePrefix: String = {
+                    guard let session = sessions.first(where: { $0.id == sid }),
+                          let msg = session.messages.first(where: { $0.id == assistantID }),
+                          Self.isSlowResponseFallbackNoticeOnly(msg.content)
+                    else { return "" }
+                    return ChatMessage.stripActualCostFooter(msg.content)
+                        .trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n"
+                }()
                 updateSession(sid) { session in
                     if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
-                        session.messages[m].content = response.message.content
+                        session.messages[m].content = noticePrefix + response.message.content
                     }
                 }
                 persistInlineImages(sessionID: sid, assistantID: assistantID)
@@ -5243,7 +5543,7 @@ final class AppState: ObservableObject {
                     await fulfillOSAccessShellBlocks(
                         sessionID: sid,
                         assistantID: assistantID,
-                        contentOverride: response.message.content,
+                        contentOverride: noticePrefix + response.message.content,
                         userPrompt: skillMentions.cleanedPrompt.isEmpty ? sendText : skillMentions.cleanedPrompt
                     )
                 }
@@ -5317,7 +5617,8 @@ final class AppState: ObservableObject {
                     routingProfile: APIRoutingProfile(routingProfile),
                     sessionId: sessionID.uuidString.lowercased(),
                     useCache: true,
-                    runProbe: true
+                    runProbe: true,
+                    excludedModels: activeExcludedModelIDs()
                 )
             )
             if Task.isCancelled { return }

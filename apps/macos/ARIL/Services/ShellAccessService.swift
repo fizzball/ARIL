@@ -158,7 +158,9 @@ enum ShellAccessService {
                 .lowercased() ?? ""
 
             if let inline = inlineFenceCommand(opener) {
-                if !found.contains(inline) { found.append(inline) }
+                if looksLikeShellArgv(inline), !found.contains(inline) {
+                    found.append(inline)
+                }
                 continue
             }
 
@@ -176,9 +178,10 @@ enum ShellAccessService {
             }
             let command = body.joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            // Empty lang: only accept if it looks like a real shell argv.
-            if langToken.isEmpty, !looksLikeShellArgv(command) { continue }
-            if !command.isEmpty, !found.contains(command) {
+            // Always require a known argv0 / path — invented tokens like `set-inform`
+            // must not auto-run just because they sat in an ```aril-shell``` fence.
+            guard !command.isEmpty, looksLikeShellArgv(command) else { continue }
+            if !found.contains(command) {
                 found.append(command)
             }
         }

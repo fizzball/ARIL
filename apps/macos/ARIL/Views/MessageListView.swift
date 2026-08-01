@@ -215,6 +215,9 @@ private struct MessageBubble: View {
                             streaming: isWaitingAssistant
                         )
                     }
+                    ForEach(state.pendingOSAccessApprovals(forAssistantMessageID: message.id)) { pending in
+                        OSAccessApprovalBanner(approval: pending)
+                    }
                     if let costLabel = message.costFooterLabel {
                         Text(costLabel)
                             .font(ARILTheme.captionFont.weight(.semibold))
@@ -227,6 +230,50 @@ private struct MessageBubble: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Inline Run / Cancel chip for a proposed local shell command.
+private struct OSAccessApprovalBanner: View {
+    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var theme: ThemeStore
+    let approval: PendingOSAccessApproval
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("OS Access wants to run a local command")
+                .font(ARILTheme.captionFont.weight(.semibold))
+                .foregroundStyle(theme.palette.text)
+            Text(approval.command)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(theme.palette.accent)
+                .textSelection(.enabled)
+                .lineLimit(4)
+            HStack(spacing: 10) {
+                Button("Run") {
+                    state.respondToOSAccessApproval(id: approval.id, allow: true)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(theme.palette.accentStrong)
+                .controlSize(.small)
+
+                Button("Cancel", role: .cancel) {
+                    state.respondToOSAccessApproval(id: approval.id, allow: false)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.palette.inputFill.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(theme.palette.accent.opacity(0.35), lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("OS Access approval for \(approval.command)")
     }
 }
 

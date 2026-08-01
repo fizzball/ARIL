@@ -61,6 +61,8 @@ struct PreviewRequest: Encodable {
     let skipAnalysisOnJudgement: Bool
     let updateJudgement: Bool
     let systemPrompt: String?
+    /// Models to skip for Auto recommendation (recent timeouts).
+    var excludedModels: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case prompt, temperature
@@ -72,6 +74,7 @@ struct PreviewRequest: Encodable {
         case skipAnalysisOnJudgement = "skip_analysis_on_judgement"
         case updateJudgement = "update_judgement"
         case systemPrompt = "system_prompt"
+        case excludedModels = "excluded_models"
     }
 }
 
@@ -274,6 +277,8 @@ struct ChatRequest: Encodable {
     /// Enter before analysis idle timer — chat normally but do not seed Learning.
     let skipAutoJudgement: Bool
     let mcpServers: [MCPServerInRequestDTO]
+    /// Models to skip for Auto routing (recent timeouts).
+    var excludedModels: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case messages, model, temperature, attachments
@@ -285,6 +290,7 @@ struct ChatRequest: Encodable {
         case webSearch = "web_search"
         case skipAutoJudgement = "skip_auto_judgement"
         case mcpServers = "mcp_servers"
+        case excludedModels = "excluded_models"
     }
 }
 
@@ -406,6 +412,7 @@ struct CompareRequestDTO: Encodable {
     let sessionId: String?
     let useCache: Bool
     let runProbe: Bool
+    var excludedModels: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case messages, models, temperature
@@ -413,6 +420,7 @@ struct CompareRequestDTO: Encodable {
         case sessionId = "session_id"
         case useCache = "use_cache"
         case runProbe = "run_probe"
+        case excludedModels = "excluded_models"
     }
 }
 

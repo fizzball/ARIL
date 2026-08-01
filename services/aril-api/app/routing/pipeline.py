@@ -19,6 +19,62 @@ from app.core.schemas import (
 
 DEFAULT_PROFILE = RoutingProfile().as_map()
 
+
+def normalize_excluded_models(excluded: list[str] | None) -> set[str]:
+    """Normalize client-supplied bypass IDs for membership checks."""
+    out: set[str] = set()
+    for raw in excluded or []:
+        mid = (raw or "").strip()
+        if mid:
+            out.add(mid)
+    return out
+
+
+def first_allowed_model(
+    candidates: list[str] | tuple[str, ...] | None,
+    excluded: set[str],
+) -> str | None:
+    """Return the first non-empty model id that is not in `excluded`."""
+    for raw in candidates or []:
+        mid = (raw or "").strip()
+        if mid and mid not in excluded:
+            return mid
+    return None
+
+
+def alternate_model_for_category(
+    category: RouteCategory,
+    profile: dict[RouteCategory, str] | None,
+    excluded: set[str],
+    *,
+    prefer: str | None = None,
+) -> str:
+    """Pick a usable model when Prefer / profile picks are bypassed."""
+    mapping = profile or DEFAULT_PROFILE
+    candidates: list[str] = []
+    if prefer:
+        candidates.append(prefer)
+    candidates.append(mapping.get(category) or "")
+    candidates.extend(CATEGORY_RECOMMENDATIONS.get(category, []))
+    candidates.extend(mapping.values())
+    for models in CATEGORY_RECOMMENDATIONS.values():
+        candidates.extend(models)
+    # Cheap last-resort peers used by the Mac client too.
+    candidates.extend(
+        [
+            "openai/gpt-4.1-mini",
+            "openai/gpt-4o-mini",
+            "google/gemini-2.5-flash",
+            "google/gemini-2.0-flash-001",
+        ]
+    )
+    pick = first_allowed_model(candidates, excluded)
+    if pick:
+        return pick
+    # Absolute fallback — should almost never hit an empty catalog.
+    return mapping.get(category) or mapping[RouteCategory.general]
+
+
 # Legacy blended fallbacks — live OpenRouter rates come from app.routing.pricing.
 COST_PER_1K: dict[str, float] = {
     "openai/gpt-4.1": 0.005,
@@ -230,18 +286,20 @@ def select_judge_models(
     category: RouteCategory,
     profile: dict[RouteCategory, str] | None = None,
     count: int = 3,
+    excluded_models: list[str] | None = None,
 ) -> list[str]:
     """Pick 1 profile model + up to 2 peers that share the same capability.
 
     Example: vision prompt → profile vision model + 2 other vision-capable models.
     """
     mapping = profile or DEFAULT_PROFILE
+    excluded = normalize_excluded_models(excluded_models)
     picks: list[str] = []
     seen: set[str] = set()
 
     def add(model_id: str | None) -> None:
         mid = (model_id or "").strip()
-        if not mid or mid in seen:
+        if not mid or mid in seen or mid in excluded:
             return
         seen.add(mid)
         picks.append(mid)
@@ -265,6 +323,13 @@ def select_judge_models(
         add(mid)
         if len(picks) >= count:
             break
+    # Still short after exclusions — pull from other category catalogs.
+    if len(picks) < count:
+        for models in CATEGORY_RECOMMENDATIONS.values():
+            for mid in models:
+                add(mid)
+                if len(picks) >= count:
+                    return picks[:count]
     return picks[:count]
 
 
@@ -473,6 +538,7 @@ def build_preview(
     # Prefer explicit profile mapping for the classified category (clearest Auto behavior)
     profile_pick = profile.get(classification.primary) or profile[RouteCategory.general]
     preference_reason: str | None = None
+    excluded = normalize_excluded_models(getattr(req, "excluded_models", None))
 
     if req.preferred_model and req.route_mode.value == "manual":
         recommended = req.preferred_model
@@ -482,19 +548,42 @@ def build_preview(
         pick = pref_store.preferred_model_for_prompt(
             req.prompt, classification.primary.value
         )
-        if pick:
+        if pick and pick.get("model") and pick["model"] not in excluded:
             recommended = pick["model"]
             preference_reason = pick.get("reason")
-        elif user_override and user_override.model and user_override.category_overridden:
+        elif (
+            user_override
+            and user_override.model
+            and user_override.category_overridden
+            and user_override.model not in excluded
+        ):
             recommended = user_override.model
-        else:
+        elif profile_pick not in excluded:
             recommended = profile_pick
+        else:
+            recommended = alternate_model_for_category(
+                classification.primary, profile, excluded, prefer=profile_pick
+            )
+            preference_reason = (
+                f"Skipped non-responsive model; using {recommended}."
+            )
     elif user_override and user_override.model and user_override.category_overridden:
         recommended = user_override.model
     else:
         recommended = profile_pick
 
-    # Ensure recommended appears first in routes for UI
+    if (
+        req.route_mode.value != "manual"
+        and recommended in excluded
+        and not wants_image_generation(req.prompt)
+    ):
+        recommended = alternate_model_for_category(
+            classification.primary, profile, excluded, prefer=recommended
+        )
+
+    # Drop bypassed models from the Intelligence route shortlist (keep recommended).
+    if excluded:
+        routes = [r for r in routes if r.model_id not in excluded or r.model_id == recommended]
     routes.sort(
         key=lambda r: (0 if r.model_id == recommended else 1, -r.score),
     )

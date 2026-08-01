@@ -321,6 +321,82 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Non-responsive model bypass") {
+                Toggle(
+                    "Bypass models after timeout",
+                    isOn: Binding(
+                        get: { state.modelBypassEnabled },
+                        set: { state.setModelBypassEnabled($0) }
+                    )
+                )
+                Text("When a model fails to return a first token, skip it for Auto, Judge, and fallback retries until the bypass expires (or you clear it). Manual locks still honor your pick.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker(
+                    "Bypass duration",
+                    selection: Binding(
+                        get: { state.modelBypassMinutes },
+                        set: { state.setModelBypassMinutes($0) }
+                    )
+                ) {
+                    Text("5 minutes").tag(5)
+                    Text("15 minutes").tag(15)
+                    Text("30 minutes").tag(30)
+                    Text("1 hour").tag(60)
+                    Text("2 hours").tag(120)
+                    Text("6 hours").tag(360)
+                    Text("24 hours").tag(1440)
+                }
+                .disabled(!state.modelBypassEnabled || state.modelBypassPermanentOnTimeout)
+
+                Toggle(
+                    "Bypass permanently on timeout",
+                    isOn: Binding(
+                        get: { state.modelBypassPermanentOnTimeout },
+                        set: { state.setModelBypassPermanentOnTimeout($0) }
+                    )
+                )
+                .disabled(!state.modelBypassEnabled)
+                Text("When on, a timeout keeps the model bypassed until you remove it below. Duration above is ignored.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if state.bypassedModels.isEmpty {
+                    Text("No models are currently bypassed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(state.bypassedModels) { entry in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.modelID.split(separator: "/").last.map(String.init) ?? entry.modelID)
+                                    .font(.body.weight(.medium))
+                                Text(entry.modelID)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                Text("\(entry.statusLabel) · \(entry.reason)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Clear") {
+                                state.clearModelBypass(entry.modelID)
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                    Button("Clear all bypasses") {
+                        state.clearAllModelBypasses()
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .onAppear {
+                state.pruneExpiredModelBypasses()
+            }
+
             Section("Menu bar") {
                 Toggle(
                     "Show ARIL in the menu bar",

@@ -137,6 +137,8 @@ class PreviewRequest(BaseModel):
     update_judgement: bool = False
     # Optional Claude.md-style system prompt; counted toward token/cost estimates only.
     system_prompt: str | None = None
+    # Models the Mac client marked non-responsive (timeouts); skip for Auto recommend.
+    excluded_models: list[str] = Field(default_factory=list)
 
 
 class PreviewResponse(BaseModel):
@@ -182,6 +184,8 @@ class ChatRequest(BaseModel):
     skip_auto_judgement: bool = False
     # Ready remote MCP servers for this turn (keys from the Mac Keychain).
     mcp_servers: list[MCPServerInRequest] = Field(default_factory=list)
+    # Models the Mac client marked non-responsive (timeouts); skip for Auto routing.
+    excluded_models: list[str] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -204,6 +208,7 @@ class CompareRequest(BaseModel):
     session_id: str | None = None
     use_cache: bool = True
     run_probe: bool = True
+    excluded_models: list[str] = Field(default_factory=list)
 
 
 class CompareResult(BaseModel):

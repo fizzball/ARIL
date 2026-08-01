@@ -105,10 +105,17 @@ def _resolve_model(
     profile,
     *,
     route_mode: RouteMode = RouteMode.auto,
+    excluded_models: list[str] | None = None,
 ) -> tuple[str, object, str | None]:
+    from app.routing.pipeline import (
+        alternate_model_for_category,
+        normalize_excluded_models,
+    )
+
     classification = classify(last_user)
     mapping = resolve_profile(profile) if profile is not None else DEFAULT_PROFILE
     preference_reason: str | None = None
+    excluded = normalize_excluded_models(excluded_models)
 
     if route_mode == RouteMode.manual and req_model:
         # Manual is the only mode that honors the client-supplied model lock.
@@ -119,13 +126,29 @@ def _resolve_model(
         pick = pref_store.preferred_model_for_prompt(
             last_user, classification.primary.value
         )
-        if pick:
+        if pick and pick.get("model") and pick["model"] not in excluded:
             model = pick["model"]
             preference_reason = pick.get("reason")
         else:
-            model = mapping[classification.primary]
+            profile_pick = mapping[classification.primary]
+            if profile_pick not in excluded:
+                model = profile_pick
+            else:
+                model = alternate_model_for_category(
+                    classification.primary, mapping, excluded, prefer=profile_pick
+                )
+                preference_reason = f"Skipped non-responsive model; using {model}."
     else:
         model = req_model or mapping[classification.primary]
+
+    if (
+        route_mode != RouteMode.manual
+        and model in excluded
+        and not wants_image_generation(last_user)
+    ):
+        model = alternate_model_for_category(
+            classification.primary, mapping, excluded, prefer=model
+        )
 
     if wants_image_generation(last_user):
         model_l = (model or "").lower()
@@ -410,6 +433,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         last_user,
         req.routing_profile,
         route_mode=req.route_mode,
+        excluded_models=req.excluded_models,
     )
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
@@ -493,6 +517,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         last_user,
         req.routing_profile,
         route_mode=req.route_mode,
+        excluded_models=req.excluded_models,
     )
     temperature = (
         req.temperature if req.temperature is not None else settings.aril_default_temperature
@@ -845,6 +870,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
             route_category,
             profile=profile,
             count=target_count,
+            excluded_models=req.excluded_models,
         )
 
     # Deduplicate while preserving order; pad with capability peers if thin.
@@ -856,6 +882,7 @@ async def compare(req: CompareRequest) -> CompareResponse:
             route_category,
             profile=profile,
             count=target_count * 2,
+            excluded_models=req.excluded_models,
         ):
             if mid not in seen:
                 models.append(mid)
