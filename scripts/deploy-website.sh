@@ -42,13 +42,13 @@ echo "-> Deploying website to ${USER}@${HOST}:${REMOTE} (port ${PORT})..."
 
 RSYNC_SSH="ssh -p ${PORT} -o StrictHostKeyChecking=accept-new"
 
-# GNU rsync (Linux CI) supports --chmod=D755,F644; macOS/BSD rsync does not.
-RSYNC_CHMOD=()
-if rsync --help 2>&1 | grep -q -- '--chmod'; then
-  RSYNC_CHMOD=(--chmod=D755,F644)
+# GNU rsync (Linux CI) supports --chmod=D755,F644; macOS/BSD rsync rejects it.
+RSYNC_ARGS=(-avz --delete)
+if [[ "$(uname -s)" == "Linux" ]]; then
+  RSYNC_ARGS+=(--chmod=D755,F644)
 fi
 
-rsync -avz --delete "${RSYNC_CHMOD[@]}" \
+rsync "${RSYNC_ARGS[@]}" \
   -e "$RSYNC_SSH" \
   "$WEB/" \
   "${USER}@${HOST}:${REMOTE}/"
