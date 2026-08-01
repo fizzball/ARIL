@@ -5,8 +5,30 @@ struct ContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var theme: ThemeStore
     @Environment(\.openSettings) private var openSettings
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = Self.loadColumnVisibility()
     @StateObject private var systemMetrics = SystemMetricsMonitor()
+
+    private static let columnVisibilityKey = "aril.sidebarColumnVisibility"
+
+    private static func loadColumnVisibility() -> NavigationSplitViewVisibility {
+        switch UserDefaults.standard.string(forKey: columnVisibilityKey) {
+        case "detailOnly": return .detailOnly
+        case "doubleColumn": return .doubleColumn
+        case "automatic": return .automatic
+        default: return .all
+        }
+    }
+
+    private static func saveColumnVisibility(_ value: NavigationSplitViewVisibility) {
+        let raw: String
+        switch value {
+        case .detailOnly: raw = "detailOnly"
+        case .doubleColumn: raw = "doubleColumn"
+        case .automatic: raw = "automatic"
+        default: raw = "all"
+        }
+        UserDefaults.standard.set(raw, forKey: columnVisibilityKey)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,7 +82,8 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.22), value: state.activeToolPanel)
         .animation(.easeInOut(duration: 0.15), value: theme.fontSize)
         .animation(.easeInOut(duration: 0.15), value: theme.fontFamily)
-        .onChange(of: columnVisibility) { _, _ in
+        .onChange(of: columnVisibility) { _, newValue in
+            Self.saveColumnVisibility(newValue)
             WindowTitleHiding.hide(in: NSApp.keyWindow)
         }
         .toolbar {

@@ -70,6 +70,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.15", changes: [
+            "Cyan ARIL wordmark on the empty hero, title bar, and About panel (matches aril.host)",
+            "Collapsed sidebar no longer shows a duplicate system “ARIL” title beside the wordmark",
+            "Sidebar open/collapsed state is remembered across launches",
+        ]),
         ChangelogEntry(version: "0.4.14", changes: [
             "Project files — attach Word/Excel/PDF/RTF/CSV/Markdown to a Project; sessions retrieve excerpts into context",
             "Project Files sheet — Show in Finder; Search… moved to the project context menu",
