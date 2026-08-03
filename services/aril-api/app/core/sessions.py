@@ -157,17 +157,62 @@ def get_session(session_id: str) -> SessionDetail | None:
         )
 
 
+def _strip_cost_footer(content: str | None) -> str:
+    """Remove a trailing model/cost annotation (current + legacy formats)."""
+    import re
+
+    text = content or ""
+    patterns = (
+        # [ model · tokens used N / M: cost = $X ]  /  [ tokens used … ]
+        r"\n?\s*\[\s*(?:[^\]·]+·\s*)?tokens used\s+(?:\d+|—)\s*/\s*(?:\d+|—):\s*cost\s*=\s*\$[0-9.]+\s*\]\s*$",
+        # [ total token cost = $X ]
+        r"\n?\s*\[\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+\s*\]\s*$",
+        # --> total token cost = $X <--
+        r"\n?\s*-->\s*total(?:\s*\(in\+out\))?\s+token cost\s*=\s*\$[0-9.]+\s*<--\s*$",
+        # {actual cost = $X}
+        r"\n?\s*\{actual cost = \$[0-9.]+\}\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        after = text[match.end() :].strip()
+        if after:
+            continue
+        return text[: match.start()].rstrip()
+    return text
+
+
+def with_cost_footer(
+    content: str,
+    *,
+    model: str | None = None,
+    cost_usd: float = 0.0,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> str:
+    """Append a client-compatible `[ model · tokens used … ]` footer for restart survival."""
+    body = _strip_cost_footer(content).rstrip()
+    if not body.strip():
+        return content or ""
+    leaf = ""
+    if model:
+        leaf = str(model).split("/")[-1].strip() or str(model).strip()
+    dollars = f"${max(0.0, float(cost_usd or 0.0)):.4f}"
+    if input_tokens is not None and output_tokens is not None:
+        cost_part = f"tokens used {int(input_tokens)} / {int(output_tokens)}: cost = {dollars}"
+    else:
+        cost_part = f"tokens used — / —: cost = {dollars}"
+    if leaf:
+        return f"{body}\n\n[ {leaf} · {cost_part} ]"
+    return f"{body}\n\n[ {cost_part} ]"
+
+
 def _norm_content(content: str | None) -> str:
     """Collapse cost footers / whitespace for turn dedupe comparisons."""
     import re
 
-    text = content or ""
-    text = re.sub(
-        r"\n?\s*\[\s*[^\]]*tokens used[^\]]*cost\s*=\s*\$[0-9.]+\s*\]\s*$",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
+    text = _strip_cost_footer(content)
     text = re.sub(r"!\[[^\]]*\]\(file://[^)]+\)", "![img](file)", text, flags=re.IGNORECASE)
     text = re.sub(r"!\[[^\]]*\]\(data:image/[^)]+\)", "![img](data)", text, flags=re.IGNORECASE)
     # Same logical image turn after a client mistakenly stored the strip placeholder.
@@ -179,6 +224,11 @@ def _norm_content(content: str | None) -> str:
     )
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def _has_cost_footer(content: str | None) -> bool:
+    text = content or ""
+    return _strip_cost_footer(text) != text.rstrip()
 
 
 def _content_richness(content: str | None) -> int:
@@ -195,11 +245,23 @@ def _content_richness(content: str | None) -> int:
         score -= 80_000
     if "<svg" in text.lower():
         score += 20_000
+    # Prefer annotated replies so restart merges keep model/cost tags.
+    if _has_cost_footer(text):
+        score += 5_000
     return score
 
 
+def _prefer_content(new: str | None, old: str | None) -> bool:
+    """True when `new` should replace `old` for the same logical turn."""
+    return _content_richness(new) >= _content_richness(old)
+
+
 def _dedupe_messages(msgs: list[dict]) -> list[dict]:
-    """Collapse consecutive identical turns and duplicated user→assistant pairs."""
+    """Collapse consecutive identical turns and duplicated user→assistant pairs.
+
+    Same user prompt in consecutive pairs is treated as a record/upsert race even when
+    assistant wording differs slightly — keep the richer assistant (cost footer wins).
+    """
     out: list[dict] = []
     for msg in msgs:
         if not isinstance(msg, dict):
@@ -224,9 +286,8 @@ def _dedupe_messages(msgs: list[dict]) -> list[dict]:
             dup_user = out[-1]
             prev_asst = out[-2]
             prev_user = out[-3]
-            if _norm_content(dup_user.get("content")) == _norm_content(prev_user.get("content")) and _norm_content(
-                content
-            ) == _norm_content(prev_asst.get("content")):
+            same_user = _norm_content(dup_user.get("content")) == _norm_content(prev_user.get("content"))
+            if same_user:
                 if _content_richness(content) > _content_richness(prev_asst.get("content")):
                     out[-2] = msg
                 out.pop()
@@ -250,7 +311,11 @@ def upsert_session(payload: SessionUpsert) -> SessionDetail | None:
         # Prefer the longer unique history. Equal length → keep the richer message at
         # each index so a late client upsert with omitted-from-context cannot clobber
         # a gateway file:// image from record_chat_turn.
-        if old_msgs and len(new_msgs) < len(old_msgs):
+        # Exception: a shorter copy with cost footers beats a longer duplicate-inflated
+        # history that lost those annotations.
+        old_footers = sum(1 for m in old_msgs if _has_cost_footer(m.get("content")))
+        new_footers = sum(1 for m in new_msgs if _has_cost_footer(m.get("content")))
+        if old_msgs and len(new_msgs) < len(old_msgs) and new_footers <= old_footers:
             new_msgs = old_msgs
         elif old_msgs and len(new_msgs) == len(old_msgs):
             merged: list[dict] = []
@@ -260,6 +325,10 @@ def upsert_session(payload: SessionUpsert) -> SessionDetail | None:
                 else:
                     merged.append(old)
             new_msgs = merged
+        elif old_msgs and len(new_msgs) < len(old_msgs) and new_footers > old_footers:
+            # Keep the annotated shorter history (after soft dedupe the longer copy was
+            # usually a race duplicate without footers).
+            pass
         row = {
             "title": payload.title or (existing or {}).get("title") or "Untitled",
             "updated_at": _now(),
@@ -307,15 +376,15 @@ def record_chat_turn(
             msgs[-1].get("content") or ""
         ).strip():
             msgs.pop()
-        # Already recorded this exact turn (stream + upsert / retry races).
+        # Same trailing user prompt → merge assistant in place (stream/upsert/retry races
+        # often produce slightly different wording; appending would duplicate the turn).
         if (
             len(msgs) >= 2
             and msgs[-2].get("role") == "user"
             and msgs[-1].get("role") == "assistant"
             and _norm_content(msgs[-2].get("content")) == _norm_content(user_content)
-            and _norm_content(msgs[-1].get("content")) == _norm_content(assistant_content)
         ):
-            if _content_richness(assistant_content) > _content_richness(msgs[-1].get("content")):
+            if _prefer_content(assistant_content, msgs[-1].get("content")):
                 msgs[-1] = {"role": "assistant", "content": assistant_content}
                 row["messages"] = msgs
                 row["updated_at"] = _now()

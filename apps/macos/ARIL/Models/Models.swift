@@ -389,7 +389,9 @@ struct ChatSession: Identifiable, Hashable, Codable {
                 continue
             }
 
-            // Drop a repeated user→assistant pair that already appears immediately before.
+            // Drop a repeated user→assistant pair for the same user prompt.
+            // Assistant wording may differ slightly after stream/upsert/retry races —
+            // keep the richer assistant (cost footer preferred) and drop the duplicate user.
             if msg.role == .assistant,
                out.count >= 3,
                out[out.count - 1].role == .user,
@@ -400,10 +402,7 @@ struct ChatSession: Identifiable, Hashable, Codable {
                 let prevUser = out[out.count - 3]
                 let sameUser = ChatMessage.normalizedForDedupe(dupUser.content)
                     == ChatMessage.normalizedForDedupe(prevUser.content)
-                let sameAssistant = ChatMessage.normalizedForDedupe(msg.content)
-                    == ChatMessage.normalizedForDedupe(prevAssistant.content)
-                if sameUser && sameAssistant {
-                    // Keep the richer assistant of the two; drop the duplicate user.
+                if sameUser {
                     if ChatMessage.contentRichness(msg.content) > ChatMessage.contentRichness(prevAssistant.content) {
                         out[out.count - 2] = msg
                     }
@@ -613,6 +612,8 @@ struct ChatMessage: Identifiable, Hashable, Codable {
         if content.contains("data:image") { score += 40_000 }
         if content.contains("omitted-from-context") { score -= 80_000 }
         if body.lowercased().contains("<svg") { score += 20_000 }
+        // Prefer annotated replies so local/gateway merges keep model/cost tags.
+        if actualCostUsd(from: content) != nil { score += 5_000 }
         return score
     }
 

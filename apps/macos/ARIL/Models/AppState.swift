@@ -2782,8 +2782,16 @@ final class AppState: ObservableObject {
     /// Choose the better of two already-deduped sessions for the same id.
     private static func preferredSession(_ a: ChatSession, _ b: ChatSession) -> ChatSession {
         var winner: ChatSession
+        let aFooters = a.messages.filter { ChatMessage.actualCostUsd(from: $0.content) != nil }.count
+        let bFooters = b.messages.filter { ChatMessage.actualCostUsd(from: $0.content) != nil }.count
         if b.messages.count != a.messages.count {
-            winner = b.messages.count > a.messages.count ? b : a
+            // A duplicate-inflated gateway copy (no cost tags) must not beat a shorter
+            // local copy that still has model/cost footers.
+            if aFooters != bFooters {
+                winner = bFooters > aFooters ? b : a
+            } else {
+                winner = b.messages.count > a.messages.count ? b : a
+            }
         } else if a.messages.count == b.messages.count, !a.messages.isEmpty {
             // Same length: pick the richer message at each index so a local
             // omitted-from-context placeholder cannot beat a gateway file:// image.
@@ -2808,6 +2816,8 @@ final class AppState: ObservableObject {
                 let bRich = b.messages.reduce(0) { $0 + ChatMessage.contentRichness($1.content) }
                 if aRich != bRich {
                     winner = bRich > aRich ? b : a
+                } else if aFooters != bFooters {
+                    winner = bFooters > aFooters ? b : a
                 } else {
                     winner = b.updatedAt > a.updatedAt ? b : a
                 }

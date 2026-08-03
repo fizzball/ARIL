@@ -458,12 +458,6 @@ async def chat(req: ChatRequest) -> ChatResponse:
     # Persist images before returning so the HTTP body stays small (file:// links).
     client_content = _sse_token_content(result.content)
     assistant = ChatMessage(role="assistant", content=client_content)
-    session_store.record_chat_turn(
-        session_id,
-        title=last_user[:42] if last_user else "New session",
-        user_content=last_user,
-        assistant_content=result.content,
-    )
 
     resolved_cost = resolve_cost_usd(
         result.model,
@@ -473,6 +467,18 @@ async def chat(req: ChatRequest) -> ChatResponse:
         web_search=req.web_search,
     )
     final_cost = resolved_cost * (0.45 if cached else 1.0)
+    session_store.record_chat_turn(
+        session_id,
+        title=last_user[:42] if last_user else "New session",
+        user_content=last_user,
+        assistant_content=session_store.with_cost_footer(
+            result.content,
+            model=result.model,
+            cost_usd=final_cost,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        ),
+    )
     analysis_store.record_chat_transaction(
         session_id=session_id,
         prompt=last_user,
@@ -562,7 +568,13 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     session_id,
                     title=last_user[:42] if last_user else "New session",
                     user_content=last_user,
-                    assistant_content=content,
+                    assistant_content=session_store.with_cost_footer(
+                        content,
+                        model=str(meta["model"]),
+                        cost_usd=float(meta["cost_usd"]),
+                        input_tokens=int(meta["input_tokens"]),
+                        output_tokens=int(meta["output_tokens"]),
+                    ),
                 )
                 analysis_store.record_chat_transaction(
                     session_id=session_id,
@@ -790,19 +802,27 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             )
         # Client still received the full streamed content (including images) above.
         # Pass the full text so the session store can persist generated images to disk
-        # (as file:// links) instead of dropping them to a placeholder.
-        session_store.record_chat_turn(
-            session_id,
-            title=last_user[:42] if last_user else "New session",
-            user_content=last_user,
-            assistant_content=full,
-        )
+        # (as file:// links) instead of dropping them to a placeholder. Attach the
+        # model/cost footer here so tags survive app restart without relying on the
+        # client's later upsert.
         meta["cost_usd"] = resolve_cost_usd(
             str(meta.get("model") or model),
             reported_cost=float(meta.get("cost_usd") or 0.0),
             input_tokens=int(meta.get("input_tokens") or 0),
             output_tokens=int(meta.get("output_tokens") or 0),
             web_search=bool(req.web_search),
+        )
+        session_store.record_chat_turn(
+            session_id,
+            title=last_user[:42] if last_user else "New session",
+            user_content=last_user,
+            assistant_content=session_store.with_cost_footer(
+                full,
+                model=str(meta.get("model") or model),
+                cost_usd=float(meta.get("cost_usd") or 0.0),
+                input_tokens=int(meta.get("input_tokens") or 0),
+                output_tokens=int(meta.get("output_tokens") or 0),
+            ),
         )
         meta["latency_ms"] = int((time.perf_counter() - stream_started) * 1000)
         analysis_store.record_chat_transaction(
