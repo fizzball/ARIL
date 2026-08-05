@@ -425,7 +425,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.16"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.17"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "52"
         return "\(short) (\(build))"
     }

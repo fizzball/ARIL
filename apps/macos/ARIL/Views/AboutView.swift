@@ -70,6 +70,11 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.17", changes: [
+            "SSLyze Scanner (local) MCP — TLS certificate info, protocols, vuln checks (pipx install sslyze)",
+            "Model/cost tags survive app restart; duplicate session turns are collapsed",
+            "Slow-response stall prompts for retry model + timeout (defaults to Preferences)",
+        ]),
         ChangelogEntry(version: "0.4.16", changes: [
             "OS Access asks for inline Run / Cancel before executing a local shell command",
             "Non-responsive model bypass — skip models that stall on first token (Preferences duration or permanent); clear list anytime",
