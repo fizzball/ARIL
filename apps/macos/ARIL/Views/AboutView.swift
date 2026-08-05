@@ -70,6 +70,9 @@ struct AboutView: View {
     }
 
     private static let changelog: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4.18", changes: [
+            "Image replies show the model / tokens / cost tag again (storage sanitization no longer drops the assistant message id)",
+        ]),
         ChangelogEntry(version: "0.4.17", changes: [
             "SSLyze Scanner (local) MCP — TLS certificate info, protocols, vuln checks (pipx install sslyze)",
             "Model/cost tags survive app restart; duplicate session turns are collapsed",

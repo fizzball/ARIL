@@ -425,7 +425,7 @@ final class AppState: ObservableObject {
     }
 
     var appVersionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.17"
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.4.18"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "52"
         return "\(short) (\(build))"
     }
@@ -876,7 +876,14 @@ final class AppState: ObservableObject {
             var copy = session
             copy.deduplicateMessages()
             copy.messages = copy.messages.map { message in
-                ChatMessage(role: message.role, content: Self.sanitizeContentForStorage(message.content))
+                // Keep stable IDs — regenerating UUIDs here made post-stream
+                // applyActualCost miss the assistant bubble (image gens rewrite data: → file://).
+                ChatMessage(
+                    id: message.id,
+                    role: message.role,
+                    content: Self.sanitizeContentForStorage(message.content),
+                    displayName: message.displayName
+                )
             }
             copy.recomputeTotalCost()
             cleaned.append(copy)
@@ -5558,7 +5565,9 @@ final class AppState: ObservableObject {
             let assembled = streamAssembly.snapshot()
             if !assembled.isEmpty {
                 updateSession(sid) { session in
-                    guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+                    let index = session.messages.firstIndex(where: { $0.id == assistantID })
+                        ?? session.messages.lastIndex(where: { $0.role == .assistant })
+                    guard let m = index else { return }
                     if session.messages[m].content.count < assembled.count {
                         session.messages[m].content = assembled
                     }
@@ -5943,7 +5952,12 @@ final class AppState: ObservableObject {
             outputTokens: outputTokens
         )
         updateSession(sessionID) { session in
-            guard let m = session.messages.firstIndex(where: { $0.id == assistantID }) else { return }
+            // Prefer the streamed assistant id; fall back to the trailing assistant
+            // bubble when storage sanitization previously regenerated message UUIDs
+            // (common on image turns that rewrite data:image → file://).
+            let index = session.messages.firstIndex(where: { $0.id == assistantID })
+                ?? session.messages.lastIndex(where: { $0.role == .assistant })
+            guard let m = index else { return }
             let body = session.messages[m].content
             guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             session.messages[m].content = ChatMessage.withActualCostFooter(
@@ -6048,9 +6062,10 @@ final class AppState: ObservableObject {
     /// files is what lets generated images survive a restart. Returns true if changed.
     @discardableResult
     func persistInlineImages(sessionID sid: UUID, assistantID: UUID) -> Bool {
-        guard let i = sessions.firstIndex(where: { $0.id == sid }),
-              let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
-        else { return false }
+        guard let i = sessions.firstIndex(where: { $0.id == sid }) else { return false }
+        let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+            ?? sessions[i].messages.lastIndex(where: { $0.role == .assistant })
+        guard let m else { return false }
         let original = sessions[i].messages[m].content
         let rewritten = Self.rewriteInlineImagesToFiles(original, directory: Self.generatedImagesDirectoryURL())
         guard rewritten != original else { return false }
@@ -6063,9 +6078,10 @@ final class AppState: ObservableObject {
     /// When the client only has `omitted-from-context`, pull the gateway session and
     /// adopt any richer assistant turn (usually a `file://` GeneratedImages link).
     private func healOmittedImagesFromGateway(sessionID sid: UUID, assistantID: UUID) async {
-        guard let i = sessions.firstIndex(where: { $0.id == sid }),
-              let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
-        else { return }
+        guard let i = sessions.firstIndex(where: { $0.id == sid }) else { return }
+        let m = sessions[i].messages.firstIndex(where: { $0.id == assistantID })
+            ?? sessions[i].messages.lastIndex(where: { $0.role == .assistant })
+        guard let m else { return }
         let local = sessions[i].messages[m].content
         guard local.contains("omitted-from-context") || local.contains("data:image/") else { return }
         do {
@@ -6692,7 +6708,12 @@ final class AppState: ObservableObject {
             for i in live.indices where !live[i].incognitoEnabled {
                 live[i].deduplicateMessages()
                 let newMessages = live[i].messages.map { message in
-                    ChatMessage(role: message.role, content: Self.sanitizeContentForStorage(message.content))
+                    ChatMessage(
+                        id: message.id,
+                        role: message.role,
+                        content: Self.sanitizeContentForStorage(message.content),
+                        displayName: message.displayName
+                    )
                 }
                 if newMessages.map(\.content) != live[i].messages.map(\.content) {
                     live[i].messages = newMessages
