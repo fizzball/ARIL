@@ -304,7 +304,7 @@ struct SettingsView: View {
                         Text("\(seconds)s").tag(seconds)
                     }
                 }
-                Text("When set (default 30s), Auto cancels a hang with no first token and retries once on a faster peer. Off disables fallback entirely. Judge, reasoning models, and image-generation turns are never switched.")
+                Text("When set (default 30s), Auto cancels a hang with no first token and prompts you to retry on another model with a chosen timeout (defaults to this setting). Off disables the stall watchdog. Judge, reasoning models, and image-generation turns are never switched.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -1120,6 +1120,15 @@ struct SettingsView: View {
                 installed: state.semgrepInstalled,
                 busy: state.codeScanServerBusy,
                 statusText: state.codeScanServerStatus
+            )
+        case MCPServerConfig.sslyzePresetId:
+            return ManagedDetails(
+                toolName: "sslyze",
+                installHint: "brew install pipx && pipx install sslyze",
+                blurb: "ARIL runs this server for you — it generates a fresh bearer token each time you enable it, writes a localhost-only config, and launches sslyze over MCP for TLS certificate and protocol analysis. The token is stored in Application Support `.env` (same place as your OpenRouter key). Only scan hosts you own or are authorized to test.",
+                installed: state.sslyzeInstalled,
+                busy: state.sslyzeServerBusy,
+                statusText: state.sslyzeServerStatus
             )
         default:
             return ManagedDetails(

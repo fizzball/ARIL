@@ -29,6 +29,7 @@
 		6D5BCBB207619C3C148D2E07 /* NmapServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1043C54877BC10229B71AC9 /* NmapServerManager.swift */; };
 		78671E9ACB7E7353C329A250 /* SystemMetricsTitleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419B886F471ACE62C6442B8B /* SystemMetricsTitleView.swift */; };
 		7A851037F2B08C395FAFFAE5 /* LogAnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59497300BFE9B0E70587C61 /* LogAnalysisView.swift */; };
+		7ABCE8A7B8C123640FBB9EB9 /* SSLyzeServerManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8D98C8951DDAD0C39379C7 /* SSLyzeServerManager.swift */; };
 		80D522E4978591C865C52D27 /* ModelPopularityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F160030F13576729A8C964D0 /* ModelPopularityView.swift */; };
 		822BC840B98AADC146B3C60B /* OpenRouterModelBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 750FDE47ACAD5DDAE88BBAE8 /* OpenRouterModelBrowserView.swift */; };
 		8440C0C7E0C5791333676D45 /* IncognitoGhostIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = D74DC83ACB9FB0D9B7EBB359 /* IncognitoGhostIcon.swift */; };
@@ -80,6 +81,7 @@
 		51A5248C42FB7C5D311DC40B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		55361ECE99637E232D219342 /* LocalGuardrailScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGuardrailScanner.swift; sourceTree = "<group>"; };
 		5555AA38F5DC7AB2985E66DA /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
+		5A8D98C8951DDAD0C39379C7 /* SSLyzeServerManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSLyzeServerManager.swift; sourceTree = "<group>"; };
 		5BDAFE561961509A103F7891 /* IntelligencePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligencePanelView.swift; sourceTree = "<group>"; };
 		737E53E01C03502A719F8365 /* SpendLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpendLedger.swift; sourceTree = "<group>"; };
 		73F7258E2BF863107D0D1C2F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 				AA3D825999B767F134E0F3BB /* ProjectKnowledgeStore.swift */,
 				7CC33AA003A5C02003C398A2 /* ShellAccessService.swift */,
 				737E53E01C03502A719F8365 /* SpendLedger.swift */,
+				5A8D98C8951DDAD0C39379C7 /* SSLyzeServerManager.swift */,
 				A9CF94248A2D3725D27ED3A2 /* StatusBarController.swift */,
 				C906E03EA7C6DF7794B2DF75 /* SystemMetricsMonitor.swift */,
 			);
@@ -338,6 +341,7 @@
 				A467A508513F5A48276667B0 /* ProjectFilesView.swift in Sources */,
 				FC89685602D8D27D3AECC263 /* ProjectKnowledgeStore.swift in Sources */,
 				0642E4B64AFFAB0B2CEDE8D1 /* RoutingAnalysisView.swift in Sources */,
+				7ABCE8A7B8C123640FBB9EB9 /* SSLyzeServerManager.swift in Sources */,
 				B8EB569822A0AC3A6D7FFD52 /* SettingsView.swift in Sources */,
 				508062E33644CF9295C001A7 /* ShellAccessService.swift in Sources */,
 				5D99EDD46D917EBE0DDCD15E /* SidebarView.swift in Sources */,

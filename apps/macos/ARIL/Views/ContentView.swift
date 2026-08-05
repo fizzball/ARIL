@@ -209,6 +209,10 @@ struct ContentView: View {
         } message: {
             Text(state.sessionCacheAlertMessage ?? "")
         }
+        .sheet(item: $state.pendingSlowResponseRetry) { pending in
+            SlowResponseRetrySheet(pending: pending)
+                .environmentObject(state)
+        }
         .task {
             systemMetrics.start()
             // Health only — bootstrap owns the first session load to avoid a selection race.
@@ -220,5 +224,71 @@ struct ContentView: View {
         .onDisappear {
             systemMetrics.stop()
         }
+    }
+}
+
+/// Shown after a first-token stall — pick a retry model and timeout before continuing.
+private struct SlowResponseRetrySheet: View {
+    @EnvironmentObject private var state: AppState
+    let pending: PendingSlowResponseRetry
+
+    private var selectedModel: Binding<String> {
+        Binding(
+            get: { state.pendingSlowResponseRetry?.selectedModel ?? pending.selectedModel },
+            set: { state.updatePendingSlowResponseRetryModel($0) }
+        )
+    }
+
+    private var selectedTimeout: Binding<Int> {
+        Binding(
+            get: { state.pendingSlowResponseRetry?.retryTimeoutSeconds ?? pending.retryTimeoutSeconds },
+            set: { state.updatePendingSlowResponseRetryTimeout($0) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("No response from model")
+                .font(.headline)
+            Text(
+                "\(pending.stalledModel) produced no first token after \(pending.stallTimeoutSeconds)s. Choose another model and a timeout for the retry attempt."
+            )
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Picker("Retry model", selection: selectedModel) {
+                ForEach(pending.modelChoices, id: \.self) { model in
+                    Text(model).tag(model)
+                }
+            }
+
+            Picker("Retry timeout", selection: selectedTimeout) {
+                Text("Off").tag(0)
+                ForEach(Array(stride(from: 15, through: 300, by: 15)), id: \.self) { seconds in
+                    Text("\(seconds)s").tag(seconds)
+                }
+            }
+            Text("Defaults to your Preferences → General first-token timeout. Off disables the watchdog on this retry only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    state.respondToSlowResponseRetry(.cancel)
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Retry") {
+                    let model = state.pendingSlowResponseRetry?.selectedModel ?? pending.selectedModel
+                    let timeout = state.pendingSlowResponseRetry?.retryTimeoutSeconds
+                        ?? pending.retryTimeoutSeconds
+                    state.respondToSlowResponseRetry(.retry(model: model, timeoutSeconds: timeout))
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 420)
     }
 }

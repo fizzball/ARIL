@@ -80,7 +80,7 @@ Live system metrics monitor displayed in the main toolbar.
 Configure remote MCP servers in **Preferences → MCP**:
 
 - Built-in presets (disabled by default): Agenty, AI Diagram Maker, Cloudflare Browser, DeepWiki, GitHub, Firecrawl
-- **Nmap Scanner (local)** and **Code Scanner (Semgrep, local)** — ARIL-*managed* MCP servers (see below)
+- **Nmap Scanner (local)**, **Code Scanner (Semgrep, local)**, and **SSLyze Scanner (local)** — ARIL-*managed* MCP servers (see below)
 - Selective enable per server + master **Use MCP servers** toggle
 - API keys stored in Application Support `.env` (with OpenRouter); **Check connection** probes initialize + tools/list via the Solo gateway
 - Managed servers mint a **new bearer token on each enable**, rewrite localhost `config.json`, and restart so token + server never drift
@@ -105,5 +105,12 @@ Configure remote MCP servers in **Preferences → MCP**:
 - Tools exposed to Auto/Manual chat: `semgrep_scan` (default `auto` ruleset, override via `config` e.g. `p/owasp-top-ten`), `security_check` (`p/security-audit`), and `semgrep_scan_with_custom_rule` (bring-your-own YAML rule, no registry needed)
 - Requires the `semgrep` binary; ARIL detects it and prompts **`brew install semgrep`** (or `pipx install semgrep`) if missing
 - Findings are parsed from Semgrep JSON into a compact report per finding (`[SEVERITY] check_id`, `path:line — message`, plus CWE/OWASP tags); progress streams live over SSE
+
+### Managed SSLyze TLS / certificate scanner
+
+- Enable **SSLyze Scanner (local)** and ARIL manages it like Nmap / Semgrep — token in `.env` (rotated on enable), localhost-only `config.json`, launched via the bundled `aril-gateway sslyze-mcp` subcommand (listens on **127.0.0.1:8744**), health-checked before it's marked ready
+- Tools exposed to Auto/Manual chat: `sslyze_cert_info` (leaf cert, SANs, validity, trust stores), `sslyze_scan` (Mozilla intermediate TLS posture), `sslyze_protocols` (SSL/TLS version support), `sslyze_vuln_checks` (Heartbleed / CCS / ROBOT / CRIME / fallback), and `sslyze_custom_scan`
+- Requires the `sslyze` CLI; ARIL detects it and prompts **`brew install pipx && pipx install sslyze`** if missing (there is no Homebrew `sslyze` formula)
+- Results are parsed from SSLyze JSON into a compact certificate / TLS report; only scan hosts you own or are authorized to test
 - **Chat (Auto / Manual):** ready enabled servers are attached each turn; the Solo gateway lists tools, runs OpenRouter tool calls, and shows brief status in the assistant bubble (`Using DeepWiki · ask_question…`)
 - **Judge / Compare** does not use MCP tools

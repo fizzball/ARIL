@@ -44,6 +44,19 @@ def _run_code_mcp(argv: list[str]) -> None:
     run_code(args.config)
 
 
+def _run_sslyze_mcp(argv: list[str]) -> None:
+    """Dispatch `aril-gateway sslyze-mcp --config <path>` to the managed TLS scanner."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="aril-gateway sslyze-mcp")
+    parser.add_argument("-c", "--config", default=None, help="Path to config.json")
+    args = parser.parse_args(argv)
+
+    from app.sslyze_mcp.server import run as run_sslyze
+
+    run_sslyze(args.config)
+
+
 def main() -> None:
     # Allow resource extraction folder to be found when frozen.
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
@@ -61,6 +74,9 @@ def main() -> None:
         return
     if len(sys.argv) > 1 and sys.argv[1] == "code-mcp":
         _run_code_mcp(sys.argv[2:])
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "sslyze-mcp":
+        _run_sslyze_mcp(sys.argv[2:])
         return
 
     host = os.environ.get("ARIL_HOST", "127.0.0.1")

@@ -80,6 +80,37 @@ struct PendingOSAccessApproval: Identifiable, Equatable {
     }
 }
 
+/// Prompt shown after a first-token stall — user picks retry model + timeout.
+struct PendingSlowResponseRetry: Identifiable, Equatable {
+    let id: UUID
+    let stalledModel: String
+    let stallTimeoutSeconds: Int
+    var modelChoices: [String]
+    var selectedModel: String
+    var retryTimeoutSeconds: Int
+
+    init(
+        id: UUID = UUID(),
+        stalledModel: String,
+        stallTimeoutSeconds: Int,
+        modelChoices: [String],
+        selectedModel: String,
+        retryTimeoutSeconds: Int
+    ) {
+        self.id = id
+        self.stalledModel = stalledModel
+        self.stallTimeoutSeconds = stallTimeoutSeconds
+        self.modelChoices = modelChoices
+        self.selectedModel = selectedModel
+        self.retryTimeoutSeconds = retryTimeoutSeconds
+    }
+}
+
+enum SlowResponseRetryDecision: Equatable {
+    case cancel
+    case retry(model: String, timeoutSeconds: Int)
+}
+
 /// Local `sessions-cache.json` size band for footer colour and launch warnings.
 enum SessionCacheHealth: Equatable, Comparable {
     case healthy
@@ -182,6 +213,11 @@ final class AppState: ObservableObject {
     @Published var semgrepInstalled: Bool = false
     @Published var codeScanServerStatus: String = ""
     @Published var codeScanServerBusy: Bool = false
+    /// Managed SSLyze TLS/cert MCP server lifecycle mirrors (for the Preferences UI).
+    @Published var sslyzeServerRunning: Bool = false
+    @Published var sslyzeInstalled: Bool = false
+    @Published var sslyzeServerStatus: String = ""
+    @Published var sslyzeServerBusy: Bool = false
     /// Shell-style prompt history (most recent last), recalled with ↑/↓ in the input bar.
     @Published var promptHistory: [String] = AppState.loadPromptHistory()
     static let promptHistoryLimit = 10
@@ -321,6 +357,8 @@ final class AppState: ObservableObject {
     @Published var contextLimitMessage: String?
     /// OS Access commands awaiting inline Run / Cancel in the assistant bubble.
     @Published var pendingOSAccessApprovals: [PendingOSAccessApproval] = []
+    /// Slow-response stall: ask which model/timeout to use for the retry.
+    @Published var pendingSlowResponseRetry: PendingSlowResponseRetry?
     /// On-disk session cache size for the status footer.
     @Published var sessionCacheBytes: Int = 0
     @Published var sessionCacheLabel: String = "—"
@@ -340,6 +378,7 @@ final class AppState: ObservableObject {
     let gatewayManager = LocalGatewayManager()
     let nmapServerManager = NmapServerManager()
     let codeScanServerManager = CodeScanServerManager()
+    let sslyzeServerManager = SSLyzeServerManager()
     private var previewTask: Task<Void, Never>?
     private var sendTask: Task<Void, Never>?
     private var generationTimerTask: Task<Void, Never>?
@@ -351,6 +390,7 @@ final class AppState: ObservableObject {
     private var budgetBypassForEval: Bool = false
     private var contextLimitContinuation: CheckedContinuation<ContextLimitDecision, Never>?
     private var osAccessApprovalContinuations: [UUID: CheckedContinuation<Bool, Never>] = [:]
+    private var slowResponseRetryContinuation: CheckedContinuation<SlowResponseRetryDecision, Never>?
     /// Sessions where the user chose "Continue" past the context warning — don't nag again.
     private var contextWarnAcknowledged: Set<UUID> = []
     /// Periodic footer health probe (gateway / database / OpenRouter).
@@ -686,6 +726,63 @@ final class AppState: ObservableObject {
                 cont.resume(returning: false)
             }
         }
+    }
+
+    /// Ask the user which model and timeout to use after a first-token stall.
+    private func requestSlowResponseRetry(
+        stalledModel: String,
+        stallTimeoutSeconds: Int,
+        suggestedModel: String
+    ) async -> SlowResponseRetryDecision {
+        if slowResponseRetryContinuation != nil {
+            respondToSlowResponseRetry(.cancel)
+        }
+        var choices = modelCatalog.filter {
+            let id = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !id.isEmpty
+                && id != stalledModel
+                && !Self.isReasoningModelID(id)
+                && !activeExcludedModelIDs().contains(id)
+        }
+        if !choices.contains(suggestedModel) {
+            choices.insert(suggestedModel, at: 0)
+        }
+        if choices.isEmpty {
+            choices = [suggestedModel]
+        }
+        let defaultTimeout = slowResponseFallbackSeconds > 0
+            ? slowResponseFallbackSeconds
+            : 30
+        let pending = PendingSlowResponseRetry(
+            stalledModel: stalledModel,
+            stallTimeoutSeconds: stallTimeoutSeconds,
+            modelChoices: choices,
+            selectedModel: choices.contains(suggestedModel) ? suggestedModel : choices[0],
+            retryTimeoutSeconds: defaultTimeout
+        )
+        return await withCheckedContinuation { continuation in
+            slowResponseRetryContinuation = continuation
+            pendingSlowResponseRetry = pending
+        }
+    }
+
+    func updatePendingSlowResponseRetryModel(_ model: String) {
+        guard var pending = pendingSlowResponseRetry else { return }
+        pending.selectedModel = model
+        pendingSlowResponseRetry = pending
+    }
+
+    func updatePendingSlowResponseRetryTimeout(_ seconds: Int) {
+        guard var pending = pendingSlowResponseRetry else { return }
+        pending.retryTimeoutSeconds = Self.clampedSlowResponseFallbackSeconds(seconds)
+        pendingSlowResponseRetry = pending
+    }
+
+    func respondToSlowResponseRetry(_ decision: SlowResponseRetryDecision) {
+        pendingSlowResponseRetry = nil
+        let cont = slowResponseRetryContinuation
+        slowResponseRetryContinuation = nil
+        cont?.resume(returning: decision)
     }
 
     func respondToContextLimit(_ decision: ContextLimitDecision) {
@@ -1469,8 +1566,12 @@ final class AppState: ObservableObject {
                 switch presetId {
                 case MCPServerConfig.codescanPresetId:
                     enabled ? await startCodeScanServer() : stopCodeScanServer()
-                default:
+                case MCPServerConfig.sslyzePresetId:
+                    enabled ? await startSSLyzeServer() : stopSSLyzeServer()
+                case MCPServerConfig.nmapPresetId:
                     enabled ? await startNmapServer() : stopNmapServer()
+                default:
+                    break
                 }
             }
             return
@@ -1577,6 +1678,52 @@ final class AppState: ObservableObject {
         codeScanServerRunning = false
         codeScanServerStatus = "Code Scan MCP stopped"
         if let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.codescanPresetId }) {
+            mcpServers[idx].enabled = false
+            saveMCPServers()
+        }
+    }
+
+    // MARK: - Managed SSLyze TLS/cert MCP server
+
+    private var sslyzePreset: MCPServerConfig? {
+        mcpServers.first(where: { $0.presetId == MCPServerConfig.sslyzePresetId })
+    }
+
+    func refreshSSLyzeInstalled() {
+        sslyzeInstalled = sslyzeServerManager.refreshSSLyzeInstalled()
+    }
+
+    /// Rotate token, rewrite config.json, restart the server, and wire the preset.
+    func startSSLyzeServer() async {
+        guard let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.sslyzePresetId })
+        else { return }
+        let id = mcpServers[idx].id
+        sslyzeServerBusy = true
+        defer { sslyzeServerBusy = false }
+
+        let token = rotateManagedToken(for: id)
+        let ok = await sslyzeServerManager.ensureRunning(token: token, forceRestart: true)
+        sslyzeServerRunning = ok
+        sslyzeInstalled = sslyzeServerManager.sslyzeInstalled
+        sslyzeServerStatus = sslyzeServerManager.lastMessage
+
+        if let latest = mcpServers.firstIndex(where: { $0.id == id }) {
+            mcpServers[latest].apiKey = token
+            mcpServers[latest].url = sslyzeServerManager.mcpURL
+            mcpServers[latest].enabled = ok
+            if !ok {
+                mcpServers[latest].lastCheckStatus = .failed
+                mcpServers[latest].lastCheckMessage = sslyzeServerManager.lastMessage
+            }
+            saveMCPServers()
+        }
+    }
+
+    func stopSSLyzeServer() {
+        sslyzeServerManager.stop()
+        sslyzeServerRunning = false
+        sslyzeServerStatus = "SSLyze MCP stopped"
+        if let idx = mcpServers.firstIndex(where: { $0.presetId == MCPServerConfig.sslyzePresetId }) {
             mcpServers[idx].enabled = false
             saveMCPServers()
         }
@@ -1765,6 +1912,11 @@ final class AppState: ObservableObject {
         refreshSemgrepInstalled()
         if mcpEnabled, let preset = codeScanPreset, preset.enabled {
             await startCodeScanServer()
+        }
+        // Managed SSLyze TLS/cert server: reflect availability, resume if left on.
+        refreshSSLyzeInstalled()
+        if mcpEnabled, let preset = sslyzePreset, preset.enabled {
+            await startSSLyzeServer()
         }
         beginGatewayActivity()
         startHealthPolling()
@@ -3333,13 +3485,14 @@ final class AppState: ObservableObject {
 
     /// Source of truth for the command palette (canonical commands + base summaries).
     ///
-    /// `/nmap` and `/codescan` summaries are overridden at runtime by
+    /// `/nmap`, `/codescan`, and `/sslyze` summaries are overridden at runtime by
     /// `paletteCommands` to reflect whether their MCP server is enabled.
     static let slashCommands: [SlashCommand] = [
-        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, cache, Nmap, code scan, MCP, skills, latest release"),
+        SlashCommand(id: "/status", summary: "Health check — gateway, OpenRouter, guardrails, cache, Nmap, code scan, SSLyze, MCP, skills, latest release"),
         SlashCommand(id: "/update", summary: "Check for a newer ARIL release and install it to /Applications"),
         SlashCommand(id: "/nmap", summary: "Example Nmap prompts — port, host, and vuln scans"),
         SlashCommand(id: "/codescan", summary: "Example Semgrep prompts — scan a path or inline code"),
+        SlashCommand(id: "/sslyze", summary: "Example SSLyze prompts — certificate and TLS scans"),
         SlashCommand(id: "/web", summary: "Toggle web search (or /web on|off) — also Preferences → General"),
         SlashCommand(id: "/skills", summary: "List or toggle skills — /skills list|enable|disable [id]"),
         SlashCommand(id: "/save", summary: "Save last reply as PDF or Word (Document Export skill) — /save pdf|docx"),
@@ -3363,6 +3516,11 @@ final class AppState: ObservableObject {
         mcpEnabled && (codeScanPreset?.enabled ?? false)
     }
 
+    /// True when the master MCP switch is on and the managed SSLyze preset is enabled.
+    var sslyzeServerEnabled: Bool {
+        mcpEnabled && (sslyzePreset?.enabled ?? false)
+    }
+
 
     /// Palette commands with runtime-computed summaries (server enabled/disabled state).
     var paletteCommands: [SlashCommand] {
@@ -3381,6 +3539,13 @@ final class AppState: ObservableObject {
                     summary: codeScanServerEnabled
                         ? command.summary
                         : "Example Semgrep prompts — ⚠︎ Code Scan MCP server disabled"
+                )
+            case "/sslyze", "/ssl":
+                return SlashCommand(
+                    id: command.id,
+                    summary: sslyzeServerEnabled
+                        ? command.summary
+                        : "Example SSLyze prompts — ⚠︎ SSLyze MCP server disabled"
                 )
             case "/save":
                 return SlashCommand(
@@ -3512,6 +3677,11 @@ final class AppState: ObservableObject {
             recordPromptHistory(trimmed)
             setDraft("")
             appendLocalAssistantNote(codeScanExamplesNote())
+            return true
+        case "/sslyze", "/ssl":
+            recordPromptHistory(trimmed)
+            setDraft("")
+            appendLocalAssistantNote(sslyzeExamplesNote())
             return true
         case "/web", "/search":
             recordPromptHistory(trimmed)
@@ -4465,6 +4635,27 @@ final class AppState: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    /// Example prompts for the managed SSLyze TLS/cert MCP server (`/sslyze`).
+    private func sslyzeExamplesNote() -> String {
+        var lines: [String] = ["**SSLyze MCP — example prompts**", ""]
+        if !sslyzeServerEnabled {
+            lines.append(
+                "⚠︎ The SSLyze MCP server is currently **disabled**. Enable **SSLyze Scanner (local)** in Preferences → MCP (and turn on **Use MCP servers**) before running these."
+            )
+            lines.append("")
+        }
+        lines.append(contentsOf: [
+            "- use sslyze mcp to analyse the SSL certificate on example.com",
+            "- use sslyze to check TLS protocols on https://example.com",
+            "- use sslyze mcp to run Heartbleed and related vuln checks on example.com:443",
+            "- use sslyze to do a full TLS scan of www.google.com",
+            "- use sslyze custom scan with --certinfo --http_headers on example.com",
+            "",
+            "Only scan hosts you own or are authorized to test.",
+        ])
+        return lines.joined(separator: "\n")
+    }
+
 
     /// Clear the visible transcript for the current session (in place).
     func clearCurrentTranscript() {
@@ -4593,16 +4784,20 @@ final class AppState: ObservableObject {
         // MCP
         refreshNmapInstalled()
         refreshSemgrepInstalled()
+        refreshSSLyzeInstalled()
         let nmapState = nmapServerRunning ? "running on port \(nmapServerManager.port)" : "stopped"
         let nmapBin = nmapInstalled ? "nmap installed" : "nmap missing (brew install nmap)"
         let codeState = codeScanServerRunning ? "running on port \(codeScanServerManager.port)" : "stopped"
         let codeBin = semgrepInstalled ? "semgrep installed" : "semgrep missing (brew install semgrep)"
+        let sslState = sslyzeServerRunning ? "running on port \(sslyzeServerManager.port)" : "stopped"
+        let sslBin = sslyzeInstalled ? "sslyze installed" : "sslyze missing (brew install pipx && pipx install sslyze)"
         let ready = mcpServers.filter(\.isReady).count
         let enabled = mcpServers.filter(\.enabled).count
         lines.append("**MCP** \(mcpEnabled ? "✅" : "❌")")
         lines.append("- Servers: \(mcpEnabled ? "on" : "off") · \(ready) ready · \(enabled) enabled")
         lines.append("- Nmap: \(nmapState) · \(nmapBin)")
         lines.append("- Code Scan: \(codeState) · \(codeBin)")
+        lines.append("- SSLyze: \(sslState) · \(sslBin)")
         lines.append("")
         lines.append("---")
         lines.append("")
@@ -4814,6 +5009,9 @@ final class AppState: ObservableObject {
         sendTask?.cancel()
         sendTask = nil
         cancelPendingOSAccessApprovals()
+        if pendingSlowResponseRetry != nil {
+            respondToSlowResponseRetry(.cancel)
+        }
         endGenerationTracking(error: "Generation stopped")
     }
 
@@ -5282,14 +5480,37 @@ final class AppState: ObservableObject {
                     reason: "No first token after \(stall.timeoutSeconds)s"
                 )
                 guard !Task.isCancelled,
-                      let fallback = resolveSlowResponseFallbackModel(stalledModel: stall.stalledModel),
-                      fallback != stall.stalledModel
+                      let suggested = resolveSlowResponseFallbackModel(stalledModel: stall.stalledModel),
+                      suggested != stall.stalledModel
                 else {
                     throw ARILAPIError.stream(
                         "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s."
                     )
                 }
-                let note = "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s — retrying with \(fallback)…"
+                let decision = await requestSlowResponseRetry(
+                    stalledModel: stall.stalledModel,
+                    stallTimeoutSeconds: stall.timeoutSeconds,
+                    suggestedModel: suggested
+                )
+                guard !Task.isCancelled else { return }
+                let fallback: String
+                let retryTimeout: Int
+                switch decision {
+                case .cancel:
+                    throw ARILAPIError.stream(
+                        "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s. Retry cancelled."
+                    )
+                case .retry(let model, let timeout):
+                    fallback = model.trimmingCharacters(in: .whitespacesAndNewlines)
+                    retryTimeout = Self.clampedSlowResponseFallbackSeconds(timeout)
+                    guard !fallback.isEmpty, fallback != stall.stalledModel else {
+                        throw ARILAPIError.stream(
+                            "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s."
+                        )
+                    }
+                }
+                let timeoutLabel = retryTimeout == 0 ? "Off" : "\(retryTimeout)s"
+                let note = "No response from \(stall.stalledModel) after \(stall.timeoutSeconds)s — retrying with \(fallback) (timeout \(timeoutLabel))…"
                 updateSession(sid) { session in
                     if let m = session.messages.firstIndex(where: { $0.id == assistantID }) {
                         session.messages[m].content = note + "\n\n"
@@ -5322,7 +5543,7 @@ final class AppState: ObservableObject {
                 )
                 done = try await chatStreamWithSlowResponseWatchdog(
                     request: retryRequest,
-                    timeoutSeconds: 0,
+                    timeoutSeconds: retryTimeout,
                     expectedModel: fallback,
                     streamTokens: streamTokens,
                     streamMCP: streamMCP,
@@ -6356,6 +6577,7 @@ final class AppState: ObservableObject {
         saveLocalSessions()
         nmapServerManager.stop()
         codeScanServerManager.stop()
+        sslyzeServerManager.stop()
         gatewayManager.stop()
     }
 

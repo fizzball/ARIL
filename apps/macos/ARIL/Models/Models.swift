@@ -803,8 +803,11 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
     /// Stable preset id for the ARIL-managed local Semgrep code-scan MCP server.
     static let codescanPresetId = "codescan-local"
 
+    /// Stable preset id for the ARIL-managed local SSLyze TLS/cert MCP server.
+    static let sslyzePresetId = "sslyze-local"
+
     /// Preset ids whose lifecycle (process + token + config) ARIL manages itself.
-    static let managedPresetIds: Set<String> = [nmapPresetId, codescanPresetId]
+    static let managedPresetIds: Set<String> = [nmapPresetId, codescanPresetId, sslyzePresetId]
 
     /// True for presets whose lifecycle (process + token + config) ARIL manages itself.
     var isManaged: Bool {
@@ -838,10 +841,10 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
 
     /// Built-in presets (disabled by default).
     ///
-    /// Only the ARIL-managed local Nmap scanner ships for now. Remote presets were
-    /// removed pending a per-server architecture review; they'll be re-added
-    /// selectively. Removing an entry here drops any previously-persisted copy on the
-    /// next launch (see `AppState.loadMCPServers`), so no migration is needed.
+    /// ARIL-managed local scanners ship here. Remote presets were removed pending a
+    /// per-server architecture review; they'll be re-added selectively. Removing an
+    /// entry here drops any previously-persisted copy on the next launch (see
+    /// `AppState.loadMCPServers`), so no migration is needed.
     static func builtInPresets() -> [MCPServerConfig] {
         [
             MCPServerConfig(
@@ -862,6 +865,16 @@ struct MCPServerConfig: Identifiable, Hashable, Codable {
                 presetId: codescanPresetId,
                 authStyle: .bearer,
                 docsURL: "https://github.com/semgrep/semgrep",
+                isEditable: false
+            ),
+            MCPServerConfig(
+                id: UUID(uuidString: "A1111111-1111-4111-8111-11111111110A")!,
+                name: "SSLyze Scanner (local)",
+                url: "http://127.0.0.1:8744/mcp",
+                enabled: false,
+                presetId: sslyzePresetId,
+                authStyle: .bearer,
+                docsURL: "https://github.com/nabla-c0d3/sslyze",
                 isEditable: false
             ),
         ]
